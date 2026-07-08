@@ -16,15 +16,18 @@ Conservative by design: solve one problem well before expanding.
 
 Detailed plan: **[PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md)**.
 
-- [ ] Cargo workspace (`crates/core` library + `crates/cli` binary)
-- [ ] Logging (to file, via `tracing`) and error handling (`thiserror` + `anyhow`)
-- [ ] Parse `player*.u1` (offsets hardcoded, via `binrw`)
-- [ ] Inspect / display fields (read-only CLI)
-- [ ] Edit values (validated)
-- [ ] Save changes (atomic write, preserve unknown bytes)
-- [ ] Automatic timestamped backups
+- [x] Cargo workspace (`crates/core` library + `crates/cli` binary)
+- [x] Error handling (`thiserror` + `anyhow`)
+- [ ] Logging to file (via `tracing`) — deferred, not yet wired up
+- [x] Parse `PLAYER*.U1` (fixed offsets; hand-rolled little-endian reads — `binrw` proved unnecessary for this simple layout)
+- [x] Inspect / display fields (read-only CLI: `inspect` / `get` / `dump`)
+- [x] Edit values, validated (`set`)
+- [x] Save changes (atomic write; unknown bytes preserved)
+- [x] Automatic timestamped backups (`backup` / `backups` / `restore`)
+- [x] Default save path via `config.toml` (`save_dir`) + env override
+- [x] In-game validation — an edited save loads correctly in Ultima I (no checksum)
 
-This is the first major milestone.
+**Status: complete** — the first major milestone is met.
 
 ---
 

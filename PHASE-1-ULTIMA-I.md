@@ -5,8 +5,9 @@
 > file — with Ultima I knowledge **hardcoded** in Rust. No generic schema engine,
 > no TUI, no multi-OS support yet. Those come later.
 
-Status: **in progress** — workspace scaffolded and building; Ultima I engine next.
-This is our working guideline; we'll refine it as we go.
+Status: **complete** — the CLI can inspect, edit, and safely back up a real Ultima I
+save, and edited saves load correctly in-game. This remains our working guideline as
+later phases build on it.
 
 ---
 
@@ -143,7 +144,7 @@ hand-rolling anything.
 
 | Crate | Purpose | License |
 | --- | --- | --- |
-| **`binrw`** | Declarative binary **read + write** via derive macros. Handles little-endian INT16, fixed offsets, arrays. Our workhorse for parsing `player*.u1`. | MIT OR Apache-2.0 |
+| **`binrw`** *(not yet used)* | Declarative binary read + write via derive macros. Planned for more complex future formats — Ultima I's fixed-offset `u16` layout was simple enough to hand-roll, so `binrw` isn't a dependency yet. | MIT OR Apache-2.0 |
 | **`clap`** | Command-line argument parsing (subcommands, flags, help text). | MIT OR Apache-2.0 |
 | **`thiserror`** | Ergonomic typed error enums for the `core` library. | MIT OR Apache-2.0 |
 | **`anyhow`** | Easy error propagation/reporting in the `cli` binary. | MIT OR Apache-2.0 |
@@ -228,12 +229,10 @@ map-object array we won't edit at first. This is exactly why our editing model i
 **"load all 820 bytes, mutate only the offsets we understand, write the buffer back."**
 Unknown bytes ride along untouched, guaranteed.
 
-> ✅ **Checksum check:** the real `PLAYER1.U1` we inspected stores every stat as a plain
-> `INT16LE` exactly where the spec says, with **no checksum byte evident in the header** —
-> encouraging. We can't yet be *certain* nothing validates the file, so the plan stands:
-> a **round-trip** test (load → save unchanged → compare byte-identical) plus an **in-game
-> load** of an edited copy. If the game ever rejects an edit, a checksum elsewhere is the
-> prime suspect.
+> ✅ **Checksum check — resolved.** There is **no checksum**. The header stores every stat
+> as a plain `INT16LE` exactly where the spec says, and an in-game test confirmed it:
+> editing `gold` to 525 loaded correctly in Ultima I with the character fully intact.
+> Edits need no checksum recalculation.
 
 ---
 
@@ -339,12 +338,12 @@ split already sets us up for it, because the `Model` will mostly wrap `core` typ
 
 ## 11. Immediate next steps / open items
 
-1. **Save file located & format confirmed.** A real `PLAYER1.U1` from the GOG/macOS
-   install has been captured and decodes exactly per §6 (character "Enki", a Wizard).
-   Remaining: **confirm the exact on-disk directory** — the file lives *outside* the
-   `.app` bundle, most likely under `~/Library/Application Support/GOG.com/Galaxy/...`
-   (to be confirmed) — so we can hardcode a sensible default path and drop a copy into
-   `tests/fixtures/`.
+1. ✅ **Save file located & format confirmed.** The real `PLAYER1.U1` lives *inside* the
+   GOG/macOS app bundle at
+   `/Applications/Ultima I™.app/Contents/Resources/game/PLAYER1.U1` (owned by the user,
+   writable without `sudo`) and decodes exactly per §6 (character "Enki", a Wizard). A
+   copy is kept locally (gitignored) under `tests/fixtures/local/`, and the default
+   directory is set via `config.toml` (`save_dir`) so commands accept a bare file name.
 2. ✅ **Workspace scaffolded.** A Cargo workspace with `crates/core` (library) and
    `crates/cli` (the `fringe-retro` binary) builds cleanly; `fringe-retro --version` and
    `--help` work, and `cargo clippy` / `cargo fmt --check` / `cargo test` are all green.
@@ -360,11 +359,13 @@ split already sets us up for it, because the `Model` will mostly wrap `core` typ
    field's range/enum), plus `backup` / `backups` / `restore`. Every write first makes a
    timestamped backup and then writes atomically (temp file + rename); `restore` also
    backs up the current save before overwriting. Verified end-to-end on a *copy* of the
-   real `PLAYER1.U1`. **Remaining: your in-game validation** — load an edited copy in
-   Ultima I to confirm the character is intact (our checksum sanity check).
+   real `PLAYER1.U1`.
+6. ✅ **In-game validation passed.** Edited a real save (`gold` → 525), loaded it in
+   Ultima I, and the game showed the new value with the character fully intact —
+   confirming there is **no checksum** blocking edits.
 
-**Definition of done for Phase 1:** we can inspect a real save, change a stat, load the
-edited character successfully in Ultima I, and a backup of the original exists — with a
+**Definition of done for Phase 1 — met.** We can inspect a real save, change a stat, load
+the edited character successfully in Ultima I, and a backup of the original exists — with a
 passing test suite proving we never disturb unknown bytes.
 
 ---

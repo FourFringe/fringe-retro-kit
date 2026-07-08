@@ -5,10 +5,15 @@
 # committed to git.
 #
 # Format is TOML (the app-config format we've settled on; game *schemas* may use a
-# different format later). This schema will grow as the tool matures; for Phase 1 we
-# only need to point at a single Ultima I save file.
+# different format later). This schema will grow as the tool matures.
+#
+# Phase 1 note: the tool reads this file from the current working directory (or the
+# path in the FRINGE_RETRO_CONFIG environment variable). A proper per-OS config
+# location is planned.
 
 [games.ultima1]
-# Absolute path to the active Ultima I save file to inspect/edit.
-# On a GOG/macOS install this lives inside the app bundle, e.g.:
-save_path = "/Applications/Ultima I.app/Contents/Resources/game/PLAYER1.U1"
+# Directory that holds the Ultima I save files (PLAYER1.U1 … PLAYER4.U1). When you
+# pass a *bare* file name to a command (e.g. `fringe-retro inspect PLAYER1.U1`), it is
+# resolved against this directory. On a GOG/macOS install the saves live inside the
+# app bundle, e.g.:
+save_dir = "/Applications/Ultima I.app/Contents/Resources/game"

@@ -17,8 +17,12 @@ Legend: ✅ implemented · 🔷 planned (not yet available)
 fringe-retro <command> [arguments] [--flags]
 ```
 
-- `<path>` is the path to a save file. During Phase 1 you pass it explicitly; automatic
-  discovery is planned (see below).
+- `<path>` is the path to a save file. It can be either:
+  - a full or relative path (used exactly as given), or
+  - a **bare file name** like `PLAYER1.U1`, which is resolved against a configured save
+    directory (see [Default save directory](#default-save-directory)).
+
+  Automatic game discovery is planned.
 - Global flags:
   - `--help`, `-h` — show help. Works on the tool and on any subcommand
     (`fringe-retro set --help`).
@@ -229,12 +233,37 @@ preservation. Planned behavior:
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 
+### Default save directory
+
+So you can type `fringe-retro inspect PLAYER1.U1` instead of the full in-bundle path, the
+tool resolves a **bare file name** against a configured directory. Resolution order:
+
+1. `FRINGE_RETRO_SAVE_DIR` environment variable, if set (a quick, per-shell override).
+2. `save_dir` under `[games.ultima1]` in `config.toml`.
+
+Paths that are absolute or contain a directory component are always used exactly as given,
+so nothing changes if you prefer to pass full paths. If you pass a bare name and no
+directory is configured, the tool tells you how to set one.
+
+```bash
+fringe-retro inspect PLAYER1.U1          # resolved against save_dir
+fringe-retro inspect "/full/path/PLAYER1.U1"   # used as-is
+```
+
 ### Configuration
 
-Application settings use **TOML**. A template lives at
-[config.example.toml](config.example.toml); copy it to a local `config.toml` (which is
-gitignored) for machine-specific paths. A configuration system that the tool actually
-reads — including a per-OS config directory (via the `directories` crate) — is planned.
+Application settings use **TOML**. In Phase 1 the tool reads `config.toml` from the
+current working directory (or the path in the `FRINGE_RETRO_CONFIG` environment variable);
+a template lives at [config.example.toml](config.example.toml). Copy it to a local
+`config.toml` (which is gitignored) and set `save_dir`:
+
+```toml
+[games.ultima1]
+save_dir = "/Applications/Ultima I™.app/Contents/Resources/game"
+```
+
+A fuller configuration system — including a proper per-OS config directory (via the
+`directories` crate) — is planned.
 
 ---
 

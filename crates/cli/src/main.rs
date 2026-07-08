@@ -1,7 +1,8 @@
 //! `fringe-retro` — command-line entry point.
 //!
 //! Phase 1 exposes a small, permanent headless CLI over `fringe-retro-core`.
-//! The subcommands below are stubbed until the Ultima I engine lands in the next step.
+
+mod config;
 
 use std::path::PathBuf;
 
@@ -9,6 +10,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use fringe_retro_core::backup;
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
+
+use crate::config::Config;
 
 /// Fringe Retro Kit — inspect, edit, and back up classic game save files.
 #[derive(Debug, Parser)]
@@ -70,14 +73,17 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let config = Config::load()?;
     match cli.command {
         Command::Inspect { path } => {
+            let path = config.resolve_save_path(&path)?;
             let save = Ultima1Save::load(&path)?;
             for (label, value) in save.inspect() {
                 println!("{label:<14} {value}");
             }
         }
         Command::Get { path, field } => {
+            let path = config.resolve_save_path(&path)?;
             let save = Ultima1Save::load(&path)?;
             match save.get_field(&field) {
                 Some(value) => println!("{value}"),
@@ -88,6 +94,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Dump { path, range } => {
+            let path = config.resolve_save_path(&path)?;
             let save = Ultima1Save::load(&path)?;
             let (start, end) = match range {
                 Some(r) => parse_range(&r)?,
@@ -96,6 +103,7 @@ fn main() -> Result<()> {
             print!("{}", ultima1::hex_dump(save.as_bytes(), start, end));
         }
         Command::Set { path, field, value } => {
+            let path = config.resolve_save_path(&path)?;
             let mut save = Ultima1Save::load(&path)?;
             let old = save.get_field(&field).unwrap_or_else(|| "?".to_string());
             save.set_field(&field, &value)?;
@@ -107,10 +115,12 @@ fn main() -> Result<()> {
             println!("backup: {}", backup_path.display());
         }
         Command::Backup { path } => {
+            let path = config.resolve_save_path(&path)?;
             let backup_path = backup::create(&path)?;
             println!("{}", backup_path.display());
         }
         Command::Backups { path } => {
+            let path = config.resolve_save_path(&path)?;
             let backups = backup::list(&path)?;
             if backups.is_empty() {
                 println!("(no backups)");
@@ -124,6 +134,8 @@ fn main() -> Result<()> {
             path,
             backup: backup_path,
         } => {
+            let path = config.resolve_save_path(&path)?;
+            let backup_path = config.resolve_save_path(&backup_path)?;
             let pre_restore = backup::restore(&backup_path, &path)?;
             println!("restored {} -> {}", backup_path.display(), path.display());
             println!("previous save backed up to {}", pre_restore.display());
