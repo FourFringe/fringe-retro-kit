@@ -59,6 +59,7 @@ It exists solely to help users inspect, preserve, and edit their own save files.
 
 ## Documentation
 
+- [COMMANDS.md](COMMANDS.md) — the command reference (what the tool can do today)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — decisions we've committed to
 - [ROADMAP.md](ROADMAP.md) — what's planned but not yet built or decided
 - [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md) — the current, concrete development target
