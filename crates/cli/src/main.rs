@@ -78,8 +78,13 @@ fn main() -> Result<()> {
         Command::Inspect { path } => {
             let path = config.resolve_save_path(&path)?;
             let save = Ultima1Save::load(&path)?;
-            for (label, value) in save.inspect() {
-                println!("{label:<14} {value}");
+            let mut current_section = "";
+            for (section, label, value) in save.inspect() {
+                if section != current_section {
+                    println!("\n{section}:");
+                    current_section = section;
+                }
+                println!("  {label:<16} {value}");
             }
         }
         Command::Get { path, field } => {

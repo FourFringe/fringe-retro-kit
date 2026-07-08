@@ -41,20 +41,25 @@ fringe-retro inspect "/Applications/Ultima I™.app/Contents/Resources/game/PLAY
 
 ### ✅ `inspect <path>`
 
-Show every field the tool understands, as a labeled table.
+Show every field the tool understands, grouped into sections.
 
 ```bash
 fringe-retro inspect "/…/PLAYER1.U1"
 ```
 ```
-Name           Enki
-Race           Human
-Class          Wizard
-Strength       12
-Gold           100
-Food           200
-Transport      Walking
-…
+Character:
+  Name             Enki
+  Race             Human
+  Class            Wizard
+  Sex              Male
+
+Attributes:
+  Strength         12
+  …
+
+Inventory: Weapons:
+  Dagger           2
+  …
 ```
 
 Reads only; never modifies the file.
@@ -176,10 +181,32 @@ little-endian 16-bit integers.
 | `transport` | Transport | enum | Walking, Horse, Cart, Raft, Frigate, Aircar |
 | `x` | Map X | number | 0–65535 (overworld position) |
 | `y` | Map Y | number | 0–65535 (overworld position) |
+| `last_signpost` | Last Signpost | number | 0–65535 (index; default 65535) |
+| `steps` | Steps | number | 0–65535 |
 
 > Editing `x`/`y` moves the character on the overworld and is best left alone unless you
 > know the coordinates. Setting `transport` alone changes the value but not the on-screen
 > vehicle icon (a quirk of the game).
+
+### Inventory quantities
+
+Each item you can carry has its own count field (`number`, `0–9999`). The keys follow a
+`<category>_<item>` pattern:
+
+- **Gems:** `gem_red`, `gem_green`, `gem_blue`, `gem_white`
+- **Armour:** `armour_leather`, `armour_chain_mail`, `armour_plate_mail`, `armour_vacuum_suit`, `armour_reflect_suit`
+- **Weapons:** `weapon_dagger`, `weapon_mace`, `weapon_axe`, `weapon_rope_spikes`, `weapon_sword`, `weapon_great_sword`, `weapon_bow`, `weapon_amulet`, `weapon_wand`, `weapon_staff`, `weapon_triangle`, `weapon_pistol`, `weapon_light_sword`, `weapon_phazor`, `weapon_blaster`
+- **Spells:** `spell_open`, `spell_unlock`, `spell_magic_missile`, `spell_steal`, `spell_ladder_down`, `spell_ladder_up`, `spell_blink`, `spell_create`, `spell_destroy`, `spell_kill`
+- **Transports:** `transport_horse`, `transport_cart`, `transport_raft`, `transport_frigate`, `transport_aircar`, `transport_shuttle`, `transport_time_machine`
+
+Note the difference between an *equipped* item and its *inventory count*: `weapon` (above)
+is what's readied, while `weapon_blaster` is how many Blasters you own. Run
+`fringe-retro inspect <save>` for the full grouped list.
+
+```bash
+fringe-retro set "/…/PLAYER1.U1" weapon_blaster 1
+fringe-retro set "/…/PLAYER1.U1" transport_time_machine 1
+```
 
 ---
 

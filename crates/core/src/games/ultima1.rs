@@ -5,8 +5,7 @@
 //! are little-endian 16-bit integers.
 //!
 //! The parser keeps the complete raw byte buffer and reads known offsets from it. Edits
-//! (added later) will mutate only known offsets in place, so bytes we don't understand
-//! are always preserved.
+//! mutate only known offsets in place, so bytes we don't understand are always preserved.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -19,8 +18,8 @@ pub const SAVE_LEN: usize = 0x334;
 /// Length of the name field (bytes `0x00..0x0F`), including the null terminator.
 const NAME_LEN: usize = 15;
 
-// --- Enum tables (value -> label). Data-driven so `inspect`, `get`, and (later)
-// `set` all share one source of truth. Values are decimal (the wiki uses hex). ---
+// --- Enum tables (value -> label). Data-driven so `inspect`, `get`, and `set` all share
+// one source of truth. Values are decimal (the wiki uses hex). ---
 
 type EnumTable = &'static [(u16, &'static str)];
 
@@ -86,44 +85,121 @@ enum Kind {
     Enum(EnumTable),
 }
 
-/// A known field: a stable key, a display label, its byte offset, and how to read it.
+/// A known field: a stable key, a display label, the section it belongs to, its byte
+/// offset, and how to read it.
 struct FieldDef {
     key: &'static str,
     label: &'static str,
+    section: &'static str,
     offset: usize,
     kind: Kind,
 }
 
-/// Every field we understand, in file order. This table drives `inspect` and `get`
-/// (and will drive `set` once editing lands).
+// Display sections, used to group `inspect` output.
+const S_CHARACTER: &str = "Character";
+const S_ATTRIBUTES: &str = "Attributes";
+const S_STATUS: &str = "Status";
+const S_EQUIPPED: &str = "Equipped";
+const S_LOCATION: &str = "Location";
+const S_GEMS: &str = "Inventory: Gems";
+const S_ARMOUR: &str = "Inventory: Armour";
+const S_WEAPONS: &str = "Inventory: Weapons";
+const S_SPELLS: &str = "Inventory: Spells";
+const S_TRANSPORTS: &str = "Inventory: Transports";
+
+/// Every field we understand, grouped by section. This table drives `inspect`, `get`,
+/// and `set`. Order here is for display; each field carries its own byte offset, so the
+/// array order is independent of the on-disk layout.
 #[rustfmt::skip]
 const FIELDS: &[FieldDef] = &[
-    FieldDef { key: "name", label: "Name", offset: 0x00, kind: Kind::Name },
-    FieldDef { key: "race", label: "Race", offset: 0x10, kind: Kind::Enum(RACE) },
-    FieldDef { key: "class", label: "Class", offset: 0x12, kind: Kind::Enum(CLASS) },
-    FieldDef { key: "sex", label: "Sex", offset: 0x14, kind: Kind::Enum(SEX) },
-    FieldDef { key: "hits", label: "Hits", offset: 0x16, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "strength", label: "Strength", offset: 0x18, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "agility", label: "Agility", offset: 0x1A, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "stamina", label: "Stamina", offset: 0x1C, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "charisma", label: "Charisma", offset: 0x1E, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "wisdom", label: "Wisdom", offset: 0x20, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "intelligence", label: "Intelligence", offset: 0x22, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "gold", label: "Gold", offset: 0x24, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "experience", label: "Experience", offset: 0x26, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "food", label: "Food", offset: 0x28, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon", label: "Ready Weapon", offset: 0x2A, kind: Kind::Enum(WEAPON) },
-    FieldDef { key: "spell", label: "Ready Spell", offset: 0x2C, kind: Kind::Enum(SPELL) },
-    FieldDef { key: "armour", label: "Ready Armour", offset: 0x2E, kind: Kind::Enum(ARMOUR) },
-    FieldDef { key: "transport", label: "Transport", offset: 0x30, kind: Kind::Enum(TRANSPORT) },
-    FieldDef { key: "x", label: "Map X", offset: 0x34, kind: Kind::U16 { max: u16::MAX } },
-    FieldDef { key: "y", label: "Map Y", offset: 0x36, kind: Kind::U16 { max: u16::MAX } },
+    // Character
+    FieldDef { key: "name",  label: "Name",  section: S_CHARACTER, offset: 0x00, kind: Kind::Name },
+    FieldDef { key: "race",  label: "Race",  section: S_CHARACTER, offset: 0x10, kind: Kind::Enum(RACE) },
+    FieldDef { key: "class", label: "Class", section: S_CHARACTER, offset: 0x12, kind: Kind::Enum(CLASS) },
+    FieldDef { key: "sex",   label: "Sex",   section: S_CHARACTER, offset: 0x14, kind: Kind::Enum(SEX) },
+
+    // Attributes
+    FieldDef { key: "strength",     label: "Strength",     section: S_ATTRIBUTES, offset: 0x18, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "agility",      label: "Agility",      section: S_ATTRIBUTES, offset: 0x1A, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "stamina",      label: "Stamina",      section: S_ATTRIBUTES, offset: 0x1C, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "charisma",     label: "Charisma",     section: S_ATTRIBUTES, offset: 0x1E, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "wisdom",       label: "Wisdom",       section: S_ATTRIBUTES, offset: 0x20, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "intelligence", label: "Intelligence", section: S_ATTRIBUTES, offset: 0x22, kind: Kind::U16 { max: 9999 } },
+
+    // Status
+    FieldDef { key: "hits",       label: "Hits",       section: S_STATUS, offset: 0x16, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "gold",       label: "Gold",       section: S_STATUS, offset: 0x24, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "experience", label: "Experience", section: S_STATUS, offset: 0x26, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "food",       label: "Food",       section: S_STATUS, offset: 0x28, kind: Kind::U16 { max: 9999 } },
+
+    // Equipped
+    FieldDef { key: "weapon",    label: "Ready Weapon", section: S_EQUIPPED, offset: 0x2A, kind: Kind::Enum(WEAPON) },
+    FieldDef { key: "spell",     label: "Ready Spell",  section: S_EQUIPPED, offset: 0x2C, kind: Kind::Enum(SPELL) },
+    FieldDef { key: "armour",    label: "Ready Armour", section: S_EQUIPPED, offset: 0x2E, kind: Kind::Enum(ARMOUR) },
+    FieldDef { key: "transport", label: "Transport",    section: S_EQUIPPED, offset: 0x30, kind: Kind::Enum(TRANSPORT) },
+
+    // Location
+    FieldDef { key: "x",             label: "Map X",         section: S_LOCATION, offset: 0x34, kind: Kind::U16 { max: u16::MAX } },
+    FieldDef { key: "y",             label: "Map Y",         section: S_LOCATION, offset: 0x36, kind: Kind::U16 { max: u16::MAX } },
+    FieldDef { key: "last_signpost", label: "Last Signpost", section: S_LOCATION, offset: 0xA8, kind: Kind::U16 { max: u16::MAX } },
+    FieldDef { key: "steps",         label: "Steps",         section: S_LOCATION, offset: 0xAC, kind: Kind::U16 { max: u16::MAX } },
+
+    // Inventory: Gems
+    FieldDef { key: "gem_red",   label: "Red",   section: S_GEMS, offset: 0x4C, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "gem_green", label: "Green", section: S_GEMS, offset: 0x4E, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "gem_blue",  label: "Blue",  section: S_GEMS, offset: 0x50, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "gem_white", label: "White", section: S_GEMS, offset: 0x52, kind: Kind::U16 { max: 9999 } },
+
+    // Inventory: Armour
+    FieldDef { key: "armour_leather",      label: "Leather",      section: S_ARMOUR, offset: 0x56, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "armour_chain_mail",   label: "Chain Mail",   section: S_ARMOUR, offset: 0x58, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "armour_plate_mail",   label: "Plate Mail",   section: S_ARMOUR, offset: 0x5A, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "armour_vacuum_suit",  label: "Vacuum Suit",  section: S_ARMOUR, offset: 0x5C, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "armour_reflect_suit", label: "Reflect Suit", section: S_ARMOUR, offset: 0x5E, kind: Kind::U16 { max: 9999 } },
+
+    // Inventory: Weapons
+    FieldDef { key: "weapon_dagger",      label: "Dagger",        section: S_WEAPONS, offset: 0x62, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_mace",        label: "Mace",          section: S_WEAPONS, offset: 0x64, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_axe",         label: "Axe",           section: S_WEAPONS, offset: 0x66, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_rope_spikes", label: "Rope & Spikes", section: S_WEAPONS, offset: 0x68, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_sword",       label: "Sword",         section: S_WEAPONS, offset: 0x6A, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_great_sword", label: "Great Sword",   section: S_WEAPONS, offset: 0x6C, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_bow",         label: "Bow & Arrows",  section: S_WEAPONS, offset: 0x6E, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_amulet",      label: "Amulet",        section: S_WEAPONS, offset: 0x70, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_wand",        label: "Wand",          section: S_WEAPONS, offset: 0x72, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_staff",       label: "Staff",         section: S_WEAPONS, offset: 0x74, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_triangle",    label: "Triangle",      section: S_WEAPONS, offset: 0x76, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_pistol",      label: "Pistol",        section: S_WEAPONS, offset: 0x78, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_light_sword", label: "Light Sword",   section: S_WEAPONS, offset: 0x7A, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_phazor",      label: "Phazor",        section: S_WEAPONS, offset: 0x7C, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "weapon_blaster",     label: "Blaster",       section: S_WEAPONS, offset: 0x7E, kind: Kind::U16 { max: 9999 } },
+
+    // Inventory: Spells
+    FieldDef { key: "spell_open",          label: "Open",          section: S_SPELLS, offset: 0x82, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_unlock",        label: "Unlock",        section: S_SPELLS, offset: 0x84, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_magic_missile", label: "Magic Missile", section: S_SPELLS, offset: 0x86, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_steal",         label: "Steal",         section: S_SPELLS, offset: 0x88, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_ladder_down",   label: "Ladder Down",   section: S_SPELLS, offset: 0x8A, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_ladder_up",     label: "Ladder Up",     section: S_SPELLS, offset: 0x8C, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_blink",         label: "Blink",         section: S_SPELLS, offset: 0x8E, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_create",        label: "Create",        section: S_SPELLS, offset: 0x90, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_destroy",       label: "Destroy",       section: S_SPELLS, offset: 0x92, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "spell_kill",          label: "Kill",          section: S_SPELLS, offset: 0x94, kind: Kind::U16 { max: 9999 } },
+
+    // Inventory: Transports
+    FieldDef { key: "transport_horse",        label: "Horse",        section: S_TRANSPORTS, offset: 0x98, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "transport_cart",         label: "Cart",         section: S_TRANSPORTS, offset: 0x9A, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "transport_raft",         label: "Raft",         section: S_TRANSPORTS, offset: 0x9C, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "transport_frigate",      label: "Frigate",      section: S_TRANSPORTS, offset: 0x9E, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "transport_aircar",       label: "Aircar",       section: S_TRANSPORTS, offset: 0xA0, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "transport_shuttle",      label: "Shuttle",      section: S_TRANSPORTS, offset: 0xA2, kind: Kind::U16 { max: 9999 } },
+    FieldDef { key: "transport_time_machine", label: "Time Machine", section: S_TRANSPORTS, offset: 0xA4, kind: Kind::U16 { max: 9999 } },
 ];
 
 /// A parsed Ultima I save file.
 ///
-/// Holds the complete raw byte buffer. Reads (and later, edits) operate on known
-/// offsets, so bytes we don't understand are always preserved.
+/// Holds the complete raw byte buffer. Reads and edits operate on known offsets, so
+/// bytes we don't understand are always preserved.
 #[derive(Clone)]
 pub struct Ultima1Save {
     bytes: Vec<u8>,
@@ -166,11 +242,11 @@ impl Ultima1Save {
         Some(self.format_field(field))
     }
 
-    /// All known fields as `(label, value)` pairs, in file order.
-    pub fn inspect(&self) -> Vec<(&'static str, String)> {
+    /// All known fields as `(section, label, value)` triples, in display order.
+    pub fn inspect(&self) -> Vec<(&'static str, &'static str, String)> {
         FIELDS
             .iter()
-            .map(|f| (f.label, self.format_field(f)))
+            .map(|f| (f.section, f.label, self.format_field(f)))
             .collect()
     }
 
@@ -438,6 +514,32 @@ mod tests {
         // Everything after the 7-char name must be null-padded.
         assert_eq!(&save.as_bytes()[7..NAME_LEN], &[0u8; NAME_LEN - 7]);
         assert!(save.set_field("name", "ThisNameIsWayTooLong").is_err());
+    }
+
+    #[test]
+    fn set_inventory_fields() {
+        let mut save = Ultima1Save::from_bytes(synthetic()).unwrap();
+
+        save.set_field("transport_time_machine", "1").unwrap();
+        assert_eq!(save.get_field("transport_time_machine").unwrap(), "1");
+        assert_eq!(&save.as_bytes()[0xA4..0xA6], &1u16.to_le_bytes());
+
+        save.set_field("weapon_blaster", "5").unwrap();
+        assert_eq!(save.get_field("weapon_blaster").unwrap(), "5");
+        assert_eq!(&save.as_bytes()[0x7E..0x80], &5u16.to_le_bytes());
+
+        save.set_field("gem_white", "3").unwrap();
+        assert_eq!(&save.as_bytes()[0x52..0x54], &3u16.to_le_bytes());
+    }
+
+    #[test]
+    fn inspect_is_grouped_into_sections() {
+        let save = Ultima1Save::from_bytes(synthetic()).unwrap();
+        let rows = save.inspect();
+        assert!(rows.iter().any(|(s, _, _)| *s == "Character"));
+        assert!(rows
+            .iter()
+            .any(|(s, l, _)| *s == "Inventory: Transports" && *l == "Time Machine"));
     }
 
     #[test]
