@@ -10,6 +10,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use fringe_retro_core::backup;
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
+use fringe_retro_core::games::ultima3::{self, Ultima3Roster};
 
 use crate::config::Config;
 
@@ -77,14 +78,31 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Inspect { path } => {
             let path = config.resolve_save_path(&path)?;
-            let save = Ultima1Save::load(&path)?;
-            let mut current_section = "";
-            for (section, label, value) in save.inspect() {
-                if section != current_section {
-                    println!("\n{section}:");
-                    current_section = section;
+            let bytes = std::fs::read(&path)?;
+            if bytes.len() == ultima3::ROSTER_LEN {
+                // Ultima III roster: 20 character slots.
+                let roster = Ultima3Roster::from_bytes(bytes)?;
+                let occupied = roster.occupied_slots();
+                if occupied.is_empty() {
+                    println!("(empty roster)");
                 }
-                println!("  {label:<16} {value}");
+                for slot in occupied {
+                    println!("\nSlot {}: {}", slot + 1, roster.summary(slot));
+                    for (label, value) in roster.inspect(slot) {
+                        println!("  {label:<16} {value}");
+                    }
+                }
+            } else {
+                // Ultima I single-character save.
+                let save = Ultima1Save::from_bytes(bytes)?;
+                let mut current_section = "";
+                for (section, label, value) in save.inspect() {
+                    if section != current_section {
+                        println!("\n{section}:");
+                        current_section = section;
+                    }
+                    println!("  {label:<16} {value}");
+                }
             }
         }
         Command::Get { path, field } => {
@@ -100,12 +118,12 @@ fn main() -> Result<()> {
         }
         Command::Dump { path, range } => {
             let path = config.resolve_save_path(&path)?;
-            let save = Ultima1Save::load(&path)?;
+            let bytes = std::fs::read(&path)?;
             let (start, end) = match range {
                 Some(r) => parse_range(&r)?,
-                None => (0, save.as_bytes().len()),
+                None => (0, bytes.len()),
             };
-            print!("{}", ultima1::hex_dump(save.as_bytes(), start, end));
+            print!("{}", ultima1::hex_dump(&bytes, start, end));
         }
         Command::Set { path, field, value } => {
             let path = config.resolve_save_path(&path)?;

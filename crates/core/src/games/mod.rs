@@ -5,3 +5,4 @@
 //! been implemented by hand (see `ROADMAP.md`).
 
 pub mod ultima1;
+pub mod ultima3;
