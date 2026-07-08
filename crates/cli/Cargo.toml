@@ -1,0 +1,17 @@
+[package]
+name = "fringe-retro-cli"
+description = "Command-line interface for Fringe Retro Kit."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fringe-retro"
+path = "src/main.rs"
+
+[dependencies]
+fringe-retro-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true

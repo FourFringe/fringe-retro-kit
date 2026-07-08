@@ -1,0 +1,11 @@
+# Local, private test data (gitignored)
+
+This directory holds **real** game save files copied from your own installations,
+kept locally for manual and integration testing. Its contents are gitignored — only
+this `.gitkeep` is committed, to preserve the folder.
+
+Do **not** commit real game save data here. Committed automated tests should use
+**synthetic** fixtures (built in code from the documented format) so the test suite
+never depends on a specific user's files or ships game data.
+
+Example (kept locally, ignored): `PLAYER1.U1`

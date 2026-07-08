@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["John Sheets <john.sheets@mastery.net>"]
+repository = "https://github.com/FourFringe/fringe-retro-kit"
+
+[workspace.dependencies]
+# Internal
+fringe-retro-core = { path = "crates/core" }
+
+# Shared third-party crates (all MIT or MIT/Apache-2.0).
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"

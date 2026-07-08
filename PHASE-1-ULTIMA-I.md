@@ -5,7 +5,8 @@
 > file — with Ultima I knowledge **hardcoded** in Rust. No generic schema engine,
 > no TUI, no multi-OS support yet. Those come later.
 
-Status: **planning**. This is our working guideline; we'll refine it as we go.
+Status: **in progress** — workspace scaffolded and building; Ultima I engine next.
+This is our working guideline; we'll refine it as we go.
 
 ---
 
@@ -60,11 +61,14 @@ We're building **one workspace** containing **two crates**: a **library crate**
 **Recommended:**
 
 ```bash
-brew install rustup     # installs the rustup toolchain manager
-rustup-init             # accept defaults; installs the stable toolchain + cargo
+brew install rustup      # installs the rustup toolchain manager
+rustup default stable    # downloads + activates the stable toolchain (rustc, cargo, clippy, rustfmt)
 ```
 
-Then restart your shell (or `source ~/.cargo/env`) and verify:
+Note: Homebrew's `rustup` has **no separate `rustup-init` binary** — the `rustup`
+command does the setup itself. It installs the `cargo` / `rustc` / etc. *shims* into
+`$(brew --prefix rustup)/bin` (e.g. `/opt/homebrew/opt/rustup/bin`), **not** `~/.cargo/bin`.
+Add that directory to your `PATH` in `~/.zshrc`, open a new terminal, and verify:
 
 ```bash
 rustc --version
@@ -121,7 +125,6 @@ fringe-retro-kit/
       src/
         main.rs             # arg parsing + dispatch into core
   tests/                    # (workspace-level) integration tests, added later
-  REVIEW.md
   docs/                     # design docs may migrate here over time
 ```
 
@@ -342,8 +345,11 @@ split already sets us up for it, because the `Model` will mostly wrap `core` typ
    `.app` bundle, most likely under `~/Library/Application Support/GOG.com/Galaxy/...`
    (to be confirmed) — so we can hardcode a sensible default path and drop a copy into
    `tests/fixtures/`.
-2. **Scaffold the workspace** (`Cargo.toml`, `crates/core`, `crates/cli`) and get a
-   trivial `fringe-retro --version` building. *(Blocked only on Rust being installed.)*
+2. ✅ **Workspace scaffolded.** A Cargo workspace with `crates/core` (library) and
+   `crates/cli` (the `fringe-retro` binary) builds cleanly; `fringe-retro --version` and
+   `--help` work, and `cargo clippy` / `cargo fmt --check` / `cargo test` are all green.
+   Subcommands (`inspect` / `get` / `dump` / `set` / `backup` / `backups` / `restore`)
+   are defined but stubbed.
 3. **Implement Ultima I parsing** in `core::games::ultima1` against the spec in §6,
    with the synthetic-fixture round-trip test.
 4. **Wire up `inspect` / `get` / `dump`** (read-only) first — zero risk to real files.

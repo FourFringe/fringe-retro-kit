@@ -1,0 +1,14 @@
+# Fringe Retro Kit — local configuration (EXAMPLE / template)
+#
+# Copy this file to `config.toml` (which is gitignored) and adjust the paths for
+# your machine. `config.toml` holds machine-specific absolute paths and is never
+# committed to git.
+#
+# Format is TOML (the app-config format we've settled on; game *schemas* may use a
+# different format later). This schema will grow as the tool matures; for Phase 1 we
+# only need to point at a single Ultima I save file.
+
+[games.ultima1]
+# Absolute path to the active Ultima I save file to inspect/edit.
+# On a GOG/macOS install this lives inside the app bundle, e.g.:
+save_path = "/Applications/Ultima I.app/Contents/Resources/game/PLAYER1.U1"
