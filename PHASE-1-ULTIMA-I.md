@@ -350,11 +350,18 @@ split already sets us up for it, because the `Model` will mostly wrap `core` typ
    `--help` work, and `cargo clippy` / `cargo fmt --check` / `cargo test` are all green.
    Subcommands (`inspect` / `get` / `dump` / `set` / `backup` / `backups` / `restore`)
    are defined but stubbed.
-3. **Implement Ultima I parsing** in `core::games::ultima1` against the spec in §6,
-   with the synthetic-fixture round-trip test.
-4. **Wire up `inspect` / `get` / `dump`** (read-only) first — zero risk to real files.
-5. **Add `set` + backups + atomic save**, then validate by editing a *copy* of a real
-   save and loading it in-game.
+3. ✅ **Ultima I parsing implemented** in `core::games::ultima1` against the spec in §6:
+   a data-driven field table (name, stats, gold/food, ready weapon/spell/armour, transport,
+   map X/Y) over the raw 820-byte buffer, with unit tests (synthetic-fixture field reads,
+   round-trip byte preservation, length + unknown-value handling).
+4. ✅ **Read-only commands wired up** — `inspect` / `get` / `dump` work against the real
+   `PLAYER1.U1` (verified: "Enki", a Human Wizard). Zero risk to real files.
+5. ✅ **Editing + backups + atomic save implemented.** `set` (validated against each
+   field's range/enum), plus `backup` / `backups` / `restore`. Every write first makes a
+   timestamped backup and then writes atomically (temp file + rename); `restore` also
+   backs up the current save before overwriting. Verified end-to-end on a *copy* of the
+   real `PLAYER1.U1`. **Remaining: your in-game validation** — load an edited copy in
+   Ultima I to confirm the character is intact (our checksum sanity check).
 
 **Definition of done for Phase 1:** we can inspect a real save, change a stat, load the
 edited character successfully in Ultima I, and a backup of the original exists — with a

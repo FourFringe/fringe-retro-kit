@@ -6,7 +6,7 @@ members = ["crates/core", "crates/cli"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["John Sheets <john.sheets@mastery.net>"]
+authors = ["John Sheets <john@fourfringe.com>"]
 repository = "https://github.com/FourFringe/fringe-retro-kit"
 
 [workspace.dependencies]
@@ -15,5 +15,7 @@ fringe-retro-core = { path = "crates/core" }
 
 # Shared third-party crates (all MIT or MIT/Apache-2.0).
 anyhow = "1"
+chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
+tempfile = "3"
 thiserror = "2"
