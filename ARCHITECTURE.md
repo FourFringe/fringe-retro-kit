@@ -140,6 +140,28 @@ are yet.
 
 ---
 
+## Alternatives considered
+
+Recorded so we don't re-litigate settled choices.
+
+**Binary parsing — chose `binrw`.** It does symmetric declarative read *and* write
+(offsets, endianness, arrays), which fits an editor that must round-trip files. Also
+considered: `deku` (bit-level — keep in mind if a future game packs flags into individual
+bits), `nom` (parser combinators — more manual than we need), and **Kaitai Struct** (a
+declarative `.ksy` binary-description language with a Rust runtime and a community format
+library — great inspiration for our eventual schema format, but read-focused, so weak at
+write-back and preserving unknown bytes, which is exactly what a save editor needs). The
+ImHex pattern language and 010 Editor templates are further inspiration for a
+"describe-a-layout" DSL when we design our own schema.
+
+**Terminal UI — chose Ratatui + Crossterm with The Elm Architecture.** Ratatui is the
+actively maintained successor to `tui-rs` with the largest ecosystem; Crossterm is the
+cross-platform backend (works on Windows consoles, unlike termion). Also considered:
+`cursive` (retained-mode widget tree — more batteries-included but less flexible) and
+`tui-realm` (a component framework atop Ratatui — possibly useful later, overkill now).
+
+---
+
 ## Non-goals
 
 Fringe Retro Kit does **not** aim to:
