@@ -1,176 +1,115 @@
-# Fringe Retro Kit
+# Architecture & Decisions
 
-> A cross-platform toolkit for exploring, editing, backing up, and preserving classic computer game save files.
-
----
-
-# Vision
-
-Fringe Retro Kit is an open-source, terminal-based application for interacting with save files from classic computer games.
-
-The project is built around one central idea:
-
-> Users should think about games and characters—not binary file formats.
-
-Fringe Retro Kit should make it easy to browse installed games, inspect save files, safely edit known values, and automatically preserve previous versions.
-
-Although the first supported game will likely be **Ultima I**, the project is intentionally designed to support many classic games through a generic architecture.
-
-This project is both a practical utility and a software preservation effort.
+> The decisions we've committed to and the shape of the system as we've settled it.
+> Anything still open or unbuilt lives in [ROADMAP.md](ROADMAP.md).
+> The current concrete work item is [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md).
 
 ---
 
-# Naming
+## Vision
 
-## Product
+Fringe Retro Kit is an open-source, terminal-based tool for inspecting, editing,
+backing up, and preserving save files from classic computer games. One idea drives it:
 
-Fringe Retro Kit
+> Users should think about games and characters — not binary file formats.
 
-## Repository
-
-fringe-retro-kit
-
-## Binary
-
-fringe-retro
-
-The executable launches directly into an interactive terminal interface.
-
-Unlike tools such as Git, the primary workflow is expected to happen inside the application rather than through numerous command-line subcommands.
-
-Example:
-
-```bash
-fringe-retro
-```
+It is both a practical utility and a software-preservation effort.
 
 ---
 
-# Core Philosophy
+## Guiding principles
 
-## User-Centered
-
-Users should work with concepts like:
-
-- Games
-- Characters
-- Save files
-- Backups
-
-The application should hide operating system details whenever possible.
-
----
-
-## Data-Driven
-
-Knowledge about individual games should live primarily in declarative configuration rather than application code.
-
-Rust should provide the generic engine.
-
-Game support should be data.
+- **User-centered.** Users work in terms of games, characters, saves, and backups; the
+  application hides operating-system details wherever practical.
+- **Safe.** Editing must never feel risky — automatic backups, preservation of bytes we
+  don't understand, and easy reverts. Data loss should be extremely unlikely.
+- **Preserve player history.** Active saves, automatic backups, and the curated Save
+  Library are treated as three distinct things.
+- **Cross-platform (eventually).** macOS first; Windows and Linux later.
+- **Data-driven (eventually).** The long-term goal is a generic engine plus per-game
+  *data* rather than per-game code — but this is deliberately deferred (see
+  *Development strategy*).
 
 ---
 
-## Extensible
+## Decisions
 
-The application should ship with officially supported game definitions.
+### Language — Rust
 
-Users should be able to extend support by adding local configuration files without recompiling the application.
+Native single binary, no runtime dependency, strong binary-parsing ecosystem,
+easy packaging, and long-term maintainability.
 
----
+### Project structure — Cargo workspace
 
-## Safe
+Two crates (a *crate* is Rust's unit of compilation — a library or binary package):
 
-Save editing should never feel risky.
+- **`crates/core`** — library crate (`fringe-retro-core`): all parsing, editing, and
+  backup logic. Unit-testable without any UI.
+- **`crates/cli`** — binary crate (`fringe-retro`): a thin command-line wrapper over the
+  core.
 
-Whenever practical:
+Rationale: precise unit testing of the risky logic, a permanent headless CLI, and future
+reuse of the same core by a TUI (or GUI).
 
-- automatically create backups
-- preserve unknown bytes
-- make reverting easy
+### Interface — CLI first, TUI later
 
-Data loss should be extremely unlikely.
+- The **headless CLI** (`inspect` / `get` / `dump` / `set` / `backup` / `restore`) is a
+  **permanent** feature, not a throwaway.
+- The **TUI** (Ratatui + Crossterm) will become the primary interface once the core is
+  solid, built using **The Elm Architecture** (Model / Message / `update` / `view`).
+- This revises the original intent of launching straight into a TUI; we start CLI-only to
+  keep the core testable and the first milestone small.
 
----
+### Dependencies — MIT-compatible only
 
-## Preserve Player History
+Every dependency is MIT or dual **MIT OR Apache-2.0** (usable under MIT):
 
-Fringe Retro Kit should help users preserve their gaming history, not merely edit save files.
+| Crate | Purpose |
+| --- | --- |
+| `binrw` | Declarative binary read + write (offsets, little-endian ints, arrays) |
+| `clap` | Command-line argument parsing |
+| `thiserror` | Typed error enums in `core` |
+| `anyhow` | Error propagation/reporting in the `cli` binary |
+| `tracing` (+ `tracing-subscriber`) | Structured logging — to a **file**, never stdout |
+| `tempfile` | Safe temp files for atomic writes |
+| `chrono` | Timestamps for backup filenames |
 
-The application distinguishes between:
+Deferred (noted so we don't reinvent them): `ratatui` + `crossterm` (TUI),
+`directories` (per-OS paths), `serde` + a maintained YAML crate (user schemas).
 
-- Active game saves
-- Automatic backups
-- The user's curated Save Library
+### Save-editing safety model
 
-These concepts serve different purposes and should remain separate throughout the application.
+1. Read the entire file into a byte buffer.
+2. Edit only **known** offsets in place — unknown bytes are preserved by construction.
+3. Validate values (ranges / enums) before writing.
+4. Create a timestamped **backup** before the first write.
+5. Write **atomically**: to a temp file in the same directory, then `rename` over the
+   original.
 
-Users should be able to revisit games years later without manually managing save files.
+### Save concepts — three distinct things
 
----
+- **Active game saves** — the game's live save files.
+- **Automatic backups** — recovery only; automatic, timestamped, temporary.
+- **Save Library** — user-curated, named, annotated, long-term. (Detailed feature set
+  lives in [ROADMAP.md](ROADMAP.md).)
 
-## Cross Platform
+### Development strategy — hardcode first, generalize later
 
-Support:
+- Build the best **Ultima I** editor first, with Ultima I knowledge hardcoded in Rust.
+- Extract the generic, data-driven schema engine only **after** 2–3 games are hardcoded,
+  so the abstraction is earned rather than speculated.
+- Supported and planned games are listed in the [README](README.md).
 
-- macOS
-- Windows
-- Linux
+### License — MIT
 
-The user experience should remain as consistent as practical across all platforms.
-
----
-
-# Technology
-
-## Language
-
-Rust
-
-Reasons:
-
-- native executables
-- no runtime dependency
-- excellent binary parsing support
-- strong ecosystem
-- easy packaging
-- long-term maintainability
-
----
-
-## User Interface
-
-Terminal User Interface (TUI)
-
-Likely libraries:
-
-- Ratatui
-- Crossterm
-
-The TUI is considered the primary interface.
-
-A desktop GUI may be added in the future, but is not an initial goal.
+The project should stay welcoming to contributors and easy to integrate with other
+preservation efforts.
 
 ---
 
-# Distribution
+## Target architecture
 
-Native binaries should be available for:
-
-- macOS
-- Windows
-- Linux
-
-Distribution targets include:
-
-- GitHub Releases
-- Homebrew
-
-Continuous Integration should automatically build all supported platforms.
-
----
-
-# High-Level Architecture
+Once the generic engine is extracted, the intended layering is:
 
 ```
                  Rust Engine
@@ -188,336 +127,26 @@ Continuous Integration should automatically build all supported platforms.
         └─────────────┬──────────────┘
                       │
         ┌─────────────▼──────────────┐
-        │        Ratatui UI          │
+        │   CLI  /  Ratatui UI       │
         └────────────────────────────┘
 ```
 
-The parser should understand concepts like:
+The engine should understand generic concepts — integers, enums, strings, arrays,
+bitfields, structures — and avoid game-specific knowledge wherever practical.
 
-- integers
-- enums
-- strings
-- arrays
-- bitfields
-- structures
-
-It should **not** contain game-specific knowledge whenever practical.
+**Current state:** the "Binary File Layer" and "Schema Engine" are represented today by
+hardcoded Ultima I code in `crates/core`. The diagram is the destination, not where we
+are yet.
 
 ---
 
-# Proposed YAML System
-
-**This section intentionally describes direction rather than specification.**
-
-The exact schema format should evolve naturally during development.
-
-The goal is to describe game knowledge declaratively.
-
-Possible responsibilities include:
-
-- supported save files
-- binary field definitions
-- enums
-- display labels
-- validation ranges
-- install detection hints
-- editor hints
-- browser behavior
-
-A future schema might look conceptually like:
-
-```yaml
-game:
-  name: Ultima I
-
-saveFiles:
-  - PLAYER
-
-fields:
-
-  strength:
-    type: u16
-    offset: 0x20
-    label: Strength
-
-  transport:
-    type: enum
-    offset: 0x52
-
-platforms:
-  gog:
-    ...
-```
-
-This is **not** intended to lock down the schema design.
-
-Instead, it illustrates the philosophy:
-
-> The Rust engine should be generic.
-> The YAML should describe games.
-
----
-
-# Embedded and Local Schemas
-
-Official schemas should be embedded into the executable during compilation.
-
-Benefits:
-
-- single executable
-- offline operation
-- version compatibility
-
-The application should also load user schemas from a local configuration directory.
-
-Example:
-
-```
-~/.fringe-retro/schemas/
-```
-
-User schemas may:
-
-- add new games
-- override existing definitions
-- experiment with unsupported formats
-
-No recompilation should be required.
-
----
-
-# Save Discovery
-
-The user should configure games—not save paths.
-
-Example:
-
-```
-Ultima I
-
-Installation:
-    GOG
-```
-
-Whenever practical the application should automatically locate:
-
-- installation directories (different for each OS)
-- save files
-
-Supporting platforms such as:
-
-- GOG
-- Steam
-
-should remain an implementation detail rather than something users manage manually.
-
-Manual path overrides should always be available.
-
-Users configure game installations.
-
-Fringe Retro Kit manages:
-
-- active save locations
-- backup storage
-- the Save Library
-
-The application should move files between these locations automatically.
-
----
-
-# Save Browser
-
-The application should discover save files and present them naturally.
-
-Example:
-
-```
-Games
-
-▶ Ultima I
-
-Character
-
-▶ Lord British
-
-Current Save
-
-PLAYER
-
-Library
-
-Before Time Machine
-Endgame
-First Dungeon
-
-Backups
-
-2026-07-06 14:22
-2026-07-06 14:05
-2026-07-05 19:41
-```
-
-Browsing should be the primary workflow.
-
----
-
-# Save Inspector
-
-Users should be able to inspect known values before editing.
-
-Example:
-
-```
-Strength         42
-Agility          35
-Gold         12,450
-Food          9,999
-Transport     Aircar
-```
-
-Unknown binary regions should remain untouched.
-
----
-
-# Editing
-
-The editor should generate itself whenever practical.
-
-Examples:
-
-```
-Strength
-
-[ 42 ]
-```
-
-Enum
-
-```
-Transport
-
-< Aircar >
-```
-
-Boolean
-
-```
-Has Time Machine
-
-[✓]
-```
-
-The goal is to minimize game-specific UI code.
-
----
-
-# Save Management
-
-## Automatic Backups
-
-Before modifying any save file, Fringe Retro Kit should automatically create a timestamped backup.
-
-Backups exist solely for recovery.
-
-Characteristics:
-
-- automatic
-- timestamped
-- temporary
-- never renamed
-- rarely edited
-
-Backups should require no user intervention.
-
-## Save Library
-
-The Save Library is the user's curated collection of game progress.
-
-Unlike backups, library entries are intentionally managed by the user.
-
-Characteristics:
-
-- named
-- browsable
-- restorable
-- optionally annotated
-- intended for long-term preservation
-
-Library entries may live outside the game installation and should support cloud-synchronized folders such as Dropbox, Google Drive, OneDrive, or iCloud Drive.
-
-The Save Library should become the primary way users revisit previous adventures.
-
----
-
-# Repository Layout
-
-```
-fringe-retro-kit/
-
-    src/
-
-    schemas/
-
-    docs/
-
-    tests/
-
-    examples/
-```
-
-Additional structure should emerge as the project grows.
-
-Avoid premature abstraction.
-
----
-
-# Development Strategy
-
-The first milestone is intentionally narrow:
-
-> Build the best Ultima I save editor available.
-
-Only after solving one real problem should the architecture expand.
-
-Likely progression:
-
-1. Ultima I
-2. Ultima II
-3. Ultima III
-4. Wasteland
-5. Bard's Tale
-6. Wizardry
-7. SSI Gold Box games
-8. Community-contributed formats
-
----
-
-# Non-Goals
+## Non-goals
 
 Fringe Retro Kit does **not** aim to:
 
-- distribute game assets
-- include game executables
+- distribute game assets or executables
 - emulate games
 - manage ROM collections
 - modify game code
 
-The project exists solely to understand, preserve, and safely manipulate user-owned save files.
-
----
-
-# Open Source
-
-License:
-
-MIT
-
-The project should remain welcoming to contributors and easy to integrate with other preservation efforts.
-
----
-
-# Guiding Principle
-
-Whenever possible, supporting a new game should involve writing a schema—not modifying Rust source code.
-
-If adding another game consistently requires changing the engine, reconsider the architecture before adding more features.
+It exists solely to understand, preserve, and safely edit user-owned save files.

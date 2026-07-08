@@ -1,198 +1,170 @@
-# Fringe Retro Kit Roadmap
+# Fringe Retro Kit — Roadmap
 
-This roadmap is intentionally conservative.
+> What we haven't built or decided yet. Committed decisions live in
+> [ARCHITECTURE.md](ARCHITECTURE.md); the current concrete target is
+> [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md).
 
-The goal is to solve one problem well before expanding.
+Conservative by design: solve one problem well before expanding.
 
----
-
-# Phase 1 — Foundation
-
-Project setup
-
-- [ ] Repository
-- [ ] CI
-- [ ] Rust workspace
-- [ ] Ratatui skeleton
-- [ ] Configuration system
-- [ ] Logging
-- [ ] Error handling
+> **Sequencing:** the first milestone **hardcodes** Ultima I in a CLI tool. The generic
+> engine, the TUI, and CI are deliberately deferred; early development is CLI-only and
+> local-only (macOS).
 
 ---
 
-# Phase 2 — Binary Engine
+## Phase 1 — Foundation + Hardcoded Ultima I MVP
 
-- [ ] Binary reader
-- [ ] Binary writer
-- [ ] Generic field model
-- [ ] Schema loader
-- [ ] Validation
-- [ ] Preserve unknown bytes
+Detailed plan: **[PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md)**.
 
----
-
-# Phase 3 — Ultima I MVP
-
-- [ ] Parse PLAYER save
-- [ ] Display fields
-- [ ] Edit values
-- [ ] Save changes
-- [ ] Automatic backups
+- [ ] Cargo workspace (`crates/core` library + `crates/cli` binary)
+- [ ] Logging (to file, via `tracing`) and error handling (`thiserror` + `anyhow`)
+- [ ] Parse `player*.u1` (offsets hardcoded, via `binrw`)
+- [ ] Inspect / display fields (read-only CLI)
+- [ ] Edit values (validated)
+- [ ] Save changes (atomic write, preserve unknown bytes)
+- [ ] Automatic timestamped backups
 
 This is the first major milestone.
 
 ---
 
-# Phase 4 — Save Browser
+## Phase 2 — Generic Binary / Schema Engine
 
-- [ ] Game list
-- [ ] Character list
-- [ ] Save discovery
+Extracted only **after** 2–3 games have been hardcoded, so the abstraction is earned.
+
+- [ ] Generic binary reader / writer
+- [ ] Generic field model (integers, enums, strings, arrays, bitfields, structures)
+- [ ] Generic "preserve unknown bytes"
+- [ ] Validation
+- [ ] Schema loader
+- [ ] Embedded official schemas (compiled into the binary) **plus** user schemas loaded
+      from a per-OS config directory (no recompile required)
+
+**Open decision — schema / config format.** The requirement: users can easily find,
+read, and add their own game configs. Leading candidates are **YAML** (friendliest for
+hand-writing field tables) for game schemas and **TOML** (native to Rust) for app
+settings. Note the original `serde_yaml` crate is unmaintained, so we'd use a maintained
+fork. This is direction only — the format is not locked. A schema might conceptually look
+like:
+
+```yaml
+game:
+  name: Ultima I
+
+saveFiles:
+  - player*.u1
+
+fields:
+  strength:
+    type: i16le
+    offset: 0x18
+    label: Strength
+
+  transport:
+    type: enum
+    offset: 0x30
+```
+
+---
+
+## Phase 3 — Save Browser & Inspector (TUI)
+
+The TUI (Ratatui + Crossterm) becomes the primary interface here.
+
+- [ ] Game / character / save browsing
+- [ ] Inspector: read-only view of known fields
+- [ ] Auto-generated editors (number / enum / boolean widgets) to minimize per-game UI code
 - [ ] Backup browser
 
----
-
-# Phase 5 — Save Management
-
-## Automatic Backups
-
-- [ ] Timestamped backups
-- [ ] Browse backups
-- [ ] Restore backups
-- [ ] Configurable backup retention
-
-## Save Library
-
-- [ ] Configurable library location
-- [ ] Named snapshots
-- [ ] Notes
-- [ ] Restore into active game
-- [ ] Duplicate
-- [ ] Rename
-- [ ] Delete
-- [ ] Cloud-friendly storage
-
-The Save Library should become the canonical place for users to preserve memorable moments from long-running games. Beyond editing individual save files, Fringe Retro Kit should help users organize and preserve their game history.
-
-The toolkit should manage a user-configurable Save Library that stores named snapshots independently of the game's active save directory.
-
-The Save Library should be treated as the user's permanent collection rather than a temporary backup location.
-
----
-
-# Phase 6 — Platform Integration
-
-- [ ] GOG detection
-- [ ] DOSBox detection
-- [ ] Steam detection (if possible)
-- [ ] Manual path configuration
-
----
-
-# Phase 7 — Additional Games
-
-Potential candidates:
-
-- Ultima II
-- Ultima III
-- Wasteland
-- Bard's Tale
-- Wizardry
-
-Only after the architecture has proven itself.
-
----
-
-## Goals
-
-- [ ] User-configurable Save Library location
-- [ ] Support local folders and cloud-synchronized directories (Dropbox, Google Drive, OneDrive, iCloud Drive, etc.)
-- [ ] Name and annotate save snapshots
-- [ ] Browse archived saves by game and character
-- [ ] Restore archived saves directly into the game's save directory
-- [ ] Preserve metadata such as creation date, last played date, and optional notes
-- [ ] Prevent accidental overwrites during restore
-
-Example workflow:
+Illustrative mockups (not final):
 
 ```
-Ultima I
+Browser                         Inspector
 
-Character
-    Lord British
+Games                           Strength         42
+▶ Ultima I                      Agility          35
+                                Gold         12,450
+Character                       Food          9,999
+▶ Lord British                  Transport     Aircar
 
-Library
+Current Save
+player0.u1                      Editors
+                                  Strength     [ 42 ]
+Backups                           Transport    < Aircar >
+2026-07-06 14:22                  Time Machine [✓]
+2026-07-06 14:05
+```
+
+---
+
+## Phase 4 — Save Management
+
+### Automatic backups
+
+- [ ] Browse backups
+- [ ] Restore backups
+- [ ] Configurable retention
+
+### Save Library
+
+The user's permanent, curated collection — distinct from automatic backups, and intended
+to become the central hub for managing a player's game history. The application handles
+copying files between the library and the active save directory automatically; users
+should never manipulate save files in a file manager.
+
+- [ ] Configurable location — local **or** cloud-synced (Dropbox, Google Drive, OneDrive,
+      iCloud Drive); treated as ordinary storage, no assumptions about sync software
+- [ ] Named snapshots with notes and metadata (created date, last played)
+- [ ] Browse archived saves by game and character
+- [ ] Restore into the active game, with overwrite protection
+- [ ] Duplicate / rename / delete
+
+Example workflow and configurable locations:
+
+```
+Ultima I  ›  Lord British  ›  Library
 
     New Character
     Before Time Machine
     Entering Dungeon
     Endgame
+
+Actions: View · Edit · Restore · Duplicate · Rename · Delete
+
+Library location examples:
+    ~/Documents/Fringe Retro Kit/
+    ~/Dropbox/Retro Saves/
+    D:\Games\Retro Saves\
 ```
-
-Selecting an entry should allow actions such as:
-
-- View
-- Edit
-- Restore
-- Duplicate
-- Rename
-- Delete
-
-The application should handle copying files between the Save Library and the active game installation automatically.
-
-Users should not need to manually manipulate save files within operating system file managers.
-
-## Configuration
-
-The Save Library location should be configurable.
-
-Examples:
-
-```
-~/Documents/Fringe Retro Kit/
-
-~/Dropbox/Retro Saves/
-
-~/Google Drive/Retro Saves/
-
-D:\Games\Retro Saves\
-```
-
-This allows users to synchronize their save collections across multiple computers using their preferred cloud storage provider.
-
-The application should avoid making assumptions about synchronization software and simply treat the configured location as ordinary storage.
-
-## Long-Term Vision
-
-Over time, the Save Library should become the central hub for managing a player's game history.
-
-Possible future capabilities include:
-
-- search
-- tags
-- favorites
-- screenshots
-- play history
-- notes
-- save comparison
-- duplicate detection
-- import/export
 
 ---
 
-# Future Ideas
+## Phase 5 — Platform Integration
 
-These are intentionally **not** commitments.
+- [ ] Proper per-OS path handling (`directories` crate)
+- [ ] GOG detection · DOSBox detection · Steam detection (if feasible) · manual path override
+- [ ] Windows & Linux support
+- [ ] GitHub Actions CI: build/test matrix across macOS / Windows / Linux
+- [ ] Release automation (`dist`) with GitHub Releases + a Homebrew tap
 
-Possible additions:
+---
 
-- Save diff viewer
-- Binary inspector
-- JSON export/import
-- Save history
-- Plugin system
-- Desktop GUI
+## Phase 6 — Additional Games
+
+Only after the architecture has proven itself. Candidate games are listed in the
+[README](README.md).
+
+---
+
+## Future ideas (not commitments)
+
+- Search, tags, favorites
+- Screenshots, play history
+- Save diff / comparison, duplicate detection
+- JSON import / export
 - Checksum verification
 - Steam Cloud awareness
 - Batch editing
+- Plugin system
+- Desktop GUI
 - Schema validator

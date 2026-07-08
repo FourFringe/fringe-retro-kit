@@ -16,14 +16,12 @@ The long-term vision is to support many classic games through declarative schema
 
 ## Features
 
-- Cross-platform (macOS, Windows, Linux)
-- Native Rust application
-- Terminal UI (Ratatui)
-- Automatic save discovery
-- Safe editing with automatic backups
-- Embedded official game definitions
-- User-extensible YAML schemas
-- Community-friendly architecture
+- Native Rust application; single binary
+- Command-line interface first, with a terminal UI (Ratatui) planned
+- Safe editing with automatic backups (unknown bytes preserved)
+- Cross-platform aim: macOS first, Windows and Linux later
+- Data-driven game definitions planned, so new games can be added as data
+- Community-friendly, MIT-licensed architecture
 
 ---
 
@@ -61,8 +59,9 @@ It exists solely to help users inspect, preserve, and edit their own save files.
 
 ## Documentation
 
-- ARCHITECTURE.md
-- ROADMAP.md
+- [ARCHITECTURE.md](ARCHITECTURE.md) — decisions we've committed to
+- [ROADMAP.md](ROADMAP.md) — what's planned but not yet built or decided
+- [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md) — the current, concrete development target
 
 ---
 
