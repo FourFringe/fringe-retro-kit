@@ -121,7 +121,31 @@ const FIELDS: &[FieldDef] = &[
     FieldDef { key: "keys",         label: "Keys",         offset: 0x26, kind: Kind::Bcd { bytes: 1 } },
     FieldDef { key: "powders",      label: "Powders",      offset: 0x27, kind: Kind::Bcd { bytes: 1 } },
     FieldDef { key: "worn_armor",   label: "Worn Armor",   offset: 0x28, kind: Kind::Byte },
+    // Armor owned (BCD counts, letters B..H in the format spec).
+    FieldDef { key: "armor_cloth",        label: "Armor: Cloth",     offset: 0x29, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "armor_leather",      label: "Armor: Leather",   offset: 0x2A, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "armor_chain",        label: "Armor: Chain",     offset: 0x2B, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "armor_plate",        label: "Armor: Plate",     offset: 0x2C, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "armor_chain_plus2",  label: "Armor: +2 Chain",  offset: 0x2D, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "armor_plate_plus2",  label: "Armor: +2 Plate",  offset: 0x2E, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "armor_exotic",       label: "Armor: Exotic",    offset: 0x2F, kind: Kind::Bcd { bytes: 1 } },
     FieldDef { key: "weapon",       label: "Ready Weapon", offset: 0x30, kind: Kind::Byte },
+    // Weapons owned (BCD counts, letters B..P in the format spec).
+    FieldDef { key: "weapon_dagger",      label: "Weapon: Dagger",   offset: 0x31, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_mace",        label: "Weapon: Mace",     offset: 0x32, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_sling",       label: "Weapon: Sling",    offset: 0x33, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_axe",         label: "Weapon: Axe",      offset: 0x34, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_bow",         label: "Weapon: Bow",      offset: 0x35, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_sword",       label: "Weapon: Sword",    offset: 0x36, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_2h_sword",    label: "Weapon: 2H Sword", offset: 0x37, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_axe_plus2",   label: "Weapon: +2 Axe",   offset: 0x38, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_bow_plus2",   label: "Weapon: +2 Bow",   offset: 0x39, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_sword_plus2", label: "Weapon: +2 Sword", offset: 0x3A, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_gloves",      label: "Weapon: Gloves",   offset: 0x3B, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_axe_plus4",   label: "Weapon: +4 Axe",   offset: 0x3C, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_bow_plus4",   label: "Weapon: +4 Bow",   offset: 0x3D, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_sword_plus4", label: "Weapon: +4 Sword", offset: 0x3E, kind: Kind::Bcd { bytes: 1 } },
+    FieldDef { key: "weapon_exotic",      label: "Weapon: Exotic",   offset: 0x3F, kind: Kind::Bcd { bytes: 1 } },
 ];
 
 // --- Shared character-record helpers, parameterized by the record's base offset. ---
@@ -591,6 +615,17 @@ mod tests {
         assert_eq!(roster.as_bytes()[0x17], b'W');
         roster.set_field(0, "race", "E").unwrap();
         assert_eq!(roster.get_field(0, "race").unwrap(), "Elf");
+    }
+
+    #[test]
+    fn set_inventory_counts() {
+        let mut roster = Ultima3Roster::from_bytes(synthetic_roster()).unwrap();
+        roster.set_field(0, "weapon_sword", "3").unwrap();
+        assert_eq!(roster.get_field(0, "weapon_sword").unwrap(), "3");
+        assert_eq!(roster.as_bytes()[0x36], 0x03); // BCD 3 at the Sword count offset
+        roster.set_field(0, "armor_plate", "2").unwrap();
+        assert_eq!(roster.get_field(0, "armor_plate").unwrap(), "2");
+        assert_eq!(roster.as_bytes()[0x2C], 0x02);
     }
 
     #[test]

@@ -3,9 +3,10 @@
 The command-line tool is `fringe-retro`. This document lists every command it supports
 today, plus commands that are planned but not yet built.
 
-> **Current status:** Phase 1 — a command-line tool with **Ultima I** support hardcoded.
-> A terminal UI (TUI), automatic game discovery, and the Save Library are planned; see
-> [ROADMAP.md](ROADMAP.md) and [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md).
+> **Current status:** Phase 1 — a command-line tool with **Ultima I** and **Ultima III**
+> support hardcoded. The game is auto-detected from the save file, so the same commands
+> work across both. A terminal UI (TUI), automatic game discovery, and the Save Library
+> are planned; see [ROADMAP.md](ROADMAP.md) and [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md).
 
 Legend: ✅ implemented · 🔷 planned (not yet available)
 
@@ -28,6 +29,9 @@ fringe-retro <command> [arguments] [--flags]
     (`fringe-retro set --help`).
   - `--version`, `-V` — print the version.
 - Numbers may be written in decimal or hexadecimal (`0x`-prefixed) where noted.
+- The **game is auto-detected** from the save file, so the same commands work across
+  games. Multi-character games (Ultima III) use a `--slot` flag — see
+  [Ultima III](#ultima-iii-rosters--parties).
 
 On macOS the path usually contains characters that need quoting, so wrap it in quotes:
 
@@ -207,6 +211,59 @@ is what's readied, while `weapon_blaster` is how many Blasters you own. Run
 fringe-retro set "/…/PLAYER1.U1" weapon_blaster 1
 fringe-retro set "/…/PLAYER1.U1" transport_time_machine 1
 ```
+
+---
+
+## Ultima III (rosters & parties)
+
+Ultima III stores **multiple characters per file**, and the game is auto-detected from
+the save, so the same `inspect` / `get` / `set` commands work — with a `--slot` flag to
+pick the character. Two file types are supported:
+
+- **`ROSTER.ULT`** — your pool of up to **20 characters** (`--slot 1`…`20`).
+- **`PARTY.ULT`** — the **4 active party members** (`--slot 1`…`4`), plus a party header
+  (transport, move count, position, and the roster slots that form the party).
+
+```bash
+fringe-retro inspect "/…/ROSTER.ULT"                  # every occupied slot
+fringe-retro get  "/…/ROSTER.ULT" strength --slot 2  # slot 2's strength
+fringe-retro set  "/…/ROSTER.ULT" gold 9999 --slot 2 # edit slot 2
+fringe-retro inspect "/…/PARTY.ULT"                  # party header + 4 members
+fringe-retro set  "/…/PARTY.ULT" hits 999 --slot 1   # edit active party member 1
+```
+
+`--slot` is 1-based and defaults to 1. (Ultima I has a single character, so it ignores
+`--slot`.)
+
+> ⚠️ **Active party members live in two files.** A character who is in the active party
+> exists both in `ROSTER.ULT` and as a copy in `PARTY.ULT`. To reliably change such a
+> character, edit **both** files (or edit while no party is formed).
+
+### Ultima III character fields
+
+Numbers are stored as **BCD** (binary-coded decimal); race/class/sex/status are stored as
+**letters**, and `set` accepts either the full name or the letter.
+
+| Field | Type | Range / options |
+| --- | --- | --- |
+| `name` | text | ASCII, ≤ 9 characters |
+| `race` | letter | Human, Elf, Dwarf, Fuzzy, Bobbit |
+| `class` | letter | Fighter, Cleric, Wizard, Thief, Paladin, Barbarian, Lark, Illusionist, Alchemist, Druid, Ranger |
+| `gender` | letter | Male, Female, Other |
+| `status` | letter | Good, Poisoned, Dead, Ashes |
+| `strength`, `dexterity`, `intelligence`, `wisdom` | number | 0–99 |
+| `hits`, `max_hits`, `experience` | number | 0–9999 |
+| `magic`, `torches`, `gems`, `keys`, `powders` | number | 0–99 |
+| `food` | number | 0–9999 |
+| `food_frac` | number | 0–99 (fractional food) |
+| `gold` | number | 0–9999 |
+| `in_party` | yes/no | whether the character is in the active party |
+| `marks_cards` | bitfield | Love, Sol, Moon, Death, Force, Fire, Snake, Kings (set as a raw 0–255 value for now) |
+| `worn_armor`, `weapon` | number | currently worn armor / readied weapon index |
+| `armor_*` (7) | number | owned armor counts: `armor_cloth`, `_leather`, `_chain`, `_plate`, `_chain_plus2`, `_plate_plus2`, `_exotic` |
+| `weapon_*` (15) | number | owned weapon counts: `weapon_dagger`, `_mace`, `_sling`, `_axe`, `_bow`, `_sword`, `_2h_sword`, `_axe_plus2`, `_bow_plus2`, `_sword_plus2`, `_gloves`, `_axe_plus4`, `_bow_plus4`, `_sword_plus4`, `_exotic` |
+
+Run `fringe-retro inspect <file>` for the full decoded list of every character.
 
 ---
 
