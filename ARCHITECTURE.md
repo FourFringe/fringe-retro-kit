@@ -26,9 +26,10 @@ It is both a practical utility and a software-preservation effort.
 - **Preserve player history.** Active saves, automatic backups, and the curated Save
   Library are treated as three distinct things.
 - **Cross-platform (eventually).** macOS first; Windows and Linux later.
-- **Data-driven (eventually).** The long-term goal is a generic engine plus per-game
-  *data* rather than per-game code — but this is deliberately deferred (see
-  *Development strategy*).
+- **Data-driven where it works (eventually).** The long-term goal is a small set of reusable
+  parsing engines plus per-game *schema data*, with bespoke Rust code for the parts data
+  can't express (encryption, compression, checksums). Deliberately deferred (see
+  *Development strategy* and *Parsing architecture*).
 
 ---
 
@@ -100,6 +101,37 @@ Deferred (noted so we don't reinvent them): `ratatui` + `crossterm` (TUI),
   so the abstraction is earned rather than speculated.
 - Supported and planned games are listed in the [README](README.md).
 
+### Parsing architecture — codec pipeline + field schema
+
+Reverse-engineering four games (Ultima I/II/III plus Wasteland) revealed that save parsing
+splits cleanly into two layers, and this is the seam the engine should follow. Neither
+"pure data-driven" nor "hardcode every game" is right; it's a **hybrid**.
+
+1. **Codec / container layer (Rust code).** Getting from bytes-on-disk to a flat plaintext
+   buffer: encryption, compression, checksums, block scanning, "a save is a directory of
+   files," and exotic string encodings. These are procedural and reusable *per family* (the
+   Wasteland MSQ cipher would serve any MSQ-based game). Modeled as a `Transform` pipeline
+   with a symmetric write path (re-encrypt / re-checksum).
+2. **Field-schema layer (data).** Once plaintext exists: fixed-offset fields — integers
+   (LE/BE), BCD, enums (numeric or letter), bitfields, arrays, sub-records. The three
+   Ultimas are essentially 100% this layer; Wasteland is a heavy codec layer with a normal
+   schema on top.
+
+**Tiered extensibility.** Simple fixed-layout games (the Ultimas) can eventually be
+user-authorable **schema files**; encrypted/compressed games (Wasteland) require an
+official Rust codec and ship in releases. We do not promise "any game via YAML" — we
+promise data-authoring for the tier where it actually works, with a code escape hatch for
+the rest. The text schema format is intentionally **not** designed yet: prove the Rust
+abstraction across the Ultimas first, then decide.
+
+### Game library manifest — a separate concern
+
+Managing *which* games a user owns (identifiers, platform, install path, save location,
+enable/disable) is game-agnostic and independent of parsing. It generalizes today's
+single-game `config.toml` and lets users run `fringe-retro inspect ultima1` instead of
+passing raw paths. It is the next concrete work item and does not depend on the schema
+engine (see [ROADMAP.md](ROADMAP.md)).
+
 ### License — MIT
 
 The project should stay welcoming to contributors and easy to integrate with other
@@ -115,28 +147,37 @@ Once the generic engine is extracted, the intended layering is:
                  Rust Engine
 
         ┌────────────────────────────┐
-        │   Binary File Layer        │
+        │   Save Container Layer      │  files / directories on disk
         └─────────────┬──────────────┘
                       │
         ┌─────────────▼──────────────┐
-        │     Schema Engine          │
+        │   Codec Pipeline            │  decrypt · decompress · block · checksum
         └─────────────┬──────────────┘
                       │
         ┌─────────────▼──────────────┐
-        │      Game Model            │
+        │   Field-Schema Engine       │  ints/BCD/enums/bitfields/arrays over plaintext
         └─────────────┬──────────────┘
                       │
         ┌─────────────▼──────────────┐
-        │   CLI  /  Ratatui UI       │
+        │      Game Model             │
+        └─────────────┬──────────────┘
+                      │
+        ┌─────────────▼──────────────┐
+        │   CLI  /  Ratatui UI        │
         └────────────────────────────┘
+
+   The game **Library Manifest** (identifiers, platforms, paths) is game-agnostic and
+   sits beside this stack — it selects what to load, not how to parse it.
 ```
 
-The engine should understand generic concepts — integers, enums, strings, arrays,
-bitfields, structures — and avoid game-specific knowledge wherever practical.
+The field-schema engine understands generic concepts — integers, enums, strings, arrays,
+bitfields, structures — and avoids game-specific knowledge; the codec pipeline handles the
+container/crypto concerns that data can't express.
 
-**Current state:** the "Binary File Layer" and "Schema Engine" are represented today by
-hardcoded Ultima I code in `crates/core`. The diagram is the destination, not where we
-are yet.
+**Current state:** four games are hardcoded in `crates/core` (Ultima I/II/III fully, plus
+Wasteland's MSQ decryption), which is what revealed the codec-vs-schema seam above. The
+layered engine is the destination, not where we are yet — the abstraction will be extracted
+once the library manifest lands and the Ultimas are migrated onto a shared field-schema.
 
 ---
 

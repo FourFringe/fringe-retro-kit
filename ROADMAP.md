@@ -31,24 +31,55 @@ Detailed plan: **[PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md)**.
 
 ---
 
-## Phase 2 — Generic Binary / Schema Engine
+## Phase 2 — Game Library Manifest & Identifiers
 
-Extracted only **after** 2–3 games have been hardcoded, so the abstraction is earned.
+The next concrete work item, and independent of parsing. Lets users describe **which games
+they own, on which platform, and where** — then refer to games by short identifiers instead
+of raw file paths. Also simplifies our own testing.
 
-- [ ] Generic binary reader / writer
-- [ ] Generic field model (integers, enums, strings, arrays, bitfields, structures)
-- [ ] Generic "preserve unknown bytes"
-- [ ] Validation
-- [ ] Schema loader
-- [ ] Embedded official schemas (compiled into the binary) **plus** user schemas loaded
-      from a per-OS config directory (no recompile required)
+- [ ] App-level config (TOML) listing enabled games, each with: identifier (e.g. `ultima1`),
+      platform (GOG / Steam / DOSBox / manual), install path, and save location
+- [ ] Resolve `fringe-retro inspect ultima1` (identifier → game + save path) instead of a path
+- [ ] Enable/disable owned games (don't surface Wasteland options if you don't own it)
+- [ ] Optional Save Library location (local or cloud-synced) — see Phase 5
+- [ ] Generalizes today's single-game `config.toml` (`save_dir`) into a multi-game manifest
 
-**Open decision — schema / config format.** The requirement: users can easily find,
-read, and add their own game configs. Leading candidates are **YAML** (friendliest for
-hand-writing field tables) for game schemas and **TOML** (native to Rust) for app
-settings. Note the original `serde_yaml` crate is unmaintained, so we'd use a maintained
-fork. This is direction only — the format is not locked. A schema might conceptually look
-like:
+This is deliberately **game-agnostic**: it manages a player's library and never touches
+save-file parsing. Automatic platform *detection* (auto-filling these paths) is deferred to
+Phase 6; the manifest is the manual foundation it will later populate.
+
+---
+
+## Phase 3 — Parsing Engines & Per-Game Schemas
+
+Extracted only **after** several games are hardcoded, so the abstraction is earned. The four
+hand-mapped games (Ultima I/II/III, Wasteland) showed that parsing splits into two layers,
+and the architecture follows that seam (see
+[ARCHITECTURE.md](ARCHITECTURE.md)):
+
+- **Codec / container layer (Rust code).** Encryption, compression, checksums, block
+  scanning, save-as-directory, exotic string encodings. Small and reusable per *family*
+  (e.g. the Wasteland MSQ cipher would be reused by other MSQ-based games).
+- **Field-schema layer (data).** Fixed-offset fields over a plaintext buffer: integers
+  (LE/BE), BCD, enums (numeric or letter), bitfields, arrays, sub-records. The Ultimas are
+  essentially 100% this layer.
+
+Planned work:
+
+- [ ] Generic binary reader/writer with a field model (int LE/BE, BCD, enum, bitfield,
+      string, array, struct) + "preserve unknown bytes" + validation
+- [ ] A `Transform`/codec pipeline in front of the schema (identity for the Ultimas;
+      MSQ-decrypt for Wasteland) with a symmetric write path
+- [ ] Pluggable string codecs (ASCIIZ, BCD, Wasteland 5-bit table)
+- [ ] Migrate the hardcoded Ultimas onto the schema engine to prove it
+- [ ] **Tiered extensibility:** simple fixed-layout games become user-authorable schema
+      files; encrypted/compressed games ship as official Rust codecs
+
+**Open decision — schema / config format (do NOT lock yet).** Prove the abstraction as a
+Rust type first; only then decide whether the field schema graduates to a hand-writable
+text format. Leading candidates are **YAML** (friendly for field tables) for game schemas
+and **TOML** (native to Rust) for app settings (the original `serde_yaml` is unmaintained,
+so we'd use a maintained fork). A schema might conceptually look like:
 
 ```yaml
 game:
@@ -68,9 +99,11 @@ fields:
     offset: 0x30
 ```
 
+Known byte layouts for implemented games live in [docs/formats/](docs/formats/README.md).
+
 ---
 
-## Phase 3 — Save Browser & Inspector (TUI)
+## Phase 4 — Save Browser & Inspector (TUI)
 
 The TUI (Ratatui + Crossterm) becomes the primary interface here.
 
@@ -100,7 +133,7 @@ Backups                           Transport    < Aircar >
 
 ---
 
-## Phase 4 — Save Management
+## Phase 5 — Save Management
 
 ### Automatic backups
 
@@ -142,7 +175,7 @@ Library location examples:
 
 ---
 
-## Phase 5 — Platform Integration
+## Phase 6 — Platform Integration
 
 - [ ] Proper per-OS path handling (`directories` crate)
 - [ ] GOG detection · DOSBox detection · Steam detection (if feasible) · manual path override
@@ -152,10 +185,30 @@ Library location examples:
 
 ---
 
-## Phase 6 — Additional Games
+## Phase 7 — Additional Games
 
-Only after the architecture has proven itself. Candidate games are listed in the
-[README](README.md).
+Only after the architecture has proven itself. Byte layouts we've mapped so far live in
+[docs/formats/](docs/formats/README.md).
+
+**Selection heuristic:** prefer games that (a) the maintainers legally own and can test, and
+(b) have an actively-maintained **open-source engine reimplementation** — that makes the
+save format effectively a published, tested spec.
+
+Grouped by codec complexity (which parsing engine each needs):
+
+- **Done / in progress:** Ultima I ✅, Ultima II ✅, Ultima III ✅, Wasteland (MSQ cipher done,
+  records in progress).
+- **Next — plain structured binary + container (no encryption):** **Fallout 1 & 2** (owned;
+  big-endian ints, save-as-directory; well RE'd by TeamX / F12se). A gentle step up from the
+  Ultimas.
+- **Easy extensions — same family as the Ultimas:** Ultima IV (`xu4`), Ultima V, Ultima VI
+  (`Nuvie`).
+- **Candidates (kept in the list; may never get to them, and that's fine):** SSI Gold Box,
+  Might & Magic 3–5 / World of Xeen (`OpenXeen`), Dungeon Master, Eye of the Beholder,
+  Daggerfall (Daggerfall Unity; introduces RLE decompression), Wizardry, original Bard's Tale.
+
+Note: the Bard's Tale Trilogy remaster is a from-scratch Krome rebuild with a modern save
+format, **not** the original — out of scope for preservation of the original formats.
 
 ---
 
