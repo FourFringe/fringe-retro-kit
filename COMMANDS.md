@@ -91,6 +91,25 @@ fringe-retro dump "/…/PLAYER1.U1" --range 0x18:0x24   # just the six core stat
 `START` and `END` accept decimal or `0x` hex. The range is **start-inclusive,
 end-exclusive**; `END` is clamped to the file length.
 
+### ✅ `watch <path> [--interval MS]`
+
+Poll a save file and print **byte-level changes** as they happen — offset, hex and
+decimal old→new, and ASCII. Runs until you press Ctrl-C. This is the primary tool for
+**reverse-engineering** an undocumented save format: run it, do one thing in the game,
+and watch which bytes move.
+
+```bash
+fringe-retro watch "/…/PLAYER"                 # default 500 ms poll
+fringe-retro watch "/…/PLAYER" --interval 200
+```
+```
+[10:27:58] 2 byte(s) changed:
+  0x0005: 0C -> 19   ( 12 ->  25)   '.' -> '.'
+  0x0007: 64 -> FF   (100 -> 255)   'd' -> '.'
+```
+
+Reads only; never modifies the file.
+
 ---
 
 ## Editing commands

@@ -4,11 +4,13 @@
 
 mod config;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use fringe_retro_core::backup;
+use fringe_retro_core::diff::diff_bytes;
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 
@@ -75,6 +77,14 @@ enum Command {
         path: PathBuf,
         /// Path to the backup to restore.
         backup: PathBuf,
+    },
+    /// Watch a save file and print byte-level changes as they happen (Ctrl-C to stop).
+    Watch {
+        /// Path to the save file to watch.
+        path: PathBuf,
+        /// Poll interval in milliseconds.
+        #[arg(long, default_value_t = 500)]
+        interval: u64,
     },
 }
 
@@ -248,6 +258,10 @@ fn main() -> Result<()> {
             println!("restored {} -> {}", backup_path.display(), path.display());
             println!("previous save backed up to {}", pre_restore.display());
         }
+        Command::Watch { path, interval } => {
+            let path = config.resolve_save_path(&path)?;
+            watch_file(&path, interval)?;
+        }
     }
     Ok(())
 }
@@ -256,6 +270,67 @@ fn main() -> Result<()> {
 fn roster_index(slot: usize) -> Result<usize> {
     anyhow::ensure!(slot >= 1, "slot must be >= 1");
     Ok(slot - 1)
+}
+
+/// Poll `path` and print byte-level changes until interrupted.
+fn watch_file(path: &Path, interval_ms: u64) -> Result<()> {
+    println!("Watching {} — press Ctrl-C to stop.", path.display());
+    let mut previous = std::fs::read(path).ok();
+    match &previous {
+        Some(p) => println!("Initial size: {} bytes.", p.len()),
+        None => println!("(file does not exist yet; waiting for it to appear)"),
+    }
+    loop {
+        std::thread::sleep(Duration::from_millis(interval_ms));
+        let current = match std::fs::read(path) {
+            Ok(c) => c,
+            Err(_) => continue, // e.g. momentarily absent during an atomic replace
+        };
+        match previous {
+            Some(ref prev) if *prev == current => {}
+            Some(ref prev) => print_changes(prev, &current),
+            None => println!(
+                "[{}] file appeared: {} bytes",
+                chrono::Local::now().format("%H:%M:%S"),
+                current.len()
+            ),
+        }
+        previous = Some(current);
+    }
+}
+
+/// Print the byte-level differences between two versions of a file.
+fn print_changes(old: &[u8], new: &[u8]) {
+    let ts = chrono::Local::now().format("%H:%M:%S");
+    if old.len() != new.len() {
+        println!("[{ts}] size changed: {} -> {} bytes", old.len(), new.len());
+    }
+    let changes = diff_bytes(old, new);
+    if changes.is_empty() {
+        return;
+    }
+    println!("[{ts}] {} byte(s) changed:", changes.len());
+    for c in &changes {
+        println!(
+            "  0x{:04X}: {:02X} -> {:02X}   ({:>3} -> {:>3})   '{}' -> '{}'",
+            c.offset,
+            c.old,
+            c.new,
+            c.old,
+            c.new,
+            printable(c.old),
+            printable(c.new),
+        );
+    }
+}
+
+/// Render a byte as a printable ASCII character, or `.` if it isn't one.
+fn printable(b: u8) -> char {
+    if (0x20..0x7f).contains(&b) {
+        b as char
+    } else {
+        '.'
+    }
 }
 
 /// Parse a `START:END` byte range like `0x18:0x24` (hex or decimal), end exclusive.
