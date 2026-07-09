@@ -10,7 +10,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use fringe_retro_core::backup;
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
-use fringe_retro_core::games::ultima3::{self, Ultima3Roster};
+use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 
 use crate::config::Config;
 
@@ -35,6 +35,9 @@ enum Command {
         path: PathBuf,
         /// Field name, e.g. `strength`.
         field: String,
+        /// Character slot for multi-character rosters (Ultima III), 1-based.
+        #[arg(long, default_value_t = 1)]
+        slot: usize,
     },
     /// Raw hex dump of the file (optionally a byte range).
     Dump {
@@ -52,6 +55,9 @@ enum Command {
         field: String,
         /// New value (numbers, or enum names such as `aircar`).
         value: String,
+        /// Character slot for multi-character rosters (Ultima III), 1-based.
+        #[arg(long, default_value_t = 1)]
+        slot: usize,
     },
     /// Make a manual timestamped backup.
     Backup {
@@ -79,7 +85,27 @@ fn main() -> Result<()> {
         Command::Inspect { path } => {
             let path = config.resolve_save_path(&path)?;
             let bytes = std::fs::read(&path)?;
-            if bytes.len() == ultima3::ROSTER_LEN {
+            if bytes.len() == ultima3::PARTY_LEN {
+                // Ultima III active party.
+                let party = Ultima3Party::from_bytes(bytes)?;
+                println!("Party:");
+                for (label, value) in party.header_inspect() {
+                    println!("  {label:<20} {value}");
+                }
+                let order = party.party_order();
+                let members = party.party_size().min(ultima3::PARTY_MEMBER_COUNT);
+                for (member, slot) in order.iter().enumerate().take(members) {
+                    println!(
+                        "\nMember {} (roster slot {}): {}",
+                        member + 1,
+                        slot,
+                        party.summary(member)
+                    );
+                    for (label, value) in party.inspect(member) {
+                        println!("  {label:<16} {value}");
+                    }
+                }
+            } else if bytes.len() == ultima3::ROSTER_LEN {
                 // Ultima III roster: 20 character slots.
                 let roster = Ultima3Roster::from_bytes(bytes)?;
                 let occupied = roster.occupied_slots();
@@ -105,14 +131,37 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Get { path, field } => {
+        Command::Get { path, field, slot } => {
             let path = config.resolve_save_path(&path)?;
-            let save = Ultima1Save::load(&path)?;
-            match save.get_field(&field) {
-                Some(value) => println!("{value}"),
-                None => {
-                    let keys: Vec<_> = Ultima1Save::field_keys().collect();
-                    anyhow::bail!("unknown field '{field}'. Known fields: {}", keys.join(", "));
+            let bytes = std::fs::read(&path)?;
+            if bytes.len() == ultima3::PARTY_LEN {
+                let party = Ultima3Party::from_bytes(bytes)?;
+                let member = roster_index(slot)?;
+                match party.get_field(member, &field) {
+                    Some(value) => println!("{value}"),
+                    None => {
+                        let keys: Vec<_> = Ultima3Party::field_keys().collect();
+                        anyhow::bail!("unknown field '{field}'. Known fields: {}", keys.join(", "));
+                    }
+                }
+            } else if bytes.len() == ultima3::ROSTER_LEN {
+                let roster = Ultima3Roster::from_bytes(bytes)?;
+                let index = roster_index(slot)?;
+                match roster.get_field(index, &field) {
+                    Some(value) => println!("{value}"),
+                    None => {
+                        let keys: Vec<_> = Ultima3Roster::field_keys().collect();
+                        anyhow::bail!("unknown field '{field}'. Known fields: {}", keys.join(", "));
+                    }
+                }
+            } else {
+                let save = Ultima1Save::from_bytes(bytes)?;
+                match save.get_field(&field) {
+                    Some(value) => println!("{value}"),
+                    None => {
+                        let keys: Vec<_> = Ultima1Save::field_keys().collect();
+                        anyhow::bail!("unknown field '{field}'. Known fields: {}", keys.join(", "));
+                    }
                 }
             }
         }
@@ -125,17 +174,53 @@ fn main() -> Result<()> {
             };
             print!("{}", ultima1::hex_dump(&bytes, start, end));
         }
-        Command::Set { path, field, value } => {
+        Command::Set {
+            path,
+            field,
+            value,
+            slot,
+        } => {
             let path = config.resolve_save_path(&path)?;
-            let mut save = Ultima1Save::load(&path)?;
-            let old = save.get_field(&field).unwrap_or_else(|| "?".to_string());
-            save.set_field(&field, &value)?;
-            let new = save.get_field(&field).unwrap_or_else(|| "?".to_string());
-            // Back up the original on disk before overwriting it.
-            let backup_path = backup::create(&path)?;
-            save.write(&path)?;
-            println!("{field}: {old} -> {new}");
-            println!("backup: {}", backup_path.display());
+            let bytes = std::fs::read(&path)?;
+            if bytes.len() == ultima3::PARTY_LEN {
+                let mut party = Ultima3Party::from_bytes(bytes)?;
+                let member = roster_index(slot)?;
+                let old = party
+                    .get_field(member, &field)
+                    .unwrap_or_else(|| "?".to_string());
+                party.set_field(member, &field, &value)?;
+                let new = party
+                    .get_field(member, &field)
+                    .unwrap_or_else(|| "?".to_string());
+                let backup_path = backup::create(&path)?;
+                party.write(&path)?;
+                println!("slot {slot} {field}: {old} -> {new}");
+                println!("backup: {}", backup_path.display());
+            } else if bytes.len() == ultima3::ROSTER_LEN {
+                let mut roster = Ultima3Roster::from_bytes(bytes)?;
+                let index = roster_index(slot)?;
+                let old = roster
+                    .get_field(index, &field)
+                    .unwrap_or_else(|| "?".to_string());
+                roster.set_field(index, &field, &value)?;
+                let new = roster
+                    .get_field(index, &field)
+                    .unwrap_or_else(|| "?".to_string());
+                let backup_path = backup::create(&path)?;
+                roster.write(&path)?;
+                println!("slot {slot} {field}: {old} -> {new}");
+                println!("backup: {}", backup_path.display());
+            } else {
+                let mut save = Ultima1Save::from_bytes(bytes)?;
+                let old = save.get_field(&field).unwrap_or_else(|| "?".to_string());
+                save.set_field(&field, &value)?;
+                let new = save.get_field(&field).unwrap_or_else(|| "?".to_string());
+                // Back up the original on disk before overwriting it.
+                let backup_path = backup::create(&path)?;
+                save.write(&path)?;
+                println!("{field}: {old} -> {new}");
+                println!("backup: {}", backup_path.display());
+            }
         }
         Command::Backup { path } => {
             let path = config.resolve_save_path(&path)?;
@@ -165,6 +250,12 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Convert a 1-based character slot into a 0-based roster index.
+fn roster_index(slot: usize) -> Result<usize> {
+    anyhow::ensure!(slot >= 1, "slot must be >= 1");
+    Ok(slot - 1)
 }
 
 /// Parse a `START:END` byte range like `0x18:0x24` (hex or decimal), end exclusive.
