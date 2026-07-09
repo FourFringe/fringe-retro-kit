@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 use fringe_retro_core::backup;
 use fringe_retro_core::diff::diff_bytes;
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
+use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 
 use crate::config::Config;
@@ -128,6 +129,14 @@ fn main() -> Result<()> {
                         println!("  {label:<16} {value}");
                     }
                 }
+            } else if bytes.len() == ultima2::SAVE_LEN {
+                // Ultima II single-character save (reverse-engineering in progress).
+                let save = Ultima2Save::from_bytes(bytes)?;
+                println!("Ultima II (partial — reverse-engineering in progress):");
+                for (label, value, tentative) in save.inspect() {
+                    let mark = if tentative { "  (?)" } else { "" };
+                    println!("  {label:<12} {value}{mark}");
+                }
             } else {
                 // Ultima I single-character save.
                 let save = Ultima1Save::from_bytes(bytes)?;
@@ -161,6 +170,15 @@ fn main() -> Result<()> {
                     Some(value) => println!("{value}"),
                     None => {
                         let keys: Vec<_> = Ultima3Roster::field_keys().collect();
+                        anyhow::bail!("unknown field '{field}'. Known fields: {}", keys.join(", "));
+                    }
+                }
+            } else if bytes.len() == ultima2::SAVE_LEN {
+                let save = Ultima2Save::from_bytes(bytes)?;
+                match save.get_field(&field) {
+                    Some(value) => println!("{value}"),
+                    None => {
+                        let keys: Vec<_> = Ultima2Save::field_keys().collect();
                         anyhow::bail!("unknown field '{field}'. Known fields: {}", keys.join(", "));
                     }
                 }
@@ -219,6 +237,15 @@ fn main() -> Result<()> {
                 let backup_path = backup::create(&path)?;
                 roster.write(&path)?;
                 println!("slot {slot} {field}: {old} -> {new}");
+                println!("backup: {}", backup_path.display());
+            } else if bytes.len() == ultima2::SAVE_LEN {
+                let mut save = Ultima2Save::from_bytes(bytes)?;
+                let old = save.get_field(&field).unwrap_or_else(|| "?".to_string());
+                save.set_field(&field, &value)?;
+                let new = save.get_field(&field).unwrap_or_else(|| "?".to_string());
+                let backup_path = backup::create(&path)?;
+                save.write(&path)?;
+                println!("{field}: {old} -> {new}");
                 println!("backup: {}", backup_path.display());
             } else {
                 let mut save = Ultima1Save::from_bytes(bytes)?;
