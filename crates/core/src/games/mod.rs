@@ -7,3 +7,4 @@
 pub mod ultima1;
 pub mod ultima2;
 pub mod ultima3;
+pub mod wasteland;
