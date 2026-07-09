@@ -4,10 +4,10 @@
 //! begins with a 4-byte `msqN` header (`N` is the disk digit), followed by two seed bytes
 //! and a ciphertext body encrypted with a simple "rotating XOR" stream cipher.
 //!
-//! The cipher (from Klaus Reimer's `wlandsuite`): the initial key is `seed0 ^ seed1`, each
-//! decrypted byte is `cipher ^ key`, and after every byte the key advances by `0x1F`
-//! (wrapping at 256). Verified against a real `GAME1`: seed `bf f0` decrypts the first
-//! bytes to a run of `0xBB`.
+//! The cipher (from Klaus Reimer's `wlandsuite`, <https://github.com/kayahr/wlandsuite>):
+//! the initial key is `seed0 ^ seed1`, each decrypted byte is `cipher ^ key`, and after
+//! every byte the key advances by `0x1F` (wrapping at 256). Verified against a real
+//! `GAME1`: seed `bf f0` decrypts the first bytes to a run of `0xBB`.
 
 use crate::{Error, Result};
 
