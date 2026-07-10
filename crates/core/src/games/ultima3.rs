@@ -12,6 +12,7 @@
 
 use std::path::Path;
 
+use crate::schema::{self, Endian, Field, FieldKind, Variants};
 use crate::{Error, Result};
 
 /// Size of one character record, in bytes.
@@ -34,34 +35,38 @@ const NAME_LEN: usize = 0x0A;
 // --- Letter tables (ASCII byte -> label). Ultima III stores these fields as a single
 // ASCII character. ---
 
-type LetterTable = &'static [(u8, &'static str)];
+type LetterTable = Variants;
 
 const RACE: LetterTable = &[
-    (b'H', "Human"),
-    (b'E', "Elf"),
-    (b'D', "Dwarf"),
-    (b'F', "Fuzzy"),
-    (b'B', "Bobbit"),
+    (b'H' as u32, "Human"),
+    (b'E' as u32, "Elf"),
+    (b'D' as u32, "Dwarf"),
+    (b'F' as u32, "Fuzzy"),
+    (b'B' as u32, "Bobbit"),
 ];
 const CLASS: LetterTable = &[
-    (b'F', "Fighter"),
-    (b'C', "Cleric"),
-    (b'W', "Wizard"),
-    (b'T', "Thief"),
-    (b'P', "Paladin"),
-    (b'B', "Barbarian"),
-    (b'L', "Lark"),
-    (b'I', "Illusionist"),
-    (b'A', "Alchemist"),
-    (b'D', "Druid"),
-    (b'R', "Ranger"),
+    (b'F' as u32, "Fighter"),
+    (b'C' as u32, "Cleric"),
+    (b'W' as u32, "Wizard"),
+    (b'T' as u32, "Thief"),
+    (b'P' as u32, "Paladin"),
+    (b'B' as u32, "Barbarian"),
+    (b'L' as u32, "Lark"),
+    (b'I' as u32, "Illusionist"),
+    (b'A' as u32, "Alchemist"),
+    (b'D' as u32, "Druid"),
+    (b'R' as u32, "Ranger"),
 ];
-const GENDER: LetterTable = &[(b'M', "Male"), (b'F', "Female"), (b'O', "Other")];
+const GENDER: LetterTable = &[
+    (b'M' as u32, "Male"),
+    (b'F' as u32, "Female"),
+    (b'O' as u32, "Other"),
+];
 const STATUS: LetterTable = &[
-    (b'G', "Good"),
-    (b'P', "Poisoned"),
-    (b'D', "Dead"),
-    (b'A', "Ashes"),
+    (b'G' as u32, "Good"),
+    (b'P' as u32, "Poisoned"),
+    (b'D' as u32, "Dead"),
+    (b'A' as u32, "Ashes"),
 ];
 
 /// Flag names for the marks/cards bitfield at offset `0x0E`, bit 0 (LSB) first.
@@ -69,83 +74,70 @@ const MARKS_CARDS: &[&str] = &[
     "Love", "Sol", "Moon", "Death", "Force", "Fire", "Snake", "Kings",
 ];
 
-/// How to interpret a field's bytes within a character record.
-#[derive(Clone, Copy)]
-enum Kind {
-    /// Null-terminated ASCII name of the given length.
-    Name { len: usize },
-    /// Binary-coded decimal number occupying `bytes` bytes (low pair first).
-    Bcd { bytes: usize },
-    /// A single ASCII letter mapped to a named variant.
-    Letter(LetterTable),
-    /// A raw unsigned byte.
-    Byte,
-    /// A boolean stored as `0x00` (no) / `0xFF` (yes).
-    Bool,
-    /// A byte of independent flags (bit 0 = first label).
-    Bitfield(&'static [&'static str]),
+/// An Ultima III little-endian BCD field of `bytes` bytes.
+const fn bcd(bytes: usize) -> FieldKind {
+    FieldKind::Bcd {
+        bytes,
+        endian: Endian::Little,
+    }
 }
 
-/// A known field within a character record: a stable key, a display label, its byte
-/// offset (relative to the record start), and how to read it.
-struct FieldDef {
-    key: &'static str,
-    label: &'static str,
-    offset: usize,
-    kind: Kind,
+/// An Ultima III ASCII-letter enum field.
+const fn letter(variants: Variants) -> FieldKind {
+    FieldKind::Letter { variants }
 }
 
 /// Every character-record field we understand (offsets are within a 64-byte record).
 #[rustfmt::skip]
-const FIELDS: &[FieldDef] = &[
-    FieldDef { key: "name",         label: "Name",         offset: 0x00, kind: Kind::Name { len: NAME_LEN } },
-    FieldDef { key: "marks_cards",  label: "Marks/Cards",  offset: 0x0E, kind: Kind::Bitfield(MARKS_CARDS) },
-    FieldDef { key: "torches",      label: "Torches",      offset: 0x0F, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "in_party",     label: "In Party",     offset: 0x10, kind: Kind::Bool },
-    FieldDef { key: "status",       label: "Status",       offset: 0x11, kind: Kind::Letter(STATUS) },
-    FieldDef { key: "strength",     label: "Strength",     offset: 0x12, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "dexterity",    label: "Dexterity",    offset: 0x13, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "intelligence", label: "Intelligence", offset: 0x14, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "wisdom",       label: "Wisdom",       offset: 0x15, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "race",         label: "Race",         offset: 0x16, kind: Kind::Letter(RACE) },
-    FieldDef { key: "class",        label: "Class",        offset: 0x17, kind: Kind::Letter(CLASS) },
-    FieldDef { key: "gender",       label: "Gender",       offset: 0x18, kind: Kind::Letter(GENDER) },
-    FieldDef { key: "magic",        label: "Magic Points", offset: 0x19, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "hits",         label: "Hit Points",   offset: 0x1A, kind: Kind::Bcd { bytes: 2 } },
-    FieldDef { key: "max_hits",     label: "Max Hits",     offset: 0x1C, kind: Kind::Bcd { bytes: 2 } },
-    FieldDef { key: "experience",   label: "Experience",   offset: 0x1E, kind: Kind::Bcd { bytes: 2 } },
-    FieldDef { key: "food_frac",    label: "Food (frac)",  offset: 0x20, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "food",         label: "Food",         offset: 0x21, kind: Kind::Bcd { bytes: 2 } },
-    FieldDef { key: "gold",         label: "Gold",         offset: 0x23, kind: Kind::Bcd { bytes: 2 } },
-    FieldDef { key: "gems",         label: "Gems",         offset: 0x25, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "keys",         label: "Keys",         offset: 0x26, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "powders",      label: "Powders",      offset: 0x27, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "worn_armor",   label: "Worn Armor",   offset: 0x28, kind: Kind::Byte },
+const FIELDS: &[Field] = &[
+    Field::new("name",         "Name",         0x00, FieldKind::Name { len: NAME_LEN }),
+    Field::new("marks_cards",  "Marks/Cards",  0x0E, FieldKind::Bitfield { flags: MARKS_CARDS }),
+    Field::new("torches",      "Torches",      0x0F, bcd(1)),
+    Field::new("in_party",     "In Party",     0x10, FieldKind::Bool),
+    Field::new("status",       "Status",       0x11, letter(STATUS)),
+    Field::new("strength",     "Strength",     0x12, bcd(1)),
+    Field::new("dexterity",    "Dexterity",    0x13, bcd(1)),
+    Field::new("intelligence", "Intelligence", 0x14, bcd(1)),
+    Field::new("wisdom",       "Wisdom",       0x15, bcd(1)),
+    Field::new("race",         "Race",         0x16, letter(RACE)),
+    Field::new("class",        "Class",        0x17, letter(CLASS)),
+    Field::new("gender",       "Gender",       0x18, letter(GENDER)),
+    Field::new("magic",        "Magic Points", 0x19, bcd(1)),
+    Field::new("hits",         "Hit Points",   0x1A, bcd(2)),
+    Field::new("max_hits",     "Max Hits",     0x1C, bcd(2)),
+    Field::new("experience",   "Experience",   0x1E, bcd(2)),
+    Field::new("food_frac",    "Food (frac)",  0x20, bcd(1)),
+    Field::new("food",         "Food",         0x21, bcd(2)),
+    Field::new("gold",         "Gold",         0x23, bcd(2)),
+    Field::new("gems",         "Gems",         0x25, bcd(1)),
+    Field::new("keys",         "Keys",         0x26, bcd(1)),
+    Field::new("powders",      "Powders",      0x27, bcd(1)),
+    Field::new("worn_armor",   "Worn Armor",   0x28, FieldKind::Byte),
     // Armor owned (BCD counts, letters B..H in the format spec).
-    FieldDef { key: "armor_cloth",        label: "Armor: Cloth",     offset: 0x29, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "armor_leather",      label: "Armor: Leather",   offset: 0x2A, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "armor_chain",        label: "Armor: Chain",     offset: 0x2B, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "armor_plate",        label: "Armor: Plate",     offset: 0x2C, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "armor_chain_plus2",  label: "Armor: +2 Chain",  offset: 0x2D, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "armor_plate_plus2",  label: "Armor: +2 Plate",  offset: 0x2E, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "armor_exotic",       label: "Armor: Exotic",    offset: 0x2F, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon",       label: "Ready Weapon", offset: 0x30, kind: Kind::Byte },
+    Field::new("armor_cloth",        "Armor: Cloth",     0x29, bcd(1)),
+    Field::new("armor_leather",      "Armor: Leather",   0x2A, bcd(1)),
+    Field::new("armor_chain",        "Armor: Chain",     0x2B, bcd(1)),
+    Field::new("armor_plate",        "Armor: Plate",     0x2C, bcd(1)),
+    Field::new("armor_chain_plus2",  "Armor: +2 Chain",  0x2D, bcd(1)),
+    Field::new("armor_plate_plus2",  "Armor: +2 Plate",  0x2E, bcd(1)),
+    Field::new("armor_exotic",       "Armor: Exotic",    0x2F, bcd(1)),
+    Field::new("weapon",       "Ready Weapon", 0x30, FieldKind::Byte),
     // Weapons owned (BCD counts, letters B..P in the format spec).
-    FieldDef { key: "weapon_dagger",      label: "Weapon: Dagger",   offset: 0x31, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_mace",        label: "Weapon: Mace",     offset: 0x32, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_sling",       label: "Weapon: Sling",    offset: 0x33, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_axe",         label: "Weapon: Axe",      offset: 0x34, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_bow",         label: "Weapon: Bow",      offset: 0x35, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_sword",       label: "Weapon: Sword",    offset: 0x36, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_2h_sword",    label: "Weapon: 2H Sword", offset: 0x37, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_axe_plus2",   label: "Weapon: +2 Axe",   offset: 0x38, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_bow_plus2",   label: "Weapon: +2 Bow",   offset: 0x39, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_sword_plus2", label: "Weapon: +2 Sword", offset: 0x3A, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_gloves",      label: "Weapon: Gloves",   offset: 0x3B, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_axe_plus4",   label: "Weapon: +4 Axe",   offset: 0x3C, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_bow_plus4",   label: "Weapon: +4 Bow",   offset: 0x3D, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_sword_plus4", label: "Weapon: +4 Sword", offset: 0x3E, kind: Kind::Bcd { bytes: 1 } },
-    FieldDef { key: "weapon_exotic",      label: "Weapon: Exotic",   offset: 0x3F, kind: Kind::Bcd { bytes: 1 } },
+    Field::new("weapon_dagger",      "Weapon: Dagger",   0x31, bcd(1)),
+    Field::new("weapon_mace",        "Weapon: Mace",     0x32, bcd(1)),
+    Field::new("weapon_sling",       "Weapon: Sling",    0x33, bcd(1)),
+    Field::new("weapon_axe",         "Weapon: Axe",      0x34, bcd(1)),
+    Field::new("weapon_bow",         "Weapon: Bow",      0x35, bcd(1)),
+    Field::new("weapon_sword",       "Weapon: Sword",    0x36, bcd(1)),
+    Field::new("weapon_2h_sword",    "Weapon: 2H Sword", 0x37, bcd(1)),
+    Field::new("weapon_axe_plus2",   "Weapon: +2 Axe",   0x38, bcd(1)),
+    Field::new("weapon_bow_plus2",   "Weapon: +2 Bow",   0x39, bcd(1)),
+    Field::new("weapon_sword_plus2", "Weapon: +2 Sword", 0x3A, bcd(1)),
+    Field::new("weapon_gloves",      "Weapon: Gloves",   0x3B, bcd(1)),
+    Field::new("weapon_axe_plus4",   "Weapon: +4 Axe",   0x3C, bcd(1)),
+    Field::new("weapon_bow_plus4",   "Weapon: +4 Bow",   0x3D, bcd(1)),
+    Field::new("weapon_sword_plus4", "Weapon: +4 Sword", 0x3E, bcd(1)),
+    Field::new("weapon_exotic",      "Weapon: Exotic",   0x3F, bcd(1)),
 ];
 
 // --- Shared character-record helpers, parameterized by the record's base offset. ---
@@ -158,14 +150,14 @@ fn record_is_occupied(buf: &[u8], base: usize) -> bool {
 /// Format a single field of the record at `base`, or `None` for an unknown key.
 fn record_get(buf: &[u8], base: usize, key: &str) -> Option<String> {
     let field = FIELDS.iter().find(|f| f.key == key)?;
-    Some(format_field(buf, base, field))
+    Some(schema::read_field(buf, base, field))
 }
 
 /// All known fields of the record at `base` as `(label, value)` pairs.
 fn record_inspect(buf: &[u8], base: usize) -> Vec<(&'static str, String)> {
     FIELDS
         .iter()
-        .map(|f| (f.label, format_field(buf, base, f)))
+        .map(|f| (f.label, schema::read_field(buf, base, f)))
         .collect()
 }
 
@@ -190,109 +182,7 @@ fn record_set(buf: &mut [u8], base: usize, key: &str, value: &str) -> Result<()>
         .iter()
         .find(|f| f.key == key)
         .ok_or_else(|| Error::Format(format!("unknown field '{key}'")))?;
-    let at = base + field.offset;
-    match field.kind {
-        Kind::Name { len } => set_name(buf, base, len, value)?,
-        Kind::Bcd { bytes } => {
-            let max = 10u32.pow(2 * bytes as u32) - 1;
-            let n: u32 = value.parse().map_err(|_| {
-                Error::Format(format!("{} must be a number (got '{value}')", field.label))
-            })?;
-            if n > max {
-                return Err(Error::Format(format!(
-                    "{} must be between 0 and {max} (got {n})",
-                    field.label
-                )));
-            }
-            write_bcd(buf, at, bytes, n);
-        }
-        Kind::Letter(table) => {
-            let letter = parse_letter(table, value).ok_or_else(|| {
-                let options: Vec<_> = table.iter().map(|(_, name)| *name).collect();
-                Error::Format(format!(
-                    "'{value}' is not a valid {}. Options: {}",
-                    field.label,
-                    options.join(", ")
-                ))
-            })?;
-            buf[at] = letter;
-        }
-        Kind::Byte => {
-            let n: u8 = value.parse().map_err(|_| {
-                Error::Format(format!("{} must be 0..=255 (got '{value}')", field.label))
-            })?;
-            buf[at] = n;
-        }
-        Kind::Bool => {
-            buf[at] = if parse_bool(value)? { 0xFF } else { 0x00 };
-        }
-        Kind::Bitfield(_) => {
-            let n: u8 = value.parse().map_err(|_| {
-                Error::Format(format!(
-                    "{} takes a raw 0..=255 value for now (got '{value}')",
-                    field.label
-                ))
-            })?;
-            buf[at] = n;
-        }
-    }
-    Ok(())
-}
-
-fn set_name(buf: &mut [u8], base: usize, len: usize, name: &str) -> Result<()> {
-    if !name.is_ascii() {
-        return Err(Error::Format("name must be ASCII".into()));
-    }
-    let max = len - 1; // reserve one byte for the null terminator
-    if name.len() > max {
-        return Err(Error::Format(format!(
-            "name must be at most {max} characters (got {})",
-            name.len()
-        )));
-    }
-    buf[base..base + len].fill(0);
-    buf[base..base + name.len()].copy_from_slice(name.as_bytes());
-    Ok(())
-}
-
-fn format_field(buf: &[u8], base: usize, field: &FieldDef) -> String {
-    let at = base + field.offset;
-    match field.kind {
-        Kind::Name { len } => {
-            let raw = &buf[at..at + len];
-            let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-            String::from_utf8_lossy(&raw[..end]).into_owned()
-        }
-        Kind::Bcd { bytes } => read_bcd(buf, at, bytes).to_string(),
-        Kind::Letter(table) => {
-            let b = buf[at];
-            match table.iter().find(|(letter, _)| *letter == b) {
-                Some((_, name)) => (*name).to_string(),
-                None if b.is_ascii_graphic() => format!("Unknown ('{}')", b as char),
-                None => format!("Unknown (0x{b:02X})"),
-            }
-        }
-        Kind::Byte => buf[at].to_string(),
-        Kind::Bool => match buf[at] {
-            0x00 => "no".to_string(),
-            0xFF => "yes".to_string(),
-            other => format!("0x{other:02X}"),
-        },
-        Kind::Bitfield(flags) => {
-            let b = buf[at];
-            let set: Vec<_> = flags
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| b & (1 << i) != 0)
-                .map(|(_, name)| *name)
-                .collect();
-            if set.is_empty() {
-                "(none)".to_string()
-            } else {
-                set.join(", ")
-            }
-        }
-    }
+    schema::write_field(buf, base, field, value)
 }
 
 /// The keys of all known character-record fields (for help and error messages).
@@ -435,7 +325,22 @@ impl Ultima3Party {
             .join(", ");
         vec![
             ("Transport", transport),
-            ("Moves", read_bcd(&self.bytes, 0x03, 4).to_string()),
+            (
+                "Moves",
+                schema::read_field(
+                    &self.bytes,
+                    0,
+                    &Field::new(
+                        "moves",
+                        "Moves",
+                        0x03,
+                        FieldKind::Bcd {
+                            bytes: 4,
+                            endian: Endian::Little,
+                        },
+                    ),
+                ),
+            ),
             ("Party Size", self.bytes[0x07].to_string()),
             (
                 "Position",
@@ -487,56 +392,6 @@ impl Ultima3Party {
 
     fn member_base(&self, member: usize) -> usize {
         PARTY_HEADER_LEN + member * RECORD_LEN
-    }
-}
-
-/// Read a little-endian BCD number of `n` bytes (each byte holds two decimal digits).
-fn read_bcd(buf: &[u8], offset: usize, n: usize) -> u32 {
-    let mut value = 0u32;
-    let mut place = 1u32;
-    for i in 0..n {
-        let b = buf[offset + i];
-        let digits = (b >> 4) as u32 * 10 + (b & 0x0F) as u32;
-        value += digits * place;
-        place *= 100;
-    }
-    value
-}
-
-/// Write a decimal `value` as a little-endian BCD number of `n` bytes.
-fn write_bcd(buf: &mut [u8], offset: usize, n: usize, mut value: u32) {
-    for i in 0..n {
-        let pair = (value % 100) as u8;
-        buf[offset + i] = ((pair / 10) << 4) | (pair % 10);
-        value /= 100;
-    }
-}
-
-/// Resolve a letter-enum input (a full name or a single letter, case-insensitive) to its
-/// stored ASCII byte.
-fn parse_letter(table: LetterTable, value: &str) -> Option<u8> {
-    let value = value.trim();
-    if let Some((letter, _)) = table
-        .iter()
-        .find(|(_, name)| name.eq_ignore_ascii_case(value))
-    {
-        return Some(*letter);
-    }
-    if value.len() == 1 {
-        let c = value.as_bytes()[0].to_ascii_uppercase();
-        if table.iter().any(|(letter, _)| *letter == c) {
-            return Some(c);
-        }
-    }
-    None
-}
-
-/// Parse a boolean from common spellings.
-fn parse_bool(value: &str) -> Result<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "yes" | "y" | "true" | "1" | "on" => Ok(true),
-        "no" | "n" | "false" | "0" | "off" => Ok(false),
-        other => Err(Error::Format(format!("expected yes/no (got '{other}')"))),
     }
 }
 

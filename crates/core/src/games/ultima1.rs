@@ -10,6 +10,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::schema::{self, Endian, Field, FieldKind, Variants};
 use crate::{Error, Result};
 
 /// Total size of an Ultima I save file, in bytes (`0x334`).
@@ -21,7 +22,7 @@ const NAME_LEN: usize = 15;
 // --- Enum tables (value -> label). Data-driven so `inspect`, `get`, and `set` all share
 // one source of truth. Values are decimal (the wiki uses hex). ---
 
-type EnumTable = &'static [(u16, &'static str)];
+type EnumTable = Variants;
 
 const RACE: EnumTable = &[(0, "Human"), (1, "Elf"), (2, "Dwarf"), (3, "Bobbit")];
 const CLASS: EnumTable = &[(0, "Fighter"), (1, "Cleric"), (2, "Wizard"), (3, "Thief")];
@@ -74,25 +75,22 @@ const TRANSPORT: EnumTable = &[
     (5, "Aircar"),
 ];
 
-/// How to interpret a field's bytes.
-#[derive(Clone, Copy)]
-enum Kind {
-    /// The null-terminated character name at the start of the file.
-    Name,
-    /// An unsigned little-endian 16-bit integer with an inclusive maximum value.
-    U16 { max: u16 },
-    /// A little-endian 16-bit value with named variants.
-    Enum(EnumTable),
+/// An Ultima I integer field: a little-endian `u16` with an inclusive edit maximum.
+const fn u16le(max: u32) -> FieldKind {
+    FieldKind::Int {
+        bytes: 2,
+        endian: Endian::Little,
+        max,
+    }
 }
 
-/// A known field: a stable key, a display label, the section it belongs to, its byte
-/// offset, and how to read it.
-struct FieldDef {
-    key: &'static str,
-    label: &'static str,
-    section: &'static str,
-    offset: usize,
-    kind: Kind,
+/// An Ultima I enum field: a little-endian `u16` mapped to named variants.
+const fn enum16(variants: Variants) -> FieldKind {
+    FieldKind::Enum {
+        bytes: 2,
+        endian: Endian::Little,
+        variants,
+    }
 }
 
 // Display sections, used to group `inspect` output.
@@ -108,92 +106,92 @@ const S_SPELLS: &str = "Inventory: Spells";
 const S_TRANSPORTS: &str = "Inventory: Transports";
 
 /// Every field we understand, grouped by section. This table drives `inspect`, `get`,
-/// and `set`. Order here is for display; each field carries its own byte offset, so the
-/// array order is independent of the on-disk layout.
+/// and `set` through the generic [`schema`] engine. Order here is for display; each field
+/// carries its own byte offset, so the array order is independent of the on-disk layout.
 #[rustfmt::skip]
-const FIELDS: &[FieldDef] = &[
+const FIELDS: &[Field] = &[
     // Character
-    FieldDef { key: "name",  label: "Name",  section: S_CHARACTER, offset: 0x00, kind: Kind::Name },
-    FieldDef { key: "race",  label: "Race",  section: S_CHARACTER, offset: 0x10, kind: Kind::Enum(RACE) },
-    FieldDef { key: "class", label: "Class", section: S_CHARACTER, offset: 0x12, kind: Kind::Enum(CLASS) },
-    FieldDef { key: "sex",   label: "Sex",   section: S_CHARACTER, offset: 0x14, kind: Kind::Enum(SEX) },
+    Field::new("name",  "Name",  0x00, FieldKind::Name { len: NAME_LEN }).in_section(S_CHARACTER),
+    Field::new("race",  "Race",  0x10, enum16(RACE)).in_section(S_CHARACTER),
+    Field::new("class", "Class", 0x12, enum16(CLASS)).in_section(S_CHARACTER),
+    Field::new("sex",   "Sex",   0x14, enum16(SEX)).in_section(S_CHARACTER),
 
     // Attributes
-    FieldDef { key: "strength",     label: "Strength",     section: S_ATTRIBUTES, offset: 0x18, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "agility",      label: "Agility",      section: S_ATTRIBUTES, offset: 0x1A, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "stamina",      label: "Stamina",      section: S_ATTRIBUTES, offset: 0x1C, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "charisma",     label: "Charisma",     section: S_ATTRIBUTES, offset: 0x1E, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "wisdom",       label: "Wisdom",       section: S_ATTRIBUTES, offset: 0x20, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "intelligence", label: "Intelligence", section: S_ATTRIBUTES, offset: 0x22, kind: Kind::U16 { max: 9999 } },
+    Field::new("strength",     "Strength",     0x18, u16le(9999)).in_section(S_ATTRIBUTES),
+    Field::new("agility",      "Agility",      0x1A, u16le(9999)).in_section(S_ATTRIBUTES),
+    Field::new("stamina",      "Stamina",      0x1C, u16le(9999)).in_section(S_ATTRIBUTES),
+    Field::new("charisma",     "Charisma",     0x1E, u16le(9999)).in_section(S_ATTRIBUTES),
+    Field::new("wisdom",       "Wisdom",       0x20, u16le(9999)).in_section(S_ATTRIBUTES),
+    Field::new("intelligence", "Intelligence", 0x22, u16le(9999)).in_section(S_ATTRIBUTES),
 
     // Status
-    FieldDef { key: "hits",       label: "Hits",       section: S_STATUS, offset: 0x16, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "gold",       label: "Gold",       section: S_STATUS, offset: 0x24, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "experience", label: "Experience", section: S_STATUS, offset: 0x26, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "food",       label: "Food",       section: S_STATUS, offset: 0x28, kind: Kind::U16 { max: 9999 } },
+    Field::new("hits",       "Hits",       0x16, u16le(9999)).in_section(S_STATUS),
+    Field::new("gold",       "Gold",       0x24, u16le(9999)).in_section(S_STATUS),
+    Field::new("experience", "Experience", 0x26, u16le(9999)).in_section(S_STATUS),
+    Field::new("food",       "Food",       0x28, u16le(9999)).in_section(S_STATUS),
 
     // Equipped
-    FieldDef { key: "weapon",    label: "Ready Weapon", section: S_EQUIPPED, offset: 0x2A, kind: Kind::Enum(WEAPON) },
-    FieldDef { key: "spell",     label: "Ready Spell",  section: S_EQUIPPED, offset: 0x2C, kind: Kind::Enum(SPELL) },
-    FieldDef { key: "armour",    label: "Ready Armour", section: S_EQUIPPED, offset: 0x2E, kind: Kind::Enum(ARMOUR) },
-    FieldDef { key: "transport", label: "Transport",    section: S_EQUIPPED, offset: 0x30, kind: Kind::Enum(TRANSPORT) },
+    Field::new("weapon",    "Ready Weapon", 0x2A, enum16(WEAPON)).in_section(S_EQUIPPED),
+    Field::new("spell",     "Ready Spell",  0x2C, enum16(SPELL)).in_section(S_EQUIPPED),
+    Field::new("armour",    "Ready Armour", 0x2E, enum16(ARMOUR)).in_section(S_EQUIPPED),
+    Field::new("transport", "Transport",    0x30, enum16(TRANSPORT)).in_section(S_EQUIPPED),
 
     // Location
-    FieldDef { key: "x",             label: "Map X",         section: S_LOCATION, offset: 0x34, kind: Kind::U16 { max: u16::MAX } },
-    FieldDef { key: "y",             label: "Map Y",         section: S_LOCATION, offset: 0x36, kind: Kind::U16 { max: u16::MAX } },
-    FieldDef { key: "last_signpost", label: "Last Signpost", section: S_LOCATION, offset: 0xA8, kind: Kind::U16 { max: u16::MAX } },
-    FieldDef { key: "steps",         label: "Steps",         section: S_LOCATION, offset: 0xAC, kind: Kind::U16 { max: u16::MAX } },
+    Field::new("x",             "Map X",         0x34, u16le(u16::MAX as u32)).in_section(S_LOCATION),
+    Field::new("y",             "Map Y",         0x36, u16le(u16::MAX as u32)).in_section(S_LOCATION),
+    Field::new("last_signpost", "Last Signpost", 0xA8, u16le(u16::MAX as u32)).in_section(S_LOCATION),
+    Field::new("steps",         "Steps",         0xAC, u16le(u16::MAX as u32)).in_section(S_LOCATION),
 
     // Inventory: Gems
-    FieldDef { key: "gem_red",   label: "Red",   section: S_GEMS, offset: 0x4C, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "gem_green", label: "Green", section: S_GEMS, offset: 0x4E, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "gem_blue",  label: "Blue",  section: S_GEMS, offset: 0x50, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "gem_white", label: "White", section: S_GEMS, offset: 0x52, kind: Kind::U16 { max: 9999 } },
+    Field::new("gem_red",   "Red",   0x4C, u16le(9999)).in_section(S_GEMS),
+    Field::new("gem_green", "Green", 0x4E, u16le(9999)).in_section(S_GEMS),
+    Field::new("gem_blue",  "Blue",  0x50, u16le(9999)).in_section(S_GEMS),
+    Field::new("gem_white", "White", 0x52, u16le(9999)).in_section(S_GEMS),
 
     // Inventory: Armour
-    FieldDef { key: "armour_leather",      label: "Leather",      section: S_ARMOUR, offset: 0x56, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "armour_chain_mail",   label: "Chain Mail",   section: S_ARMOUR, offset: 0x58, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "armour_plate_mail",   label: "Plate Mail",   section: S_ARMOUR, offset: 0x5A, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "armour_vacuum_suit",  label: "Vacuum Suit",  section: S_ARMOUR, offset: 0x5C, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "armour_reflect_suit", label: "Reflect Suit", section: S_ARMOUR, offset: 0x5E, kind: Kind::U16 { max: 9999 } },
+    Field::new("armour_leather",      "Leather",      0x56, u16le(9999)).in_section(S_ARMOUR),
+    Field::new("armour_chain_mail",   "Chain Mail",   0x58, u16le(9999)).in_section(S_ARMOUR),
+    Field::new("armour_plate_mail",   "Plate Mail",   0x5A, u16le(9999)).in_section(S_ARMOUR),
+    Field::new("armour_vacuum_suit",  "Vacuum Suit",  0x5C, u16le(9999)).in_section(S_ARMOUR),
+    Field::new("armour_reflect_suit", "Reflect Suit", 0x5E, u16le(9999)).in_section(S_ARMOUR),
 
     // Inventory: Weapons
-    FieldDef { key: "weapon_dagger",      label: "Dagger",        section: S_WEAPONS, offset: 0x62, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_mace",        label: "Mace",          section: S_WEAPONS, offset: 0x64, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_axe",         label: "Axe",           section: S_WEAPONS, offset: 0x66, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_rope_spikes", label: "Rope & Spikes", section: S_WEAPONS, offset: 0x68, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_sword",       label: "Sword",         section: S_WEAPONS, offset: 0x6A, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_great_sword", label: "Great Sword",   section: S_WEAPONS, offset: 0x6C, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_bow",         label: "Bow & Arrows",  section: S_WEAPONS, offset: 0x6E, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_amulet",      label: "Amulet",        section: S_WEAPONS, offset: 0x70, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_wand",        label: "Wand",          section: S_WEAPONS, offset: 0x72, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_staff",       label: "Staff",         section: S_WEAPONS, offset: 0x74, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_triangle",    label: "Triangle",      section: S_WEAPONS, offset: 0x76, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_pistol",      label: "Pistol",        section: S_WEAPONS, offset: 0x78, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_light_sword", label: "Light Sword",   section: S_WEAPONS, offset: 0x7A, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_phazor",      label: "Phazor",        section: S_WEAPONS, offset: 0x7C, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "weapon_blaster",     label: "Blaster",       section: S_WEAPONS, offset: 0x7E, kind: Kind::U16 { max: 9999 } },
+    Field::new("weapon_dagger",      "Dagger",        0x62, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_mace",        "Mace",          0x64, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_axe",         "Axe",           0x66, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_rope_spikes", "Rope & Spikes", 0x68, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_sword",       "Sword",         0x6A, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_great_sword", "Great Sword",   0x6C, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_bow",         "Bow & Arrows",  0x6E, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_amulet",      "Amulet",        0x70, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_wand",        "Wand",          0x72, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_staff",       "Staff",         0x74, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_triangle",    "Triangle",      0x76, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_pistol",      "Pistol",        0x78, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_light_sword", "Light Sword",   0x7A, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_phazor",      "Phazor",        0x7C, u16le(9999)).in_section(S_WEAPONS),
+    Field::new("weapon_blaster",     "Blaster",       0x7E, u16le(9999)).in_section(S_WEAPONS),
 
     // Inventory: Spells
-    FieldDef { key: "spell_open",          label: "Open",          section: S_SPELLS, offset: 0x82, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_unlock",        label: "Unlock",        section: S_SPELLS, offset: 0x84, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_magic_missile", label: "Magic Missile", section: S_SPELLS, offset: 0x86, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_steal",         label: "Steal",         section: S_SPELLS, offset: 0x88, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_ladder_down",   label: "Ladder Down",   section: S_SPELLS, offset: 0x8A, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_ladder_up",     label: "Ladder Up",     section: S_SPELLS, offset: 0x8C, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_blink",         label: "Blink",         section: S_SPELLS, offset: 0x8E, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_create",        label: "Create",        section: S_SPELLS, offset: 0x90, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_destroy",       label: "Destroy",       section: S_SPELLS, offset: 0x92, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "spell_kill",          label: "Kill",          section: S_SPELLS, offset: 0x94, kind: Kind::U16 { max: 9999 } },
+    Field::new("spell_open",          "Open",          0x82, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_unlock",        "Unlock",        0x84, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_magic_missile", "Magic Missile", 0x86, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_steal",         "Steal",         0x88, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_ladder_down",   "Ladder Down",   0x8A, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_ladder_up",     "Ladder Up",     0x8C, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_blink",         "Blink",         0x8E, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_create",        "Create",        0x90, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_destroy",       "Destroy",       0x92, u16le(9999)).in_section(S_SPELLS),
+    Field::new("spell_kill",          "Kill",          0x94, u16le(9999)).in_section(S_SPELLS),
 
     // Inventory: Transports
-    FieldDef { key: "transport_horse",        label: "Horse",        section: S_TRANSPORTS, offset: 0x98, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "transport_cart",         label: "Cart",         section: S_TRANSPORTS, offset: 0x9A, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "transport_raft",         label: "Raft",         section: S_TRANSPORTS, offset: 0x9C, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "transport_frigate",      label: "Frigate",      section: S_TRANSPORTS, offset: 0x9E, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "transport_aircar",       label: "Aircar",       section: S_TRANSPORTS, offset: 0xA0, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "transport_shuttle",      label: "Shuttle",      section: S_TRANSPORTS, offset: 0xA2, kind: Kind::U16 { max: 9999 } },
-    FieldDef { key: "transport_time_machine", label: "Time Machine", section: S_TRANSPORTS, offset: 0xA4, kind: Kind::U16 { max: 9999 } },
+    Field::new("transport_horse",        "Horse",        0x98, u16le(9999)).in_section(S_TRANSPORTS),
+    Field::new("transport_cart",         "Cart",         0x9A, u16le(9999)).in_section(S_TRANSPORTS),
+    Field::new("transport_raft",         "Raft",         0x9C, u16le(9999)).in_section(S_TRANSPORTS),
+    Field::new("transport_frigate",      "Frigate",      0x9E, u16le(9999)).in_section(S_TRANSPORTS),
+    Field::new("transport_aircar",       "Aircar",       0xA0, u16le(9999)).in_section(S_TRANSPORTS),
+    Field::new("transport_shuttle",      "Shuttle",      0xA2, u16le(9999)).in_section(S_TRANSPORTS),
+    Field::new("transport_time_machine", "Time Machine", 0xA4, u16le(9999)).in_section(S_TRANSPORTS),
 ];
 
 /// A parsed Ultima I save file.
@@ -239,14 +237,20 @@ impl Ultima1Save {
     /// Returns `None` if the key is not a known field.
     pub fn get_field(&self, key: &str) -> Option<String> {
         let field = FIELDS.iter().find(|f| f.key == key)?;
-        Some(self.format_field(field))
+        Some(schema::read_field(&self.bytes, 0, field))
     }
 
     /// All known fields as `(section, label, value)` triples, in display order.
     pub fn inspect(&self) -> Vec<(&'static str, &'static str, String)> {
         FIELDS
             .iter()
-            .map(|f| (f.section, f.label, self.format_field(f)))
+            .map(|f| {
+                (
+                    f.section.unwrap_or_default(),
+                    f.label,
+                    schema::read_field(&self.bytes, 0, f),
+                )
+            })
             .collect()
     }
 
@@ -265,91 +269,13 @@ impl Ultima1Save {
             .iter()
             .find(|f| f.key == key)
             .ok_or_else(|| Error::Format(format!("unknown field '{key}'")))?;
-        match field.kind {
-            Kind::Name => self.set_name(value)?,
-            Kind::U16 { max } => {
-                let n: u16 = value.parse().map_err(|_| {
-                    Error::Format(format!("{} must be a number (got '{value}')", field.label))
-                })?;
-                if n > max {
-                    return Err(Error::Format(format!(
-                        "{} must be between 0 and {max} (got {n})",
-                        field.label
-                    )));
-                }
-                self.write_u16(field.offset, n);
-            }
-            Kind::Enum(table) => {
-                let resolved = parse_enum(table, value).ok_or_else(|| {
-                    let options: Vec<_> = table.iter().map(|(_, label)| *label).collect();
-                    Error::Format(format!(
-                        "'{value}' is not a valid {}. Options: {}",
-                        field.label,
-                        options.join(", ")
-                    ))
-                })?;
-                self.write_u16(field.offset, resolved);
-            }
-        }
-        Ok(())
+        schema::write_field(&mut self.bytes, 0, field, value)
     }
 
     /// Write this save to `path` atomically. Callers are responsible for backups.
     pub fn write(&self, path: impl AsRef<Path>) -> Result<()> {
         crate::save::atomic_write(path, &self.bytes)
     }
-
-    fn write_u16(&mut self, offset: usize, value: u16) {
-        self.bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
-    }
-
-    fn set_name(&mut self, name: &str) -> Result<()> {
-        if !name.is_ascii() {
-            return Err(Error::Format("name must be ASCII".into()));
-        }
-        let max = NAME_LEN - 1; // reserve one byte for the null terminator
-        if name.len() > max {
-            return Err(Error::Format(format!(
-                "name must be at most {max} characters (got {})",
-                name.len()
-            )));
-        }
-        // Clear the whole field, then write the name; the remainder stays null-padded.
-        self.bytes[0..NAME_LEN].fill(0);
-        self.bytes[0..name.len()].copy_from_slice(name.as_bytes());
-        Ok(())
-    }
-
-    fn read_u16(&self, offset: usize) -> u16 {
-        u16::from_le_bytes([self.bytes[offset], self.bytes[offset + 1]])
-    }
-
-    fn format_field(&self, field: &FieldDef) -> String {
-        match field.kind {
-            Kind::Name => self.name(),
-            Kind::U16 { .. } => self.read_u16(field.offset).to_string(),
-            Kind::Enum(table) => {
-                let value = self.read_u16(field.offset);
-                match table.iter().find(|(v, _)| *v == value) {
-                    Some((_, label)) => (*label).to_string(),
-                    None => format!("Unknown ({value})"),
-                }
-            }
-        }
-    }
-}
-
-/// Resolve an enum input (a numeric value or a case-insensitive variant name) to its
-/// stored `u16`, or `None` if it matches no variant.
-fn parse_enum(table: EnumTable, value: &str) -> Option<u16> {
-    let value = value.trim();
-    if let Ok(n) = value.parse::<u16>() {
-        return table.iter().find(|(v, _)| *v == n).map(|(v, _)| *v);
-    }
-    table
-        .iter()
-        .find(|(_, label)| label.eq_ignore_ascii_case(value))
-        .map(|(v, _)| *v)
 }
 
 /// Render an `xxd`-style hex dump of `bytes[start..end]` (offset, hex, ASCII).

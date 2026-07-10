@@ -10,6 +10,7 @@
 
 use std::path::Path;
 
+use crate::schema::{self, Endian, Field, FieldKind, Variants};
 use crate::{Error, Result};
 
 /// Total size of an Ultima II `PLAYER` save file, in bytes (`0x180`).
@@ -18,10 +19,10 @@ pub const SAVE_LEN: usize = 0x180;
 /// Length of the name field (bytes `0x00..0x10`), including the null terminator.
 const NAME_LEN: usize = 0x10;
 
-type LetterTable = &'static [(u8, &'static str)];
-type EnumTable = &'static [(u8, &'static str)];
+type LetterTable = Variants;
+type EnumTable = Variants;
 
-const SEX: LetterTable = &[(b'M', "Male"), (b'F', "Female")];
+const SEX: LetterTable = &[(b'M' as u32, "Male"), (b'F' as u32, "Female")];
 
 // Class and race are stored as small numeric indices (not ASCII letters as in Ultima III).
 // Order confirmed against the game manual and the ENKII/FRINGE snapshots.
@@ -52,77 +53,74 @@ const ARMOR: EnumTable = &[
     (6, "Power"),
 ];
 
-/// How to interpret a field's bytes.
-#[derive(Clone, Copy)]
-enum Kind {
-    /// Null-terminated ASCII name of the given length.
-    Name { len: usize },
-    /// A single ASCII letter mapped to a named variant.
-    Letter(LetterTable),
-    /// A single byte holding a numeric index mapped to a named variant.
-    Enum(EnumTable),
-    /// A raw single byte interpreted as a plain (binary) 0..=255 number.
-    Byte,
-    /// A big-endian binary-coded decimal number occupying `bytes` bytes.
-    Bcd { bytes: usize },
+/// An Ultima II big-endian BCD field of `bytes` bytes.
+const fn bcd(bytes: usize) -> FieldKind {
+    FieldKind::Bcd {
+        bytes,
+        endian: Endian::Big,
+    }
 }
 
-/// A known field: a stable key, a display label, its byte offset, and how to read it.
-struct FieldDef {
-    key: &'static str,
-    label: &'static str,
-    offset: usize,
-    kind: Kind,
-    /// Whether this field is still tentative (mapped but not yet confirmed in-game).
-    tentative: bool,
+/// An Ultima II single-byte numeric enum field.
+const fn enum1(variants: Variants) -> FieldKind {
+    FieldKind::Enum {
+        bytes: 1,
+        endian: Endian::Little,
+        variants,
+    }
+}
+
+/// An Ultima II ASCII-letter enum field.
+const fn letter(variants: Variants) -> FieldKind {
+    FieldKind::Letter { variants }
 }
 
 /// Fields mapped so far. Confirmed against a snapshot of HP 14, Food 289, XP 0, Gold 400.
 #[rustfmt::skip]
-const FIELDS: &[FieldDef] = &[
-    FieldDef { key: "name", label: "Name", offset: 0x00, kind: Kind::Name { len: NAME_LEN }, tentative: false },
-    FieldDef { key: "sex",   label: "Sex",   offset: 0x10, kind: Kind::Letter(SEX),  tentative: false },
-    FieldDef { key: "class", label: "Class", offset: 0x11, kind: Kind::Enum(CLASS),  tentative: false },
-    FieldDef { key: "race",  label: "Race",  offset: 0x12, kind: Kind::Enum(RACE),   tentative: false },
+const FIELDS: &[Field] = &[
+    Field::new("name",  "Name",  0x00, FieldKind::Name { len: NAME_LEN }),
+    Field::new("sex",   "Sex",   0x10, letter(SEX)),
+    Field::new("class", "Class", 0x11, enum1(CLASS)),
+    Field::new("race",  "Race",  0x12, enum1(RACE)),
     // Attributes: six 1-byte BCD values at 0x15..0x1A, stored *adjusted* (after race/class/gender
     // bonuses). Order and encoding confirmed with the FRINGE character (all-distinct values).
-    FieldDef { key: "strength",     label: "Strength",     offset: 0x15, kind: Kind::Bcd { bytes: 1 }, tentative: false },
-    FieldDef { key: "agility",      label: "Agility",      offset: 0x16, kind: Kind::Bcd { bytes: 1 }, tentative: false },
-    FieldDef { key: "stamina",      label: "Stamina",      offset: 0x17, kind: Kind::Bcd { bytes: 1 }, tentative: false },
-    FieldDef { key: "charisma",     label: "Charisma",     offset: 0x18, kind: Kind::Bcd { bytes: 1 }, tentative: false },
-    FieldDef { key: "wisdom",       label: "Wisdom",       offset: 0x19, kind: Kind::Bcd { bytes: 1 }, tentative: false },
-    FieldDef { key: "intelligence", label: "Intelligence", offset: 0x1A, kind: Kind::Bcd { bytes: 1 }, tentative: false },
-    FieldDef { key: "hits", label: "Hits", offset: 0x1B, kind: Kind::Bcd { bytes: 2 },       tentative: false },
-    FieldDef { key: "food", label: "Food", offset: 0x1D, kind: Kind::Bcd { bytes: 2 },       tentative: false },
-    FieldDef { key: "experience", label: "Experience", offset: 0x20, kind: Kind::Bcd { bytes: 2 }, tentative: false },
-    FieldDef { key: "gold", label: "Gold", offset: 0x22, kind: Kind::Bcd { bytes: 2 },       tentative: false },
+    Field::new("strength",     "Strength",     0x15, bcd(1)),
+    Field::new("agility",      "Agility",      0x16, bcd(1)),
+    Field::new("stamina",      "Stamina",      0x17, bcd(1)),
+    Field::new("charisma",     "Charisma",     0x18, bcd(1)),
+    Field::new("wisdom",       "Wisdom",       0x19, bcd(1)),
+    Field::new("intelligence", "Intelligence", 0x1A, bcd(1)),
+    Field::new("hits", "Hits", 0x1B, bcd(2)),
+    Field::new("food", "Food", 0x1D, bcd(2)),
+    Field::new("experience", "Experience", 0x20, bcd(2)),
+    Field::new("gold", "Gold", 0x22, bcd(2)),
     // Map position (raw binary bytes), confirmed by moving left/right (X) and up/down (Y).
-    FieldDef { key: "x", label: "Map X", offset: 0x24, kind: Kind::Byte, tentative: false },
-    FieldDef { key: "y", label: "Map Y", offset: 0x25, kind: Kind::Byte, tentative: false },
+    Field::new("x", "Map X", 0x24, FieldKind::Byte),
+    Field::new("y", "Map Y", 0x25, FieldKind::Byte),
     // Readied weapon (0x2B) and worn armour (0x2C), single index into the item order (0 = none).
     // Confirmed by Wield/Wear diffs (Dagger..Bow -> 1..4; Cloth/Leather -> 1/2).
-    FieldDef { key: "weapon", label: "Weapon (readied)", offset: 0x2B, kind: Kind::Enum(WEAPON), tentative: false },
-    FieldDef { key: "armor",  label: "Armour (worn)",    offset: 0x2C, kind: Kind::Enum(ARMOR),  tentative: false },
+    Field::new("weapon", "Weapon (readied)", 0x2B, enum1(WEAPON)),
+    Field::new("armor",  "Armour (worn)",    0x2C, enum1(ARMOR)),
     // Weapons owned (counts), 0x41..0x49 in weapon order (Dagger..Quicksword); array base 0x40 is
     // Hands. Dagger..Sword confirmed by purchase diffs (5/4/3/2/1). Encoding assumed 1-byte BCD to
     // match the rest of U2 — verify with a count >= 10 (10 would read as 0x10).
-    FieldDef { key: "weapon_dagger",     label: "Daggers",      offset: 0x41, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "weapon_mace",       label: "Maces",        offset: 0x42, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "weapon_axe",        label: "Axes",         offset: 0x43, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "weapon_bow",        label: "Bows",         offset: 0x44, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "weapon_sword",      label: "Swords",       offset: 0x45, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "weapon_greatsword", label: "Great swords", offset: 0x46, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "weapon_lightsword", label: "Light swords", offset: 0x47, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "weapon_phaser",     label: "Phasers",      offset: 0x48, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "weapon_quicksword", label: "Quickswords",  offset: 0x49, kind: Kind::Bcd { bytes: 1 }, tentative: true },
+    Field::new("weapon_dagger",     "Daggers",      0x41, bcd(1)).tentative(),
+    Field::new("weapon_mace",       "Maces",        0x42, bcd(1)).tentative(),
+    Field::new("weapon_axe",        "Axes",         0x43, bcd(1)).tentative(),
+    Field::new("weapon_bow",        "Bows",         0x44, bcd(1)).tentative(),
+    Field::new("weapon_sword",      "Swords",       0x45, bcd(1)).tentative(),
+    Field::new("weapon_greatsword", "Great swords", 0x46, bcd(1)).tentative(),
+    Field::new("weapon_lightsword", "Light swords", 0x47, bcd(1)).tentative(),
+    Field::new("weapon_phaser",     "Phasers",      0x48, bcd(1)).tentative(),
+    Field::new("weapon_quicksword", "Quickswords",  0x49, bcd(1)).tentative(),
     // Armour owned (counts), 0x61..0x66 in armour order (Cloth..Power); array base 0x60 is Skin.
     // Cloth..Plate confirmed by purchase diffs. Same BCD-vs-binary caveat as weapons.
-    FieldDef { key: "armor_cloth",   label: "Cloth armour",   offset: 0x61, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "armor_leather", label: "Leather armour", offset: 0x62, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "armor_chain",   label: "Chain armour",   offset: 0x63, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "armor_plate",   label: "Plate armour",   offset: 0x64, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "armor_reflect", label: "Reflect armour", offset: 0x65, kind: Kind::Bcd { bytes: 1 }, tentative: true },
-    FieldDef { key: "armor_power",   label: "Power armour",   offset: 0x66, kind: Kind::Bcd { bytes: 1 }, tentative: true },
+    Field::new("armor_cloth",   "Cloth armour",   0x61, bcd(1)).tentative(),
+    Field::new("armor_leather", "Leather armour", 0x62, bcd(1)).tentative(),
+    Field::new("armor_chain",   "Chain armour",   0x63, bcd(1)).tentative(),
+    Field::new("armor_plate",   "Plate armour",   0x64, bcd(1)).tentative(),
+    Field::new("armor_reflect", "Reflect armour", 0x65, bcd(1)).tentative(),
+    Field::new("armor_power",   "Power armour",   0x66, bcd(1)).tentative(),
 ];
 
 /// A parsed Ultima II `PLAYER` save file.
@@ -156,14 +154,14 @@ impl Ultima2Save {
     /// Format a single field by key, or `None` for an unknown key.
     pub fn get_field(&self, key: &str) -> Option<String> {
         let field = FIELDS.iter().find(|f| f.key == key)?;
-        Some(self.format_field(field))
+        Some(schema::read_field(&self.bytes, 0, field))
     }
 
     /// All known fields as `(label, value, tentative)` triples.
     pub fn inspect(&self) -> Vec<(&'static str, String, bool)> {
         FIELDS
             .iter()
-            .map(|f| (f.label, self.format_field(f), f.tentative))
+            .map(|f| (f.label, schema::read_field(&self.bytes, 0, f), f.tentative))
             .collect()
     }
 
@@ -178,155 +176,13 @@ impl Ultima2Save {
             .iter()
             .find(|f| f.key == key)
             .ok_or_else(|| Error::Format(format!("unknown field '{key}'")))?;
-        match field.kind {
-            Kind::Name { len } => self.set_name(field.offset, len, value)?,
-            Kind::Letter(table) => {
-                let letter = parse_letter(table, value).ok_or_else(|| {
-                    let options: Vec<_> = table.iter().map(|(_, name)| *name).collect();
-                    Error::Format(format!(
-                        "'{value}' is not a valid {}. Options: {}",
-                        field.label,
-                        options.join(", ")
-                    ))
-                })?;
-                self.bytes[field.offset] = letter;
-            }
-            Kind::Enum(table) => {
-                let byte = parse_enum(table, value).ok_or_else(|| {
-                    let options: Vec<_> = table.iter().map(|(_, name)| *name).collect();
-                    Error::Format(format!(
-                        "'{value}' is not a valid {}. Options: {}",
-                        field.label,
-                        options.join(", ")
-                    ))
-                })?;
-                self.bytes[field.offset] = byte;
-            }
-            Kind::Byte => {
-                let n: u8 = value.parse().map_err(|_| {
-                    Error::Format(format!(
-                        "{} must be a number 0-255 (got '{value}')",
-                        field.label
-                    ))
-                })?;
-                self.bytes[field.offset] = n;
-            }
-            Kind::Bcd { bytes } => {
-                let max = 10u32.pow(2 * bytes as u32) - 1;
-                let n: u32 = value.parse().map_err(|_| {
-                    Error::Format(format!("{} must be a number (got '{value}')", field.label))
-                })?;
-                if n > max {
-                    return Err(Error::Format(format!(
-                        "{} must be between 0 and {max} (got {n})",
-                        field.label
-                    )));
-                }
-                write_bcd_be(&mut self.bytes, field.offset, bytes, n);
-            }
-        }
-        Ok(())
+        schema::write_field(&mut self.bytes, 0, field, value)
     }
 
     /// Write this save to `path` atomically. Callers are responsible for backups.
     pub fn write(&self, path: impl AsRef<Path>) -> Result<()> {
         crate::save::atomic_write(path, &self.bytes)
     }
-
-    fn set_name(&mut self, offset: usize, len: usize, name: &str) -> Result<()> {
-        if !name.is_ascii() {
-            return Err(Error::Format("name must be ASCII".into()));
-        }
-        let max = len - 1;
-        if name.len() > max {
-            return Err(Error::Format(format!(
-                "name must be at most {max} characters (got {})",
-                name.len()
-            )));
-        }
-        self.bytes[offset..offset + len].fill(0);
-        self.bytes[offset..offset + name.len()].copy_from_slice(name.as_bytes());
-        Ok(())
-    }
-
-    fn format_field(&self, field: &FieldDef) -> String {
-        let at = field.offset;
-        match field.kind {
-            Kind::Name { len } => {
-                let raw = &self.bytes[at..at + len];
-                let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-                String::from_utf8_lossy(&raw[..end]).into_owned()
-            }
-            Kind::Letter(table) => {
-                let b = self.bytes[at];
-                match table.iter().find(|(letter, _)| *letter == b) {
-                    Some((_, name)) => (*name).to_string(),
-                    None if b.is_ascii_graphic() => format!("Unknown ('{}')", b as char),
-                    None => format!("Unknown (0x{b:02X})"),
-                }
-            }
-            Kind::Enum(table) => {
-                let b = self.bytes[at];
-                match table.iter().find(|(index, _)| *index == b) {
-                    Some((_, name)) => (*name).to_string(),
-                    None => format!("Unknown ({b})"),
-                }
-            }
-            Kind::Byte => self.bytes[at].to_string(),
-            Kind::Bcd { bytes } => read_bcd_be(&self.bytes, at, bytes).to_string(),
-        }
-    }
-}
-
-/// Read a big-endian BCD number of `n` bytes (most significant digit-pair first).
-fn read_bcd_be(buf: &[u8], offset: usize, n: usize) -> u32 {
-    let mut value = 0u32;
-    for i in 0..n {
-        let b = buf[offset + i];
-        value = value * 100 + (b >> 4) as u32 * 10 + (b & 0x0F) as u32;
-    }
-    value
-}
-
-/// Write a decimal `value` as a big-endian BCD number of `n` bytes.
-fn write_bcd_be(buf: &mut [u8], offset: usize, n: usize, mut value: u32) {
-    for i in (0..n).rev() {
-        let pair = (value % 100) as u8;
-        buf[offset + i] = ((pair / 10) << 4) | (pair % 10);
-        value /= 100;
-    }
-}
-
-/// Resolve a letter input (a full name or a single letter, case-insensitive) to its byte.
-fn parse_letter(table: LetterTable, value: &str) -> Option<u8> {
-    let value = value.trim();
-    if let Some((letter, _)) = table
-        .iter()
-        .find(|(_, name)| name.eq_ignore_ascii_case(value))
-    {
-        return Some(*letter);
-    }
-    if value.len() == 1 {
-        let c = value.as_bytes()[0].to_ascii_uppercase();
-        if table.iter().any(|(letter, _)| *letter == c) {
-            return Some(c);
-        }
-    }
-    None
-}
-
-/// Resolve an enum input (a variant name, case-insensitive, or a numeric index) to its byte.
-fn parse_enum(table: EnumTable, value: &str) -> Option<u8> {
-    let value = value.trim();
-    if let Some((index, _)) = table
-        .iter()
-        .find(|(_, name)| name.eq_ignore_ascii_case(value))
-    {
-        return Some(*index);
-    }
-    // Accept a raw numeric index, but only if it names a known variant.
-    let n: u8 = value.parse().ok()?;
-    table.iter().any(|(index, _)| *index == n).then_some(n)
 }
 
 #[cfg(test)]

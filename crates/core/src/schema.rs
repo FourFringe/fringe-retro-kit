@@ -160,7 +160,11 @@ pub fn read_field(buf: &[u8], base: usize, field: &Field) -> String {
         FieldKind::Int { bytes, endian, .. } => read_int(buf, at, bytes, endian).to_string(),
         FieldKind::Bcd { bytes, endian } => read_bcd(buf, at, bytes, endian).to_string(),
         FieldKind::Byte => buf[at].to_string(),
-        FieldKind::Bool => if buf[at] != 0 { "yes" } else { "no" }.to_string(),
+        FieldKind::Bool => match buf[at] {
+            0x00 => "no".to_string(),
+            0xFF => "yes".to_string(),
+            other => format!("0x{other:02X}"),
+        },
         FieldKind::Enum {
             bytes,
             endian,
@@ -372,8 +376,8 @@ fn parse_number(value: &str, label: &str) -> Result<u32> {
 
 fn parse_bool(value: &str, label: &str) -> Result<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "yes" | "true" | "y" | "1" => Ok(true),
-        "no" | "false" | "n" | "0" => Ok(false),
+        "yes" | "true" | "y" | "1" | "on" => Ok(true),
+        "no" | "false" | "n" | "0" | "off" => Ok(false),
         _ => Err(Error::Format(format!(
             "{label} must be yes/no (got '{value}')"
         ))),
