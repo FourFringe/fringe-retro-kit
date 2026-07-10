@@ -16,5 +16,6 @@ fringe-retro-core.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+ratatui.workspace = true
 serde.workspace = true
 toml.workspace = true

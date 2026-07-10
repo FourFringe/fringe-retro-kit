@@ -105,10 +105,11 @@ Known byte layouts for implemented games live in [docs/formats/](docs/formats/RE
 
 ## Phase 4 — Save Browser & Inspector (TUI)
 
-The TUI (Ratatui + Crossterm) becomes the primary interface here.
+The TUI (Ratatui + Crossterm) becomes the primary interface here. Launched by running
+`fringe-retro` with no command.
 
-- [ ] Game / character / save browsing
-- [ ] Inspector: read-only view of known fields
+- [x] Game / save browsing (games list from the library manifest) — character/slot browsing still to come
+- [x] Inspector: read-only view of known fields (scrollable; shares formatting with `inspect`)
 - [ ] Auto-generated editors (number / enum / boolean widgets) to minimize per-game UI code
 - [ ] Backup browser
 

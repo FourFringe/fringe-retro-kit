@@ -3,6 +3,8 @@
 //! Phase 1 exposes a small, permanent headless CLI over `fringe-retro-core`.
 
 mod config;
+mod inspect;
+mod tui;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -22,7 +24,7 @@ use crate::config::Config;
 #[command(name = "fringe-retro", version, about)]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -94,62 +96,16 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = Config::load()?;
-    match cli.command {
+    // With no subcommand, launch the interactive terminal UI.
+    let Some(command) = cli.command else {
+        return tui::run(config);
+    };
+    match command {
         Command::Inspect { path } => {
             let path = config.resolve_save_path(&path)?;
             let bytes = std::fs::read(&path)?;
-            if bytes.len() == ultima3::PARTY_LEN {
-                // Ultima III active party.
-                let party = Ultima3Party::from_bytes(bytes)?;
-                println!("Party:");
-                for (label, value) in party.header_inspect() {
-                    println!("  {label:<20} {value}");
-                }
-                let order = party.party_order();
-                let members = party.party_size().min(ultima3::PARTY_MEMBER_COUNT);
-                for (member, slot) in order.iter().enumerate().take(members) {
-                    println!(
-                        "\nMember {} (roster slot {}): {}",
-                        member + 1,
-                        slot,
-                        party.summary(member)
-                    );
-                    for (label, value) in party.inspect(member) {
-                        println!("  {label:<16} {value}");
-                    }
-                }
-            } else if bytes.len() == ultima3::ROSTER_LEN {
-                // Ultima III roster: 20 character slots.
-                let roster = Ultima3Roster::from_bytes(bytes)?;
-                let occupied = roster.occupied_slots();
-                if occupied.is_empty() {
-                    println!("(empty roster)");
-                }
-                for slot in occupied {
-                    println!("\nSlot {}: {}", slot + 1, roster.summary(slot));
-                    for (label, value) in roster.inspect(slot) {
-                        println!("  {label:<16} {value}");
-                    }
-                }
-            } else if bytes.len() == ultima2::SAVE_LEN {
-                // Ultima II single-character save (reverse-engineering in progress).
-                let save = Ultima2Save::from_bytes(bytes)?;
-                println!("Ultima II (partial — reverse-engineering in progress):");
-                for (label, value, tentative) in save.inspect() {
-                    let mark = if tentative { "  (?)" } else { "" };
-                    println!("  {label:<12} {value}{mark}");
-                }
-            } else {
-                // Ultima I single-character save.
-                let save = Ultima1Save::from_bytes(bytes)?;
-                let mut current_section = "";
-                for (section, label, value) in save.inspect() {
-                    if section != current_section {
-                        println!("\n{section}:");
-                        current_section = section;
-                    }
-                    println!("  {label:<16} {value}");
-                }
+            for line in inspect::inspect_lines(&bytes)? {
+                println!("{line}");
             }
         }
         Command::Get { path, field, slot } => {

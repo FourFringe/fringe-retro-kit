@@ -41,6 +41,29 @@ fringe-retro inspect "/Applications/Ultima I™.app/Contents/Resources/game/PLAY
 
 ---
 
+## Interactive UI
+
+Run `fringe-retro` **with no command** to launch the interactive terminal UI:
+
+```bash
+fringe-retro
+```
+
+The first iteration is a read-only **browser**: it lists the games in your
+[library manifest](#configuration) and shows a scrollable inspector for the selected
+game's save (the same view as `inspect`).
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` (or `k` / `j`) | Move selection / scroll |
+| `Enter` (or `→`) | Open the selected game's inspector |
+| `Esc` (or `←` / `Backspace`) | Back to the games list |
+| `q` | Quit |
+
+Editing, the Save Library, and richer navigation are planned (see [ROADMAP.md](ROADMAP.md)).
+
+---
+
 ## Read-only commands
 
 ### ✅ `inspect <path>`
@@ -417,7 +440,6 @@ These are **not implemented yet**; they reflect the direction in [ROADMAP.md](RO
 
 | Command (tentative) | Purpose |
 | --- | --- |
-| `fringe-retro` (no arguments) | Launch the interactive **terminal UI** (browse games, characters, saves, and edit visually). The TUI is intended to become the primary interface. |
 | `list` (auto-discovery) | Auto-detect installed games and fill in save paths, so you don't configure them by hand. (`games` already lists your manually-configured library.) |
 | `library …` | Manage the Save Library: save a named snapshot, list, restore, duplicate, rename, delete. |
 | `config …` | View and edit configuration (save-library location, discovered game paths, etc.). |
