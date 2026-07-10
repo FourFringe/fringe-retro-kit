@@ -240,9 +240,19 @@ fn main() -> Result<()> {
         } => {
             let path = config.resolve_save_path(&path)?;
             let backup_path = config.resolve_save_path(&backup_path)?;
-            let pre_restore = backup::restore(&backup_path, &path)?;
-            println!("restored {} -> {}", backup_path.display(), path.display());
-            println!("previous save backed up to {}", pre_restore.display());
+            match backup::restore(&backup_path, &path)? {
+                Some(pre_restore) => {
+                    println!("restored {} -> {}", backup_path.display(), path.display());
+                    println!("previous save backed up to {}", pre_restore.display());
+                }
+                None => {
+                    println!(
+                        "{} already matches {}; nothing to restore",
+                        path.display(),
+                        backup_path.display()
+                    );
+                }
+            }
         }
         Command::Watch { path, interval } => {
             let path = config.resolve_save_path(&path)?;

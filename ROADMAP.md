@@ -111,7 +111,7 @@ The TUI (Ratatui + Crossterm) becomes the primary interface here. Launched by ru
 - [x] Game / save browsing (games list) and per-character drill-down (Ultima III roster slots & party members)
 - [x] Inspector: read-only view of known fields (scrollable, paged; shares formatting with `inspect`)
 - [x] Auto-generated editors driven by the field schema (text / enum / boolean fields) — batch edits in memory, validated on commit, one backup + write on save, with an unsaved-changes guard
-- [ ] Backup browser
+- [x] Backup browser — list a save's backups with a decoded preview, restore with confirmation (auto safety backup, no-op when already identical)
 
 Illustrative mockups (not final):
 

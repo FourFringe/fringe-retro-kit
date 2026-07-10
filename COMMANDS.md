@@ -65,18 +65,31 @@ edits prompts you to save, discard, or cancel.
 Section grouping (Ultima I) and the party header (Ultima III) are not shown in the editor's
 flat field list; use the `inspect` command to see those.
 
+### Backup browser
+
+Every save writes a timestamped `.bak` file beside the original. Press `b` in the editor to
+open the **backup browser**: a list of that save's backups (newest first, with the one
+matching the current file marked `← current`) alongside a decoded preview of the selected
+backup. Press `Enter` or `r` to restore the selected backup — you're asked to confirm, a
+fresh safety backup of the current file is made first, and the editor reloads to show the
+restored values. Restoring a backup that already matches the current file is a no-op (no
+write, no extra backup).
+
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` (or `k` / `j`) | Move selection · scroll one line |
 | `Enter` (or `→`) | Open the selected game / character |
 | `Enter` / `e` | Edit the selected field |
 | `s` | Save the session (backup + write) |
-| `PgUp` / `PgDn` (or `Space`) | Scroll a page (messages) |
-| `Home` / `End` | Jump to top / bottom (messages) |
+| `b` | Open the backup browser (from the editor) |
+| `Enter` / `r` | Restore the selected backup (backup browser) |
+| `PgUp` / `PgDn` (or `Space`) | Scroll a page (messages / backup preview) |
+| `Home` / `End` | Jump to top / bottom (messages / backup preview) |
 | `Esc` (or `←` / `Backspace`) | Cancel edit · back one screen |
 | `q` | Quit |
 
 When a save/discard prompt is open: `s` saves and continues, `d` discards, `Esc` cancels.
+When a restore prompt is open: `y` restores, `Esc` cancels.
 
 The Save Library is planned (see [ROADMAP.md](ROADMAP.md)).
 

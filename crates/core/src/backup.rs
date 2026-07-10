@@ -56,14 +56,20 @@ pub fn list(path: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
 
 /// Restore `backup` over `target`, first backing up whatever is currently at `target`.
 ///
-/// Returns the path of that pre-restore safety backup.
-pub fn restore(backup: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<PathBuf> {
+/// If `target` is already byte-identical to `backup`, this is a no-op: nothing is written
+/// and no safety backup is made. Returns the path of the pre-restore safety backup, or
+/// `None` when the restore was skipped because the file already matched.
+pub fn restore(backup: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<Option<PathBuf>> {
     let backup = backup.as_ref();
     let target = target.as_ref();
     let bytes = std::fs::read(backup)?;
+    // Skip the write (and its safety backup) when the target already matches the backup.
+    if std::fs::read(target).is_ok_and(|current| current == bytes) {
+        return Ok(None);
+    }
     let pre_restore = create(target)?;
     crate::save::atomic_write(target, &bytes)?;
-    Ok(pre_restore)
+    Ok(Some(pre_restore))
 }
 
 fn file_name(path: &Path) -> Result<String> {
@@ -91,11 +97,27 @@ mod tests {
 
         // Modify the save, then restore the backup.
         std::fs::write(&path, b"modified").unwrap();
-        let pre_restore = restore(&first, &path).unwrap();
+        let pre_restore = restore(&first, &path).unwrap().unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"original");
         assert_eq!(std::fs::read(&pre_restore).unwrap(), b"modified");
         // The original backup plus the pre-restore safety backup.
         assert_eq!(list(&path).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn restore_is_a_noop_when_already_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("PLAYER1.U1");
+        std::fs::write(&path, b"original").unwrap();
+
+        let first = create(&path).unwrap();
+        // The live file already matches the backup, so restoring should do nothing.
+        let result = restore(&first, &path).unwrap();
+
+        assert!(result.is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        // No safety backup was created.
+        assert_eq!(list(&path).unwrap().len(), 1);
     }
 }

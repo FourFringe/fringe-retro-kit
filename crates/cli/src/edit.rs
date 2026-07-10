@@ -90,6 +90,11 @@ impl Session {
         self.dirty
     }
 
+    /// The path of the save file this session edits.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// The editable entities (characters). Single-character games return exactly one.
     pub fn entities(&self) -> Vec<Entity> {
         match &self.save {

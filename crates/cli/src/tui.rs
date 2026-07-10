@@ -5,9 +5,10 @@
 //! and a scrollable inspector for the selected game's save. Editing and the Save Library
 //! come later (see `ROADMAP.md`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use fringe_retro_core::backup;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -36,6 +37,8 @@ enum Screen {
     Characters(CharList),
     /// A field editor for one character.
     Edit(Editor),
+    /// A browser of the current save's timestamped backups, with a preview of each.
+    Backups(BackupList),
     /// A read-only message (unsupported games, errors).
     Inspect(Inspector),
     /// An unsaved-changes prompt.
@@ -47,6 +50,24 @@ struct CharList {
     title: String,
     entities: Vec<Entity>,
     list: ListState,
+}
+
+/// One timestamped backup file of the current save.
+struct BackupEntry {
+    path: PathBuf,
+    label: String,
+    is_current: bool,
+}
+
+/// A browser of the current save's backups: a list on the left, a decoded preview of the
+/// selected backup on the right.
+struct BackupList {
+    title: String,
+    /// The editor entity to refresh after a restore reloads the session.
+    entity: usize,
+    entries: Vec<BackupEntry>,
+    list: ListState,
+    preview: Inspector,
 }
 
 /// A field editor for one character within the current session.
@@ -79,14 +100,19 @@ impl Editor {
     }
 }
 
-/// What to do once an unsaved-changes prompt is resolved.
-#[derive(Clone, Copy)]
+/// What to do once a modal prompt is resolved.
+#[derive(Clone)]
 enum Pending {
     QuitApp,
     LeaveGame,
+    /// Restore the given backup over the current save, then refresh the editor entity.
+    Restore {
+        backup: PathBuf,
+        entity: usize,
+    },
 }
 
-/// An unsaved-changes prompt shown before quitting or leaving a game with edits.
+/// A modal prompt (unsaved-changes guard, or a restore confirmation).
 struct Confirm {
     pending: Pending,
     message: Option<String>,
@@ -170,8 +196,11 @@ enum Action {
     OpenEntry(Option<usize>),
     Commit(String),
     Save,
+    OpenBackups,
+    RequestRestore,
     ConfirmSave,
     ConfirmDiscard,
+    ConfirmAccept,
     ConfirmCancel,
 }
 
@@ -252,7 +281,7 @@ impl App {
     /// Pop the confirm prompt and carry out its pending action.
     fn complete_pending(&mut self) {
         let pending = match self.stack.last() {
-            Some(Screen::Confirm(c)) => Some(c.pending),
+            Some(Screen::Confirm(c)) => Some(c.pending.clone()),
             _ => None,
         };
         if matches!(self.stack.last(), Some(Screen::Confirm(_))) {
@@ -266,7 +295,89 @@ impl App {
                 }
                 self.session = None;
             }
+            Some(Pending::Restore { backup, entity }) => self.do_restore(backup, entity),
             None => {}
+        }
+    }
+
+    /// Open the backup browser for the current session's save, previewing the newest backup.
+    fn open_backups(&mut self) {
+        let (path, entity, editor_title) = match (self.session.as_ref(), self.stack.last()) {
+            (Some(s), Some(Screen::Edit(ed))) => {
+                (s.path().to_path_buf(), ed.entity, ed.title.clone())
+            }
+            _ => return,
+        };
+        let entries = build_backup_entries(&path);
+        let mut list = ListState::default();
+        if !entries.is_empty() {
+            list.select(Some(0));
+        }
+        let content = match entries.first() {
+            Some(e) => backup_preview(&e.path),
+            None => vec!["(no backups yet)".to_string()],
+        };
+        let preview = Inspector::new("Preview".to_string(), content);
+        self.stack.push(Screen::Backups(BackupList {
+            title: format!("Backups — {editor_title}"),
+            entity,
+            entries,
+            list,
+            preview,
+        }));
+    }
+
+    /// Ask to confirm restoring the selected backup over the current save.
+    fn request_restore(&mut self) {
+        let target = match self.stack.last() {
+            Some(Screen::Backups(bl)) => bl
+                .list
+                .selected()
+                .and_then(|i| bl.entries.get(i))
+                .map(|e| (e.path.clone(), bl.entity)),
+            _ => None,
+        };
+        let Some((backup, entity)) = target else {
+            return;
+        };
+        let message = if self.session_dirty() {
+            Some("Restore this backup? Unsaved edits will be lost.".to_string())
+        } else {
+            Some("Restore this backup over the current save?".to_string())
+        };
+        self.stack.push(Screen::Confirm(Confirm {
+            pending: Pending::Restore { backup, entity },
+            message,
+        }));
+    }
+
+    /// Restore a backup over the current save, reload the session, and refresh the editor.
+    fn do_restore(&mut self, backup: PathBuf, entity: usize) {
+        let Some(path) = self.session.as_ref().map(|s| s.path().to_path_buf()) else {
+            return;
+        };
+        let outcome = backup::restore(&backup, &path);
+        // Return to the editor beneath the backup browser.
+        if matches!(self.stack.last(), Some(Screen::Backups(_))) {
+            self.stack.pop();
+        }
+        let status = match outcome {
+            Ok(Some(pre)) => {
+                if let Ok(Some(session)) = Session::load(&path) {
+                    self.session = Some(session);
+                }
+                format!("Restored. Previous save backed up to {}", pre.display())
+            }
+            Ok(None) => "Already at this version; nothing changed.".to_string(),
+            Err(e) => format!("Restore failed: {e}"),
+        };
+        let rows = self.session.as_ref().map(|s| s.rows(entity));
+        if let Some(Screen::Edit(ed)) = self.stack.last_mut() {
+            if let Some(rows) = rows {
+                ed.rows = rows;
+            }
+            ed.input = None;
+            ed.status = Some(status);
         }
     }
 
@@ -460,8 +571,32 @@ impl App {
                         KeyCode::Up | KeyCode::Char('k') => select_wrap(&mut ed.list, len, -1),
                         KeyCode::Enter | KeyCode::Char('e') => ed.begin_edit(),
                         KeyCode::Char('s') => action = Action::Save,
+                        KeyCode::Char('b') => action = Action::OpenBackups,
                         _ => {}
                     }
+                }
+            }
+            Screen::Backups(bl) => {
+                let len = bl.entries.len();
+                match code {
+                    KeyCode::Char('q') => action = Action::Quit,
+                    KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => {
+                        action = Action::Back;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        select_wrap(&mut bl.list, len, 1);
+                        refresh_backup_preview(bl);
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        select_wrap(&mut bl.list, len, -1);
+                        refresh_backup_preview(bl);
+                    }
+                    KeyCode::PageDown | KeyCode::Char(' ') => bl.preview.page_down(),
+                    KeyCode::PageUp => bl.preview.page_up(),
+                    KeyCode::Home => bl.preview.home(),
+                    KeyCode::End => bl.preview.end(),
+                    KeyCode::Enter | KeyCode::Char('r') => action = Action::RequestRestore,
+                    _ => {}
                 }
             }
             Screen::Inspect(insp) => match code {
@@ -477,11 +612,18 @@ impl App {
                 KeyCode::End | KeyCode::Char('G') => insp.end(),
                 _ => {}
             },
-            Screen::Confirm(_) => match code {
-                KeyCode::Char('s') => action = Action::ConfirmSave,
-                KeyCode::Char('d') => action = Action::ConfirmDiscard,
-                KeyCode::Esc | KeyCode::Char('n') => action = Action::ConfirmCancel,
-                _ => {}
+            Screen::Confirm(c) => match &c.pending {
+                Pending::Restore { .. } => match code {
+                    KeyCode::Char('y') | KeyCode::Enter => action = Action::ConfirmAccept,
+                    KeyCode::Esc | KeyCode::Char('n') => action = Action::ConfirmCancel,
+                    _ => {}
+                },
+                _ => match code {
+                    KeyCode::Char('s') => action = Action::ConfirmSave,
+                    KeyCode::Char('d') => action = Action::ConfirmDiscard,
+                    KeyCode::Esc | KeyCode::Char('n') => action = Action::ConfirmCancel,
+                    _ => {}
+                },
             },
         }
         match action {
@@ -492,8 +634,11 @@ impl App {
             Action::OpenEntry(Some(i)) => self.open_entry(i),
             Action::Commit(v) => self.commit_edit(v),
             Action::Save => self.save_from_editor(),
+            Action::OpenBackups => self.open_backups(),
+            Action::RequestRestore => self.request_restore(),
             Action::ConfirmSave => self.confirm_save(),
             Action::ConfirmDiscard => self.confirm_discard(),
+            Action::ConfirmAccept => self.complete_pending(),
             Action::ConfirmCancel => self.confirm_cancel(),
             Action::OpenGame(None) | Action::OpenEntry(None) => {}
         }
@@ -512,6 +657,7 @@ impl App {
             Screen::Games(list) => draw_games(frame, chunks[0], games, list),
             Screen::Characters(cl) => draw_characters(frame, chunks[0], cl),
             Screen::Edit(ed) => draw_editor(frame, chunks[0], ed, dirty),
+            Screen::Backups(bl) => draw_backups(frame, chunks[0], bl),
             Screen::Inspect(insp) => {
                 insp.viewport = chunks[0].height.saturating_sub(2);
                 draw_inspector(frame, chunks[0], insp);
@@ -597,14 +743,105 @@ fn draw_editor(frame: &mut Frame, area: Rect, ed: &mut Editor, dirty: bool) {
 }
 
 fn draw_confirm(frame: &mut Frame, area: Rect, c: &Confirm) {
-    let msg = c.message.as_deref().unwrap_or("You have unsaved changes.");
-    let text = format!("{msg}\n\n[s] save and continue\n[d] discard changes\n[Esc] cancel");
-    let widget = Paragraph::new(text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Unsaved changes "),
-    );
+    let (default_msg, choices, title) = match &c.pending {
+        Pending::Restore { .. } => (
+            "Restore this backup over the current save?",
+            "[y] restore\n[Esc] cancel",
+            " Confirm restore ",
+        ),
+        _ => (
+            "You have unsaved changes.",
+            "[s] save and continue\n[d] discard changes\n[Esc] cancel",
+            " Unsaved changes ",
+        ),
+    };
+    let msg = c.message.as_deref().unwrap_or(default_msg);
+    let text = format!("{msg}\n\n{choices}");
+    let widget = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(widget, area);
+}
+
+/// A decoded, human-readable preview of a backup file (or a friendly error line).
+fn backup_preview(path: &Path) -> Vec<String> {
+    match std::fs::read(path) {
+        Ok(bytes) => crate::inspect::inspect_lines(&bytes)
+            .unwrap_or_else(|e| vec![format!("(cannot preview: {e})")]),
+        Err(e) => vec![format!("(cannot read: {e})")],
+    }
+}
+
+/// The timestamp portion of a backup file name (strips the `<save>.` prefix and `.bak`).
+fn backup_stamp(backup: &Path, target: &Path) -> String {
+    let name = backup
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let prefix = target
+        .file_name()
+        .map(|n| format!("{}.", n.to_string_lossy()))
+        .unwrap_or_default();
+    let stamp = name.strip_prefix(&prefix).unwrap_or(&name);
+    stamp.strip_suffix(".bak").unwrap_or(stamp).to_string()
+}
+
+/// List the backups for `path`, newest first, labelled with timestamp/size and a marker on
+/// any backup that is byte-identical to the current save.
+fn build_backup_entries(path: &Path) -> Vec<BackupEntry> {
+    let current = std::fs::read(path).ok();
+    backup::list(path)
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .map(|b| {
+            let size = std::fs::metadata(b).map(|m| m.len()).unwrap_or(0);
+            let is_current = current
+                .as_ref()
+                .is_some_and(|c| std::fs::read(b).is_ok_and(|bb| &bb == c));
+            let marker = if is_current { "  ← current" } else { "" };
+            BackupEntry {
+                label: format!("{}  {size} bytes{marker}", backup_stamp(b, path)),
+                is_current,
+                path: b.clone(),
+            }
+        })
+        .collect()
+}
+
+/// Rebuild the preview pane for whichever backup is currently selected.
+fn refresh_backup_preview(bl: &mut BackupList) {
+    let content = match bl.list.selected().and_then(|i| bl.entries.get(i)) {
+        Some(e) => backup_preview(&e.path),
+        None => vec!["(no backups yet)".to_string()],
+    };
+    bl.preview = Inspector::new("Preview".to_string(), content);
+}
+
+fn draw_backups(frame: &mut Frame, area: Rect, bl: &mut BackupList) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(50), Constraint::Min(1)])
+        .split(area);
+
+    let items: Vec<ListItem> = if bl.entries.is_empty() {
+        vec![ListItem::new("(no backups yet)")]
+    } else {
+        bl.entries
+            .iter()
+            .map(|e| {
+                let style = if e.is_current {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(Line::from(e.label.clone())).style(style)
+            })
+            .collect()
+    };
+    let list = selectable_list(items, format!(" {} ", bl.title));
+    frame.render_stateful_widget(list, cols[0], &mut bl.list);
+
+    bl.preview.viewport = cols[1].height.saturating_sub(2);
+    draw_inspector(frame, cols[1], &bl.preview);
 }
 
 /// The context-dependent bottom line: key hints, the field input prompt, or a status.
@@ -622,11 +859,17 @@ fn bottom_line(screen: &Screen) -> String {
             } else if let Some(status) = &ed.status {
                 format!("  {status}")
             } else {
-                " ↑/↓ field · Enter/e edit · s save · Esc back · q quit ".to_string()
+                " ↑/↓ field · Enter/e edit · s save · b backups · Esc back · q quit ".to_string()
             }
         }
         Screen::Inspect(_) => " ↑/↓ scroll · PgUp/PgDn page · Esc back · q quit ".to_string(),
-        Screen::Confirm(_) => " s save · d discard · Esc cancel ".to_string(),
+        Screen::Backups(_) => {
+            " ↑/↓ select · PgUp/PgDn preview · Enter/r restore · Esc back · q quit ".to_string()
+        }
+        Screen::Confirm(c) => match &c.pending {
+            Pending::Restore { .. } => " y restore · Esc cancel ".to_string(),
+            _ => " s save · d discard · Esc cancel ".to_string(),
+        },
     }
 }
 
@@ -844,6 +1087,55 @@ mod tests {
 
         app.handle_key(KeyCode::Char('d')); // discard and quit
         assert!(!app.running);
+    }
+
+    /// Edit a field through the UI (begin edit, clear, type, commit).
+    fn set_field_via_ui(app: &mut App, key: &str, value: &str) {
+        select_field(app, key);
+        app.handle_key(KeyCode::Enter); // begin edit
+        for _ in 0..12 {
+            app.handle_key(KeyCode::Backspace); // clear the seeded value
+        }
+        for c in value.chars() {
+            app.handle_key(KeyCode::Char(c));
+        }
+        app.handle_key(KeyCode::Enter); // commit
+    }
+
+    #[test]
+    fn backups_screen_handles_no_backups() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter); // editor
+        app.handle_key(KeyCode::Char('b')); // no backups exist yet
+        assert!(matches!(app.stack.last(), Some(Screen::Backups(_))));
+        app.handle_key(KeyCode::Enter); // request restore with nothing selected -> no-op
+        assert!(matches!(app.stack.last(), Some(Screen::Backups(_))));
+        app.handle_key(KeyCode::Esc); // back to the editor
+        assert!(matches!(app.stack.last(), Some(Screen::Edit(_))));
+    }
+
+    #[test]
+    fn restore_backup_from_editor_reloads_values() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter); // editor (gold starts at 0)
+
+        // Edit + save twice: the newest backup captures the pre-save value (gold 100).
+        set_field_via_ui(&mut app, "gold", "100");
+        app.handle_key(KeyCode::Char('s'));
+        set_field_via_ui(&mut app, "gold", "200");
+        app.handle_key(KeyCode::Char('s'));
+        assert_eq!(editor_value(&app, "gold"), "200");
+
+        app.handle_key(KeyCode::Char('b')); // open backups (newest = gold 100)
+        assert!(matches!(app.stack.last(), Some(Screen::Backups(_))));
+        app.handle_key(KeyCode::Enter); // request restore -> confirm
+        assert!(matches!(app.stack.last(), Some(Screen::Confirm(_))));
+        app.handle_key(KeyCode::Char('y')); // confirm restore
+
+        // Back in the editor, reloaded from the restored file.
+        assert!(matches!(app.stack.last(), Some(Screen::Edit(_))));
+        assert_eq!(editor_value(&app, "gold"), "100");
+        assert!(!app.session_dirty());
     }
 
     #[test]
