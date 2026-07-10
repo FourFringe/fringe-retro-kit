@@ -8,6 +8,7 @@ pub mod backup;
 pub mod diff;
 pub mod games;
 pub mod save;
+pub mod schema;
 
 use thiserror::Error;
 
