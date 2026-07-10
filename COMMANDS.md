@@ -49,18 +49,21 @@ Run `fringe-retro` **with no command** to launch the interactive terminal UI:
 fringe-retro
 ```
 
-The first iteration is a read-only **browser**: it lists the games in your
-[library manifest](#configuration) and shows a scrollable inspector for the selected
-game's save (the same view as `inspect`).
+The first iteration is a read-only **browser**. Select a game to open it: single-character
+games (Ultima I/II) go straight to a scrollable inspector, while multi-character games
+(Ultima III rosters and parties) first show a list of characters to drill into. The
+inspector shows the same view as the `inspect` command.
 
 | Key | Action |
 | --- | --- |
-| `↑` / `↓` (or `k` / `j`) | Move selection / scroll |
-| `Enter` (or `→`) | Open the selected game's inspector |
-| `Esc` (or `←` / `Backspace`) | Back to the games list |
+| `↑` / `↓` (or `k` / `j`) | Move selection · scroll one line |
+| `Enter` (or `→`) | Open the selected game / character |
+| `PgUp` / `PgDn` (or `Space`) | Scroll a page |
+| `Home` / `End` | Jump to top / bottom |
+| `Esc` (or `←` / `Backspace`) | Back one screen |
 | `q` | Quit |
 
-Editing, the Save Library, and richer navigation are planned (see [ROADMAP.md](ROADMAP.md)).
+Editing and the Save Library are planned (see [ROADMAP.md](ROADMAP.md)).
 
 ---
 

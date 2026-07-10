@@ -108,8 +108,8 @@ Known byte layouts for implemented games live in [docs/formats/](docs/formats/RE
 The TUI (Ratatui + Crossterm) becomes the primary interface here. Launched by running
 `fringe-retro` with no command.
 
-- [x] Game / save browsing (games list from the library manifest) — character/slot browsing still to come
-- [x] Inspector: read-only view of known fields (scrollable; shares formatting with `inspect`)
+- [x] Game / save browsing (games list) and per-character drill-down (Ultima III roster slots & party members)
+- [x] Inspector: read-only view of known fields (scrollable, paged; shares formatting with `inspect`)
 - [ ] Auto-generated editors (number / enum / boolean widgets) to minimize per-game UI code
 - [ ] Backup browser
 
