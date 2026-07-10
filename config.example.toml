@@ -1,19 +1,43 @@
 # Fringe Retro Kit — local configuration (EXAMPLE / template)
 #
-# Copy this file to `config.toml` (which is gitignored) and adjust the paths for
-# your machine. `config.toml` holds machine-specific absolute paths and is never
-# committed to git.
+# Copy this file to `config.toml` (which is gitignored) and adjust for your machine.
+# This is your game "library manifest": it lists the games you own, where their saves
+# live, and (optionally) which platform they came from. Commands can then refer to a
+# game by its identifier, e.g. `fringe-retro inspect ultima2`.
 #
-# Format is TOML (the app-config format we've settled on; game *schemas* may use a
-# different format later). This schema will grow as the tool matures.
+# Format is TOML. The tool reads this file from the current working directory (or the
+# path in the FRINGE_RETRO_CONFIG environment variable). A per-OS config location is planned.
 #
-# Phase 1 note: the tool reads this file from the current working directory (or the
-# path in the FRINGE_RETRO_CONFIG environment variable). A proper per-OS config
-# location is planned.
+# Each [games.<id>] table defines one game; <id> is how you refer to it on the command
+# line. Fields:
+#   game        which built-in parser to use: ultima1 | ultima2 | ultima3 | wasteland.
+#               Defaults to <id>, so [games.ultima1] needs no `game` key. Use `game` when
+#               your id differs, e.g. [games.u2-gog] with game = "ultima2".
+#   save_dir    directory holding the game's save files (required to use the identifier).
+#   enabled     set to false to hide a game you don't currently play (default: true).
+#   platform    informational: gog | steam | dosbox | ... (used later for auto-detection).
+#   install_dir informational: where the game is installed.
+#
+# Multi-file games: `inspect ultima3` opens ROSTER.ULT; use a `:file` selector for others,
+# e.g. `inspect ultima3:PARTY.ULT` or `inspect ultima1:PLAYER2.U1`.
+#
+# List everything you've configured with: `fringe-retro games`
 
 [games.ultima1]
-# Directory that holds the Ultima I save files (PLAYER1.U1 … PLAYER4.U1). When you
-# pass a *bare* file name to a command (e.g. `fringe-retro inspect PLAYER1.U1`), it is
-# resolved against this directory. On a GOG/macOS install the saves live inside the
-# app bundle, e.g.:
-save_dir = "/Applications/Ultima I.app/Contents/Resources/game"
+platform = "gog"
+save_dir = "/Applications/Ultima I™.app/Contents/Resources/game"
+
+[games.ultima2]
+platform = "gog"
+save_dir = "/Applications/Ultima II™.app/Contents/Resources/game"
+
+[games.ultima3]
+platform = "gog"
+save_dir = "/Applications/Ultima III™.app/Contents/Resources/game"
+
+# Wasteland's save is an encrypted directory; inspect/edit support is still in progress.
+# `save_dir` should point at the save-slot directory (the one containing GAME1).
+[games.wasteland]
+platform = "steam"
+enabled = false
+save_dir = "/Users/you/Library/Application Support/Wasteland/ENKI"

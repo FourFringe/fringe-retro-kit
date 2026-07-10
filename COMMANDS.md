@@ -18,12 +18,12 @@ Legend: ✅ implemented · 🔷 planned (not yet available)
 fringe-retro <command> [arguments] [--flags]
 ```
 
-- `<path>` is the path to a save file. It can be either:
-  - a full or relative path (used exactly as given), or
-  - a **bare file name** like `PLAYER1.U1`, which is resolved against a configured save
-    directory (see [Default save directory](#default-save-directory)).
+- `<target>` selects the save to act on. It can be either:
+  - a **game identifier** from your library manifest (e.g. `ultima2`), optionally with a
+    `:file` selector to pick a specific save file (e.g. `ultima3:PARTY.ULT`), or
+  - a full or relative **path** to a save file (used exactly as given).
 
-  Automatic game discovery is planned.
+  List your configured games with `fringe-retro games` (see [Library](#library)).
 - Global flags:
   - `--help`, `-h` — show help. Works on the tool and on any subcommand
     (`fringe-retro set --help`).
@@ -286,6 +286,31 @@ Run `fringe-retro inspect <file>` for the full decoded list of every character.
 
 ---
 
+## Library
+
+### ✅ `games`
+
+List the games configured in your library manifest, each with its default save file and
+whether that file is present:
+
+```bash
+fringe-retro games
+```
+
+```
+ultima1        Ultima I  [found]
+    save:     /Applications/Ultima I™.app/Contents/Resources/game/PLAYER1.U1
+    platform: gog
+ultima2        Ultima II  [found]
+    save:     /Applications/Ultima II™.app/Contents/Resources/game/PLAYER
+    platform: gog
+```
+
+Games with `enabled = false` are hidden. See [Configuration](#configuration) to set up the
+manifest and [Game identifiers](#game-identifiers) to use these ids in other commands.
+
+---
+
 ## Where files live
 
 ### Active save files
@@ -336,37 +361,53 @@ preservation. Planned behavior:
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 
-### Default save directory
+### Game identifiers
 
-So you can type `fringe-retro inspect PLAYER1.U1` instead of the full in-bundle path, the
-tool resolves a **bare file name** against a configured directory. Resolution order:
-
-1. `FRINGE_RETRO_SAVE_DIR` environment variable, if set (a quick, per-shell override).
-2. `save_dir` under `[games.ultima1]` in `config.toml`.
-
-Paths that are absolute or contain a directory component are always used exactly as given,
-so nothing changes if you prefer to pass full paths. If you pass a bare name and no
-directory is configured, the tool tells you how to set one.
+Instead of a path, most commands accept a **game identifier** from your
+[library manifest](#configuration). The identifier resolves to that game's save directory
+plus its default save file:
 
 ```bash
-fringe-retro inspect PLAYER1.U1          # resolved against save_dir
-fringe-retro inspect "/full/path/PLAYER1.U1"   # used as-is
+fringe-retro inspect ultima2             # -> <ultima2 save_dir>/PLAYER
+fringe-retro get ultima1 gold            # -> <ultima1 save_dir>/PLAYER1.U1
+```
+
+For games with more than one save file, add a `:file` selector:
+
+```bash
+fringe-retro inspect ultima3             # -> ROSTER.ULT (default)
+fringe-retro inspect ultima3:PARTY.ULT   # -> the active party
+fringe-retro set ultima1:PLAYER2.U1 gold 500
+```
+
+Anything that isn't a configured identifier is treated as a plain filesystem path, so
+absolute and relative paths always work:
+
+```bash
+fringe-retro inspect "/full/path/PLAYER"   # used as-is
 ```
 
 ### Configuration
 
-Application settings use **TOML**. In Phase 1 the tool reads `config.toml` from the
-current working directory (or the path in the `FRINGE_RETRO_CONFIG` environment variable);
-a template lives at [config.example.toml](config.example.toml). Copy it to a local
-`config.toml` (which is gitignored) and set `save_dir`:
+Your **library manifest** is a TOML file listing the games you own. The tool reads
+`config.toml` from the current working directory (or the path in the `FRINGE_RETRO_CONFIG`
+environment variable); a template lives at [config.example.toml](config.example.toml).
+Copy it to a local `config.toml` (gitignored) and add one `[games.<id>]` table per game:
 
 ```toml
-[games.ultima1]
-save_dir = "/Applications/Ultima I™.app/Contents/Resources/game"
+[games.ultima2]
+platform = "gog"                         # informational for now
+save_dir = "/Applications/Ultima II™.app/Contents/Resources/game"
+
+[games.u1-steam]
+game = "ultima1"                         # `game` is needed when the id isn't a known name
+save_dir = "/path/to/steam/ultima1"
+enabled = false                          # hide a game you don't currently play
 ```
 
-A fuller configuration system — including a proper per-OS config directory (via the
-`directories` crate) — is planned.
+The `<id>` is what you type on the command line. `game` defaults to `<id>`, so
+`[games.ultima1]` needs no `game` key. Run `fringe-retro games` to list what's configured.
+A proper per-OS config directory (via the `directories` crate) is planned.
 
 ---
 
@@ -377,7 +418,7 @@ These are **not implemented yet**; they reflect the direction in [ROADMAP.md](RO
 | Command (tentative) | Purpose |
 | --- | --- |
 | `fringe-retro` (no arguments) | Launch the interactive **terminal UI** (browse games, characters, saves, and edit visually). The TUI is intended to become the primary interface. |
-| `list` / `games` | List discovered games and their save files, so you don't pass paths by hand. |
+| `list` (auto-discovery) | Auto-detect installed games and fill in save paths, so you don't configure them by hand. (`games` already lists your manually-configured library.) |
 | `library …` | Manage the Save Library: save a named snapshot, list, restore, duplicate, rename, delete. |
 | `config …` | View and edit configuration (save-library location, discovered game paths, etc.). |
 

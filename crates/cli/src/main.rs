@@ -87,6 +87,8 @@ enum Command {
         #[arg(long, default_value_t = 500)]
         interval: u64,
     },
+    /// List the games configured in your library manifest.
+    Games,
 }
 
 fn main() -> Result<()> {
@@ -289,6 +291,9 @@ fn main() -> Result<()> {
             let path = config.resolve_save_path(&path)?;
             watch_file(&path, interval)?;
         }
+        Command::Games => {
+            print_games(&config)?;
+        }
     }
     Ok(())
 }
@@ -297,6 +302,42 @@ fn main() -> Result<()> {
 fn roster_index(slot: usize) -> Result<usize> {
     anyhow::ensure!(slot >= 1, "slot must be >= 1");
     Ok(slot - 1)
+}
+
+/// Print the games configured in the library manifest and whether their saves are present.
+fn print_games(config: &Config) -> Result<()> {
+    let games = config.games()?;
+    if games.is_empty() {
+        println!("No games configured. Copy config.example.toml to config.toml to get started.");
+        return Ok(());
+    }
+    for game in games {
+        let default_save = game
+            .save_dir
+            .as_ref()
+            .map(|dir| dir.join(game.kind.default_save_file()));
+        let status = match &default_save {
+            Some(path) if path.exists() => "found",
+            Some(_) => "missing",
+            None => "no save_dir",
+        };
+        let note = if game.kind.is_inspectable() {
+            ""
+        } else {
+            "  (inspect not yet supported)"
+        };
+        println!("{:<14} {}{}  [{status}]", game.id, game.kind.title(), note);
+        if let Some(path) = &default_save {
+            println!("    save:     {}", path.display());
+        }
+        if let Some(platform) = &game.platform {
+            println!("    platform: {platform}");
+        }
+        if let Some(dir) = &game.install_dir {
+            println!("    install:  {}", dir.display());
+        }
+    }
+    Ok(())
 }
 
 /// Poll `path` and print byte-level changes until interrupted.
