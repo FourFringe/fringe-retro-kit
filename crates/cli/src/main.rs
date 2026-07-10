@@ -3,6 +3,7 @@
 //! Phase 1 exposes a small, permanent headless CLI over `fringe-retro-core`.
 
 mod config;
+mod edit;
 mod inspect;
 mod tui;
 

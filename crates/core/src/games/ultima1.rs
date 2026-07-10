@@ -259,6 +259,11 @@ impl Ultima1Save {
         FIELDS.iter().map(|f| f.key)
     }
 
+    /// The schema field table (key, label, kind) for building editors.
+    pub fn fields() -> &'static [Field] {
+        FIELDS
+    }
+
     /// Set a field by key from a string value, validating it first.
     ///
     /// Numbers accept decimal input; enum fields accept either the numeric value or a

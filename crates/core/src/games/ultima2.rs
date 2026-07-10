@@ -170,6 +170,11 @@ impl Ultima2Save {
         FIELDS.iter().map(|f| f.key)
     }
 
+    /// The schema field table (key, label, kind) for building editors.
+    pub fn fields() -> &'static [Field] {
+        FIELDS
+    }
+
     /// Set a field of the character by key, validating the value first.
     pub fn set_field(&mut self, key: &str, value: &str) -> Result<()> {
         let field = FIELDS

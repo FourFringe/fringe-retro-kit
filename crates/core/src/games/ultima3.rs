@@ -190,6 +190,11 @@ fn record_field_keys() -> impl Iterator<Item = &'static str> {
     FIELDS.iter().map(|f| f.key)
 }
 
+/// The schema field table (key, label, kind) shared by roster and party character records.
+pub fn record_fields() -> &'static [Field] {
+    FIELDS
+}
+
 /// A parsed Ultima III roster: 20 fixed 64-byte character records.
 #[derive(Clone)]
 pub struct Ultima3Roster {

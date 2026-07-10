@@ -49,21 +49,36 @@ Run `fringe-retro` **with no command** to launch the interactive terminal UI:
 fringe-retro
 ```
 
-The first iteration is a read-only **browser**. Select a game to open it: single-character
-games (Ultima I/II) go straight to a scrollable inspector, while multi-character games
-(Ultima III rosters and parties) first show a list of characters to drill into. The
-inspector shows the same view as the `inspect` command.
+The interactive UI is a **batch editor**. Select a game to open it: single-character
+games (Ultima I/II) go straight to a field editor, while multi-character games (Ultima III
+rosters and parties) first show a list of characters to drill into. The editor lists every
+field the tool understands as `label: value`.
+
+To change a field, select it and press `Enter` (or `e`): the current value appears on the
+bottom line for editing, and for enum/letter fields the valid options are shown. Type a new
+value and press `Enter` to commit it (invalid values are rejected and the field is left in
+edit mode so you can fix them), or `Esc` to cancel. Edits accumulate in memory — a `●` in
+the title marks unsaved changes — and are only written to disk when you press `s`, which
+takes a single timestamped backup and one write. Leaving a game or quitting with unsaved
+edits prompts you to save, discard, or cancel.
+
+Section grouping (Ultima I) and the party header (Ultima III) are not shown in the editor's
+flat field list; use the `inspect` command to see those.
 
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` (or `k` / `j`) | Move selection · scroll one line |
 | `Enter` (or `→`) | Open the selected game / character |
-| `PgUp` / `PgDn` (or `Space`) | Scroll a page |
-| `Home` / `End` | Jump to top / bottom |
-| `Esc` (or `←` / `Backspace`) | Back one screen |
+| `Enter` / `e` | Edit the selected field |
+| `s` | Save the session (backup + write) |
+| `PgUp` / `PgDn` (or `Space`) | Scroll a page (messages) |
+| `Home` / `End` | Jump to top / bottom (messages) |
+| `Esc` (or `←` / `Backspace`) | Cancel edit · back one screen |
 | `q` | Quit |
 
-Editing and the Save Library are planned (see [ROADMAP.md](ROADMAP.md)).
+When a save/discard prompt is open: `s` saves and continues, `d` discards, `Esc` cancels.
+
+The Save Library is planned (see [ROADMAP.md](ROADMAP.md)).
 
 ---
 
