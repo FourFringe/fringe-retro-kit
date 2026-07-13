@@ -13,7 +13,7 @@ use fringe_retro_core::backup;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
@@ -106,6 +106,8 @@ struct Editor {
     list: ListState,
     /// `Some` while the selected field's value is being typed.
     input: Option<String>,
+    /// `Some` while choosing an enum/letter/boolean field's value from a list.
+    picker: Option<Picker>,
     /// A one-line message (last edit, validation error, or save result).
     status: Option<String>,
     /// Field keys changed this session (manual edits or applied templates); used to
@@ -123,19 +125,32 @@ struct Capture {
     naming: Option<String>,
 }
 
+/// In-progress selection of an enum/letter/boolean field's value from an ordered list.
+struct Picker {
+    options: Vec<String>,
+    index: usize,
+}
+
 impl Editor {
     fn selected_row(&self) -> Option<&FieldRow> {
         self.list.selected().and_then(|i| self.rows.get(i))
     }
 
-    /// Begin editing the selected field: seed the input with its current value, and for
-    /// enum/letter fields show the numbered choices on the edit line.
+    /// Begin editing the selected field. Enum/letter/boolean fields open a value picker;
+    /// everything else opens a free-text input seeded with the current value.
     fn begin_edit(&mut self) {
         if let Some(row) = self.selected_row() {
-            let value = row.value.clone();
-            let hint = row.choice_hint();
-            self.input = Some(value);
-            self.status = hint;
+            if let Some(options) = row.pick_options() {
+                let index = options
+                    .iter()
+                    .position(|o| o.eq_ignore_ascii_case(&row.value))
+                    .unwrap_or(0);
+                self.picker = Some(Picker { options, index });
+                self.status = None;
+            } else {
+                self.input = Some(row.value.clone());
+                self.status = None;
+            }
         }
     }
 
@@ -718,6 +733,7 @@ impl App {
             rows,
             list,
             input: None,
+            picker: None,
             status: None,
             edited: BTreeSet::new(),
             capture: None,
@@ -746,6 +762,7 @@ impl App {
             match result {
                 Ok(()) => {
                     ed.input = None;
+                    ed.picker = None;
                     ed.edited.insert(key);
                     ed.status = Some(format!("Set {key} = {value}"));
                 }
@@ -807,6 +824,33 @@ impl App {
                             buf.pop();
                         }
                         KeyCode::Char(c) => buf.push(c),
+                        _ => {}
+                    }
+                } else if let Some(p) = &mut ed.picker {
+                    let len = p.options.len();
+                    match code {
+                        KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+                            if len > 0 {
+                                p.index = (p.index + len - 1) % len;
+                            }
+                        }
+                        KeyCode::Right
+                        | KeyCode::Down
+                        | KeyCode::Char('l')
+                        | KeyCode::Char('j') => {
+                            if len > 0 {
+                                p.index = (p.index + 1) % len;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if let Some(value) = p.options.get(p.index).cloned() {
+                                action = Action::Commit(value);
+                            }
+                        }
+                        KeyCode::Esc => {
+                            ed.picker = None;
+                            ed.status = None;
+                        }
                         _ => {}
                     }
                 } else if ed.capture.is_some() {
@@ -949,11 +993,49 @@ impl App {
             Screen::Confirm(c) => draw_confirm(frame, chunks[0], c),
         }
 
-        frame.render_widget(
-            Paragraph::new(bottom).style(Style::default().fg(Color::DarkGray)),
-            chunks[1],
-        );
+        // The enum picker gets a styled option strip; every other screen uses plain text.
+        let picker_line = match self.stack.last().expect("stack is never empty") {
+            Screen::Edit(ed) => picker_bottom_line(ed),
+            _ => None,
+        };
+        match picker_line {
+            Some(line) => frame.render_widget(Paragraph::new(line), chunks[1]),
+            None => frame.render_widget(
+                Paragraph::new(bottom).style(Style::default().fg(Color::DarkGray)),
+                chunks[1],
+            ),
+        }
     }
+}
+
+/// A styled option strip for the enum picker: the full list of values with the current one
+/// highlighted, so the user can see everything they're cycling through. It's rendered on a
+/// single line, so a long list is simply clipped on narrow terminals (the active editor row
+/// still shows the current value).
+fn picker_bottom_line(ed: &Editor) -> Option<Line<'static>> {
+    let p = ed.picker.as_ref()?;
+    let label = ed.selected_row().map(|r| r.label).unwrap_or("value");
+    let mut spans = vec![Span::styled(
+        format!(" {label}:  "),
+        Style::default().fg(Color::DarkGray),
+    )];
+    for (i, opt) in p.options.iter().enumerate() {
+        let style = if i == p.index {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        spans.push(Span::styled(format!(" {opt} "), style));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled(
+        " (←/→ Enter Esc)",
+        Style::default().fg(Color::DarkGray),
+    ));
+    Some(Line::from(spans))
 }
 
 /// Move a list selection by `delta`, wrapping around a list of `len` items.
@@ -1090,6 +1172,8 @@ fn draw_characters(frame: &mut Frame, area: Rect, cl: &mut CharList) {
 
 fn draw_editor(frame: &mut Frame, area: Rect, ed: &mut Editor, dirty: bool) {
     let selected = ed.capture.as_ref().map(|c| &c.selected);
+    let picker = ed.picker.as_ref();
+    let cursor = ed.list.selected();
     let items: Vec<ListItem> = ed
         .rows
         .iter()
@@ -1104,7 +1188,16 @@ fn draw_editor(frame: &mut Frame, area: Rect, ed: &mut Editor, dirty: bool) {
                     };
                     format!("{mark} {:<16} {}", r.label, r.value)
                 }
-                None => format!("{:<16} {}", r.label, r.value),
+                None => {
+                    // While picking, show the pending value on the active row.
+                    let value = match (picker, cursor) {
+                        (Some(p), Some(c)) if c == i => {
+                            p.options.get(p.index).cloned().unwrap_or_default()
+                        }
+                        _ => r.value.clone(),
+                    };
+                    format!("{:<16} {}", r.label, value)
+                }
             };
             ListItem::new(Line::from(text))
         })
@@ -1287,6 +1380,10 @@ fn bottom_line(screen: &Screen) -> String {
                     Some(s) => format!("  {label}: {input}_   {s}"),
                     None => format!("  {label}: {input}_   (Enter commit · Esc cancel)"),
                 }
+            } else if let Some(p) = &ed.picker {
+                let label = ed.selected_row().map(|r| r.label).unwrap_or("value");
+                let value = p.options.get(p.index).map(|s| s.as_str()).unwrap_or("");
+                format!("  {label}: ◄ {value} ►   (←/→ choose · Enter set · Esc cancel)")
             } else if let Some(cap) = &ed.capture {
                 if let Some(buf) = &cap.naming {
                     format!("  Template name: {buf}_   (Enter save · Esc back)")
@@ -1526,6 +1623,56 @@ mod tests {
             }
             _ => panic!("expected the editor"),
         }
+    }
+
+    #[test]
+    fn numeric_field_uses_text_input() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter);
+        select_field(&mut app, "gold");
+        app.handle_key(KeyCode::Enter); // begin edit
+        match app.stack.last() {
+            Some(Screen::Edit(ed)) => {
+                assert!(ed.input.is_some());
+                assert!(ed.picker.is_none());
+            }
+            _ => panic!("expected the editor"),
+        }
+    }
+
+    #[test]
+    fn enum_field_opens_picker_and_commits() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter);
+        select_field(&mut app, "race"); // enum: Human, Elf, Dwarf, Bobbit
+        app.handle_key(KeyCode::Enter); // begin edit -> picker
+        match app.stack.last() {
+            Some(Screen::Edit(ed)) => {
+                assert!(ed.picker.is_some());
+                assert!(ed.input.is_none());
+            }
+            _ => panic!("expected the editor"),
+        }
+        app.handle_key(KeyCode::Right); // Human -> Elf
+        app.handle_key(KeyCode::Enter); // commit
+        assert_eq!(editor_value(&app, "race"), "Elf");
+        assert!(app.session_dirty());
+        match app.stack.last() {
+            Some(Screen::Edit(ed)) => assert!(ed.picker.is_none()), // picker closed
+            _ => panic!("expected the editor"),
+        }
+    }
+
+    #[test]
+    fn picker_wraps_and_esc_cancels() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter);
+        select_field(&mut app, "race");
+        app.handle_key(KeyCode::Enter); // picker at "Human" (index 0)
+        app.handle_key(KeyCode::Left); // wrap to last option "Bobbit"
+        app.handle_key(KeyCode::Esc); // cancel without committing
+        assert!(!app.session_dirty());
+        assert_eq!(editor_value(&app, "race"), "Human"); // unchanged
     }
 
     #[test]

@@ -38,22 +38,16 @@ pub struct FieldRow {
 }
 
 impl FieldRow {
-    /// For enum/letter fields, an inline hint listing each value with the token you type to
-    /// pick it: the number for enums (e.g. `1) Dagger  2) Mace`), the letter for
-    /// letter-fields (e.g. `M) Male  F) Female`).
-    pub fn choice_hint(&self) -> Option<String> {
-        let parts: Vec<String> = match self.kind {
-            FieldKind::Enum { variants, .. } => variants
-                .iter()
-                .map(|(key, name)| format!("{key}) {name}"))
-                .collect(),
-            FieldKind::Letter { variants } => variants
-                .iter()
-                .map(|(key, name)| format!("{}) {name}", *key as u8 as char))
-                .collect(),
-            _ => return None,
-        };
-        Some(parts.join("  "))
+    /// The ordered list of values to cycle through for enum/letter/boolean fields (used by
+    /// the editor's picker). `None` for free-text fields such as names and numbers.
+    pub fn pick_options(&self) -> Option<Vec<String>> {
+        match self.kind {
+            FieldKind::Enum { variants, .. } | FieldKind::Letter { variants } => {
+                Some(variants.iter().map(|(_, name)| name.to_string()).collect())
+            }
+            FieldKind::Bool => Some(vec!["no".to_string(), "yes".to_string()]),
+            _ => None,
+        }
     }
 }
 
@@ -290,11 +284,10 @@ mod tests {
         let rows = session.rows(0);
         let gold = rows.iter().find(|r| r.key == "gold").unwrap();
         assert_eq!(gold.value, "100");
-        assert!(gold.choice_hint().is_none()); // numeric field
+        assert!(gold.pick_options().is_none()); // numeric field: free text
         let transport = rows.iter().find(|r| r.key == "transport").unwrap();
-        let hint = transport.choice_hint().unwrap(); // enum field
-        assert!(hint.contains("Aircar"));
-        assert!(hint.contains(") ")); // numbered, e.g. "3) Aircar"
+        let options = transport.pick_options().unwrap(); // enum field: picker
+        assert!(options.contains(&"Aircar".to_string()));
     }
 
     #[test]

@@ -54,13 +54,14 @@ games (Ultima I/II) go straight to a field editor, while multi-character games (
 rosters and parties) first show a list of characters to drill into. The editor lists every
 field the tool understands as `label: value`.
 
-To change a field, select it and press `Enter` (or `e`): the current value appears on the
-bottom line for editing, and for enum/letter fields the valid options are shown. Type a new
-value and press `Enter` to commit it (invalid values are rejected and the field is left in
-edit mode so you can fix them), or `Esc` to cancel. Edits accumulate in memory — a `●` in
-the title marks unsaved changes — and are only written to disk when you press `s`, which
-takes a single timestamped backup and one write. Leaving a game or quitting with unsaved
-edits prompts you to save, discard, or cancel.
+To change a field, select it and press `Enter` (or `e`). **Enum fields** (race, class,
+weapon, and the like) and boolean fields open a **picker**: use `←`/`→` to cycle through the
+valid values and `Enter` to set the chosen one. **Text and number fields** open an inline
+editor on the bottom line — type a new value and press `Enter` to commit (invalid values are
+rejected and the field stays in edit mode so you can fix them). `Esc` cancels either. Edits
+accumulate in memory — a `●` in the title marks unsaved changes — and are only written to
+disk when you press `s`, which takes a single timestamped backup and one write. Leaving a
+game or quitting with unsaved edits prompts you to save, discard, or cancel.
 
 Section grouping (Ultima I) and the party header (Ultima III) are not shown in the editor's
 flat field list; use the `inspect` command to see those.
