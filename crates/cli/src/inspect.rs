@@ -26,8 +26,13 @@ pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
                 slot,
                 party.summary(member)
             ));
-            for (label, value) in party.inspect(member) {
-                out.push(format!("  {label:<16} {value}"));
+            let mut current_section = "";
+            for (section, label, value) in party.inspect(member) {
+                if section != current_section {
+                    out.push(format!("  {section}:"));
+                    current_section = section;
+                }
+                out.push(format!("    {label:<16} {value}"));
             }
         }
     } else if bytes.len() == ultima3::ROSTER_LEN {
@@ -39,8 +44,13 @@ pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
         for slot in occupied {
             out.push(String::new());
             out.push(format!("Slot {}: {}", slot + 1, roster.summary(slot)));
-            for (label, value) in roster.inspect(slot) {
-                out.push(format!("  {label:<16} {value}"));
+            let mut current_section = "";
+            for (section, label, value) in roster.inspect(slot) {
+                if section != current_section {
+                    out.push(format!("  {section}:"));
+                    current_section = section;
+                }
+                out.push(format!("    {label:<16} {value}"));
             }
         }
     } else if bytes.len() == ultima2::SAVE_LEN {

@@ -21,13 +21,27 @@ use crate::config::Config;
 use crate::edit::{Entity, FieldRow, Session};
 use crate::templates::TemplateSet;
 
+/// One save file a game may keep in its save directory.
+struct SaveFile {
+    name: String,
+    path: PathBuf,
+    found: bool,
+}
+
 /// One game shown in the browser.
 struct GameRow {
     id: String,
     title: String,
     inspectable: bool,
-    save_path: Option<PathBuf>,
-    found: bool,
+    /// The game's candidate save files (default first).
+    files: Vec<SaveFile>,
+}
+
+impl GameRow {
+    /// Whether any of this game's save files exist on disk.
+    fn found(&self) -> bool {
+        self.files.iter().any(|f| f.found)
+    }
 }
 
 /// Which screen the browser is showing. The browser keeps a stack of these; the top is
@@ -35,6 +49,8 @@ struct GameRow {
 enum Screen {
     /// The list of games (selection is an index into `App::games`).
     Games(ListState),
+    /// A chooser for a game's save files (shown when a game has more than one).
+    SaveFiles(FileList),
     /// A list of a multi-character save's characters (roster slots / party members).
     Characters(CharList),
     /// A field editor for one character.
@@ -54,6 +70,19 @@ struct CharList {
     title: String,
     entities: Vec<Entity>,
     list: ListState,
+}
+
+/// A chooser for one of a game's save files (e.g. Ultima III roster vs. party).
+struct FileList {
+    title: String,
+    entries: Vec<FileEntry>,
+    list: ListState,
+}
+
+/// One selectable save file in the [`FileList`].
+struct FileEntry {
+    label: String,
+    path: PathBuf,
 }
 
 /// One timestamped backup file of the current save.
@@ -224,7 +253,7 @@ impl Editor {
 #[derive(Clone)]
 enum Pending {
     QuitApp,
-    LeaveGame,
+    LeaveFile,
     /// Restore the given backup over the current save, then refresh the editor entity.
     Restore {
         backup: PathBuf,
@@ -316,6 +345,7 @@ enum Action {
     Back,
     Quit,
     OpenGame(Option<usize>),
+    OpenSaveFile(Option<usize>),
     OpenEntry(Option<usize>),
     Commit(String),
     Save,
@@ -351,25 +381,28 @@ impl App {
         self.session.as_ref().is_some_and(|s| s.is_dirty())
     }
 
-    /// Handle a "go back" request, guarding unsaved edits when leaving a game.
+    /// Handle a "go back" request, guarding unsaved edits when leaving the current file.
     fn back(&mut self) {
-        match self.stack.len() {
-            0 | 1 => self.request_quit(),
-            2 => {
-                // Popping returns to the game list, i.e. we are leaving the current game.
-                if self.session_dirty() {
-                    self.stack.push(Screen::Confirm(Confirm {
-                        pending: Pending::LeaveGame,
-                        message: None,
-                    }));
-                } else {
-                    self.stack.pop();
-                    self.session = None;
-                }
-            }
-            _ => {
-                self.stack.pop();
-            }
+        if self.stack.len() <= 1 {
+            self.request_quit();
+            return;
+        }
+        // Returning to a chooser (the games list or the file chooser) leaves the open file.
+        let below_is_chooser = matches!(
+            self.stack.get(self.stack.len() - 2),
+            Some(Screen::Games(_)) | Some(Screen::SaveFiles(_))
+        );
+        let leaving_file = below_is_chooser && self.session.is_some();
+        if leaving_file && self.session_dirty() {
+            self.stack.push(Screen::Confirm(Confirm {
+                pending: Pending::LeaveFile,
+                message: None,
+            }));
+            return;
+        }
+        self.stack.pop();
+        if leaving_file {
+            self.session = None;
         }
     }
 
@@ -418,8 +451,9 @@ impl App {
         }
         match pending {
             Some(Pending::QuitApp) => self.running = false,
-            Some(Pending::LeaveGame) => {
-                while self.stack.len() > 1 {
+            Some(Pending::LeaveFile) => {
+                // The confirm was already popped; pop the content screen we were leaving.
+                if self.stack.len() > 1 {
                     self.stack.pop();
                 }
                 self.session = None;
@@ -692,34 +726,81 @@ impl App {
     }
 
     /// Open the selected game: load an editing session and show its character(s).
+    /// Open the selected game: choose among its save files, or open its only one directly.
     fn open_game(&mut self, index: usize) {
         let Some(row) = self.games.get(index) else {
             return;
         };
         let title = format!("{} ({})", row.title, row.id);
+        let row_title = row.title.clone();
         let inspectable = row.inspectable;
-        let found = row.found;
-        let save_path = row.save_path.clone();
-        let game_title = row.title.clone();
+        // Copy out the file data so the `self.games` borrow ends before we mutate `self`.
+        let files: Vec<(String, PathBuf, bool)> = row
+            .files
+            .iter()
+            .map(|f| (f.name.clone(), f.path.clone(), f.found))
+            .collect();
 
         if !inspectable {
-            let msg = vec![format!("Editing {game_title} is not supported yet.")];
+            let msg = vec![format!("Editing {row_title} is not supported yet.")];
             self.stack.push(Screen::Inspect(Inspector::new(title, msg)));
             return;
         }
-        let Some(path) = save_path else {
-            let msg = vec!["No save directory configured for this game.".to_string()];
-            self.stack.push(Screen::Inspect(Inspector::new(title, msg)));
-            return;
+        let found: Vec<&(String, PathBuf, bool)> = files.iter().filter(|f| f.2).collect();
+        match found.len() {
+            0 => {
+                let msg = if files.is_empty() {
+                    vec!["No save directory configured for this game.".to_string()]
+                } else {
+                    let mut m = vec![
+                        "No save files found for this game.".to_string(),
+                        String::new(),
+                        "Expected:".to_string(),
+                    ];
+                    m.extend(files.iter().map(|f| format!("  {}", f.1.display())));
+                    m
+                };
+                self.stack.push(Screen::Inspect(Inspector::new(title, msg)));
+            }
+            1 => {
+                let (name, path, _) = found[0].clone();
+                self.open_save(path, name);
+            }
+            _ => {
+                let entries: Vec<FileEntry> = found
+                    .iter()
+                    .map(|f| FileEntry {
+                        label: f.0.clone(),
+                        path: f.1.clone(),
+                    })
+                    .collect();
+                let mut list = ListState::default();
+                list.select(Some(0));
+                self.stack.push(Screen::SaveFiles(FileList {
+                    title,
+                    entries,
+                    list,
+                }));
+            }
+        }
+    }
+
+    /// Open the save file selected in the file chooser.
+    fn open_selected_file(&mut self, index: usize) {
+        let target = match self.stack.last() {
+            Some(Screen::SaveFiles(fl)) => fl
+                .entries
+                .get(index)
+                .map(|e| (e.path.clone(), e.label.clone())),
+            _ => None,
         };
-        if !found {
-            let msg = vec![
-                "Save file not found:".to_string(),
-                path.display().to_string(),
-            ];
-            self.stack.push(Screen::Inspect(Inspector::new(title, msg)));
-            return;
+        if let Some((path, label)) = target {
+            self.open_save(path, label);
         }
+    }
+
+    /// Load a save file and show its character(s), or a message; pushes onto the stack.
+    fn open_save(&mut self, path: PathBuf, title: String) {
         match Session::load(&path) {
             Ok(Some(session)) => {
                 let entities = session.entities();
@@ -852,6 +933,21 @@ impl App {
                 }
                 _ => {}
             },
+            Screen::SaveFiles(fl) => {
+                let len = fl.entries.len();
+                match code {
+                    KeyCode::Char('q') => action = Action::Quit,
+                    KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => {
+                        action = Action::Back;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => select_wrap(&mut fl.list, len, 1),
+                    KeyCode::Up | KeyCode::Char('k') => select_wrap(&mut fl.list, len, -1),
+                    KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                        action = Action::OpenSaveFile(fl.list.selected());
+                    }
+                    _ => {}
+                }
+            }
             Screen::Characters(cl) => {
                 let len = cl.entities.len();
                 match code {
@@ -1008,6 +1104,7 @@ impl App {
             Action::Back => self.back(),
             Action::Quit => self.request_quit(),
             Action::OpenGame(Some(i)) => self.open_game(i),
+            Action::OpenSaveFile(Some(i)) => self.open_selected_file(i),
             Action::OpenEntry(Some(i)) => self.open_entry(i),
             Action::Commit(v) => self.commit_edit(v),
             Action::Save => self.save_from_editor(),
@@ -1021,7 +1118,7 @@ impl App {
             Action::ConfirmDiscard => self.confirm_discard(),
             Action::ConfirmAccept => self.complete_pending(),
             Action::ConfirmCancel => self.confirm_cancel(),
-            Action::OpenGame(None) | Action::OpenEntry(None) => {}
+            Action::OpenGame(None) | Action::OpenSaveFile(None) | Action::OpenEntry(None) => {}
         }
     }
 
@@ -1036,6 +1133,7 @@ impl App {
         let games = &self.games;
         match self.stack.last_mut().expect("stack is never empty") {
             Screen::Games(list) => draw_games(frame, chunks[0], games, list),
+            Screen::SaveFiles(fl) => draw_savefiles(frame, chunks[0], fl),
             Screen::Characters(cl) => draw_characters(frame, chunks[0], cl),
             Screen::Edit(ed) => draw_editor(frame, chunks[0], ed, dirty),
             Screen::Backups(bl) => draw_backups(frame, chunks[0], bl),
@@ -1197,7 +1295,7 @@ fn draw_games(frame: &mut Frame, area: Rect, games: &[GameRow], list: &mut ListS
             .map(|g| {
                 let status = if !g.inspectable {
                     "not supported"
-                } else if g.found {
+                } else if g.found() {
                     "found"
                 } else {
                     "missing"
@@ -1211,6 +1309,16 @@ fn draw_games(frame: &mut Frame, area: Rect, games: &[GameRow], list: &mut ListS
     };
     let widget = selectable_list(items, " Fringe Retro Kit — Games ".to_string());
     frame.render_stateful_widget(widget, area, list);
+}
+
+fn draw_savefiles(frame: &mut Frame, area: Rect, fl: &mut FileList) {
+    let items: Vec<ListItem> = fl
+        .entries
+        .iter()
+        .map(|e| ListItem::new(Line::from(e.label.clone())))
+        .collect();
+    let widget = selectable_list(items, format!(" {} — choose a save file ", fl.title));
+    frame.render_stateful_widget(widget, area, &mut fl.list);
 }
 
 fn draw_characters(frame: &mut Frame, area: Rect, cl: &mut CharList) {
@@ -1434,6 +1542,9 @@ fn draw_templates(frame: &mut Frame, area: Rect, tl: &mut TemplateList) {
 fn bottom_line(screen: &Screen) -> String {
     match screen {
         Screen::Games(_) => " ↑/↓ select · Enter open · q quit ".to_string(),
+        Screen::SaveFiles(_) => {
+            " ↑/↓ select · Enter open · Esc back · q quit ".to_string()
+        }
         Screen::Characters(_) => " ↑/↓ select · Enter open · Esc back · q quit ".to_string(),
         Screen::Edit(ed) => {
             if let Some(input) = &ed.input {
@@ -1501,48 +1612,29 @@ fn draw_inspector(frame: &mut Frame, area: Rect, insp: &Inspector) {
 pub fn run(config: Config) -> Result<()> {
     let mut games = Vec::new();
     for g in config.games()? {
-        let title = g.kind.title().to_string();
-        let inspectable = g.kind.is_inspectable();
-        let Some(dir) = g.save_dir else {
-            // No save directory configured: one row, marked missing.
-            games.push(GameRow {
-                id: g.id,
-                title,
-                inspectable,
-                save_path: None,
-                found: false,
-            });
-            continue;
+        let files = match &g.save_dir {
+            Some(dir) => g
+                .kind
+                .save_files()
+                .iter()
+                .map(|name| {
+                    let path = dir.join(name);
+                    let found = path.exists();
+                    SaveFile {
+                        name: name.to_string(),
+                        path,
+                        found,
+                    }
+                })
+                .collect(),
+            None => Vec::new(),
         };
-        let files = g.kind.save_files();
-        // Show a row per known save file that exists; if none exist, show the default.
-        let existing: Vec<&str> = files
-            .iter()
-            .copied()
-            .filter(|f| dir.join(f).exists())
-            .collect();
-        let shown: Vec<&str> = if existing.is_empty() {
-            vec![g.kind.default_save_file()]
-        } else {
-            existing
-        };
-        let multi = files.len() > 1;
-        for file in shown {
-            let save_path = dir.join(file);
-            let found = save_path.exists();
-            let row_title = if multi {
-                format!("{title} ({file})")
-            } else {
-                title.clone()
-            };
-            games.push(GameRow {
-                id: g.id.clone(),
-                title: row_title,
-                inspectable,
-                save_path: Some(save_path),
-                found,
-            });
-        }
+        games.push(GameRow {
+            id: g.id,
+            title: g.kind.title().to_string(),
+            inspectable: g.kind.is_inspectable(),
+            files,
+        });
     }
 
     let mut app = App::new(games);
@@ -1578,8 +1670,7 @@ mod tests {
                 id: format!("g{i}"),
                 title: format!("Game {i}"),
                 inspectable: true,
-                save_path: None,
-                found: false,
+                files: Vec::new(),
             })
             .collect();
         App::new(games)
@@ -1641,8 +1732,11 @@ mod tests {
             id: "u1".to_string(),
             title: "Ultima I".to_string(),
             inspectable: true,
-            save_path: Some(path),
-            found: true,
+            files: vec![SaveFile {
+                name: "PLAYER1.U1".to_string(),
+                path,
+                found: true,
+            }],
         }]);
         (dir, app)
     }
@@ -1660,8 +1754,44 @@ mod tests {
             id: "u3".to_string(),
             title: "Ultima III".to_string(),
             inspectable: true,
-            save_path: Some(path),
-            found: true,
+            files: vec![SaveFile {
+                name: "PARTY.ULT".to_string(),
+                path,
+                found: true,
+            }],
+        }]);
+        (dir, app)
+    }
+
+    /// An Ultima III game with both a roster and a party file present (triggers the chooser).
+    fn app_with_ultima3_both() -> (tempfile::TempDir, App) {
+        use fringe_retro_core::games::ultima3;
+        let dir = tempfile::tempdir().unwrap();
+        let mut roster = vec![0u8; ultima3::ROSTER_LEN];
+        roster[0..4].copy_from_slice(b"Ari\0"); // slot 0 occupied
+        std::fs::write(dir.path().join("ROSTER.ULT"), &roster).unwrap();
+        let mut party = vec![0u8; ultima3::PARTY_LEN];
+        party[0x00] = 0x3F;
+        party[0x07] = 1;
+        party[0x12..0x16].copy_from_slice(b"Bob\0");
+        std::fs::write(dir.path().join("PARTY.ULT"), &party).unwrap();
+        let files = ["ROSTER.ULT", "PARTY.ULT"]
+            .iter()
+            .map(|name| {
+                let path = dir.path().join(name);
+                let found = path.exists();
+                SaveFile {
+                    name: name.to_string(),
+                    path,
+                    found,
+                }
+            })
+            .collect();
+        let app = App::new(vec![GameRow {
+            id: "u3".to_string(),
+            title: "Ultima III".to_string(),
+            inspectable: true,
+            files,
         }]);
         (dir, app)
     }
@@ -1728,6 +1858,31 @@ mod tests {
         app.handle_key(KeyCode::Enter); // commit
         assert_eq!(editor_value(&app, "transport"), "Horse");
         assert!(app.session_dirty());
+    }
+
+    #[test]
+    fn multi_file_game_shows_chooser_and_back_returns_to_it() {
+        let (_dir, mut app) = app_with_ultima3_both();
+        app.handle_key(KeyCode::Enter); // game has 2 files -> file chooser
+        assert!(matches!(app.stack.last(), Some(Screen::SaveFiles(_))));
+
+        app.handle_key(KeyCode::Down); // select PARTY.ULT
+        app.handle_key(KeyCode::Enter); // open it -> characters (Party settings + members)
+        assert!(matches!(app.stack.last(), Some(Screen::Characters(_))));
+
+        app.handle_key(KeyCode::Esc); // back returns to the file chooser, not the games list
+        assert!(matches!(app.stack.last(), Some(Screen::SaveFiles(_))));
+        assert!(app.session.is_none()); // leaving the file cleared the session
+
+        app.handle_key(KeyCode::Esc); // back again -> games list
+        assert!(matches!(app.stack.last(), Some(Screen::Games(_))));
+    }
+
+    #[test]
+    fn single_file_game_skips_the_chooser() {
+        let (_dir, mut app) = app_with_ultima3_party(); // only PARTY.ULT present
+        app.handle_key(KeyCode::Enter); // one file -> straight to characters, no chooser
+        assert!(matches!(app.stack.last(), Some(Screen::Characters(_))));
     }
 
     #[test]

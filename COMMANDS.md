@@ -49,15 +49,15 @@ Run `fringe-retro` **with no command** to launch the interactive terminal UI:
 fringe-retro
 ```
 
-The interactive UI is a **batch editor**. Select a game to open it: single-character
-games (Ultima I/II) go straight to a field editor, while multi-character games (Ultima III
-rosters and parties) first show a list of characters to drill into. The editor lists every
-field the tool understands as `label: value`.
+The interactive UI is a **batch editor**. Each game appears once in the list. Selecting a
+game that has more than one save file (e.g. Ultima III's character **roster**, `ROSTER.ULT`,
+and the active **party**, `PARTY.ULT`) shows a **file chooser** first; games with a single
+save file open straight away. Single-character saves (Ultima I/II) go to a field editor,
+while multi-character saves (an Ultima III roster or party) show a list of characters to
+drill into. The editor lists every field the tool understands as `label: value`.
 
-Ultima III keeps two save files — the character **roster** (`ROSTER.ULT`) and the active
-**party** (`PARTY.ULT`) — so each is listed separately (e.g. `Ultima III (ROSTER.ULT)` and
-`Ultima III (PARTY.ULT)`) when present. The party file is the one that includes the "Party
-settings" entry.
+The party file is the one that includes the **"Party settings"** entry (the party header).
+`Esc` from a character list steps back to the file chooser, then to the games list.
 
 To change a field, select it and press `Enter` (or `e`). **Enum fields** (race, class,
 weapon, and the like) and boolean fields open a **picker**: use `←`/`→` to cycle through the

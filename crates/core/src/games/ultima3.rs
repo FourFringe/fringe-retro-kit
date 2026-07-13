@@ -87,57 +87,75 @@ const fn letter(variants: Variants) -> FieldKind {
     FieldKind::Letter { variants }
 }
 
-/// Every character-record field we understand (offsets are within a 64-byte record).
+// Display sections for the character record, used to group the editor and inspect output.
+const S_CHARACTER: &str = "Character";
+const S_ATTRIBUTES: &str = "Attributes";
+const S_VITALS: &str = "Vitals";
+const S_RESOURCES: &str = "Resources";
+const S_MARKS: &str = "Marks & Cards";
+const S_EQUIPPED: &str = "Equipped";
+const S_ARMOR: &str = "Inventory: Armor";
+const S_WEAPONS: &str = "Inventory: Weapons";
+
+/// Every character-record field we understand (offsets are within a 64-byte record). Array
+/// order is for display (grouped into sections); each field carries its own byte offset, so
+/// the order here is independent of the on-disk layout.
 #[rustfmt::skip]
 const FIELDS: &[Field] = &[
-    Field::new("name",         "Name",         0x00, FieldKind::Name { len: NAME_LEN }),
-    Field::new("marks_cards",  "Marks/Cards",  0x0E, FieldKind::Bitfield { flags: MARKS_CARDS }),
-    Field::new("torches",      "Torches",      0x0F, bcd(1)),
-    Field::new("in_party",     "In Party",     0x10, FieldKind::Bool),
-    Field::new("status",       "Status",       0x11, letter(STATUS)),
-    Field::new("strength",     "Strength",     0x12, bcd(1)),
-    Field::new("dexterity",    "Dexterity",    0x13, bcd(1)),
-    Field::new("intelligence", "Intelligence", 0x14, bcd(1)),
-    Field::new("wisdom",       "Wisdom",       0x15, bcd(1)),
-    Field::new("race",         "Race",         0x16, letter(RACE)),
-    Field::new("class",        "Class",        0x17, letter(CLASS)),
-    Field::new("gender",       "Gender",       0x18, letter(GENDER)),
-    Field::new("magic",        "Magic Points", 0x19, bcd(1)),
-    Field::new("hits",         "Hit Points",   0x1A, bcd(2)),
-    Field::new("max_hits",     "Max Hits",     0x1C, bcd(2)),
-    Field::new("experience",   "Experience",   0x1E, bcd(2)),
-    Field::new("food_frac",    "Food (frac)",  0x20, bcd(1)),
-    Field::new("food",         "Food",         0x21, bcd(2)),
-    Field::new("gold",         "Gold",         0x23, bcd(2)),
-    Field::new("gems",         "Gems",         0x25, bcd(1)),
-    Field::new("keys",         "Keys",         0x26, bcd(1)),
-    Field::new("powders",      "Powders",      0x27, bcd(1)),
-    Field::new("worn_armor",   "Worn Armor",   0x28, FieldKind::Byte),
-    // Armor owned (BCD counts, letters B..H in the format spec).
-    Field::new("armor_cloth",        "Armor: Cloth",     0x29, bcd(1)),
-    Field::new("armor_leather",      "Armor: Leather",   0x2A, bcd(1)),
-    Field::new("armor_chain",        "Armor: Chain",     0x2B, bcd(1)),
-    Field::new("armor_plate",        "Armor: Plate",     0x2C, bcd(1)),
-    Field::new("armor_chain_plus2",  "Armor: +2 Chain",  0x2D, bcd(1)),
-    Field::new("armor_plate_plus2",  "Armor: +2 Plate",  0x2E, bcd(1)),
-    Field::new("armor_exotic",       "Armor: Exotic",    0x2F, bcd(1)),
-    Field::new("weapon",       "Ready Weapon", 0x30, FieldKind::Byte),
-    // Weapons owned (BCD counts, letters B..P in the format spec).
-    Field::new("weapon_dagger",      "Weapon: Dagger",   0x31, bcd(1)),
-    Field::new("weapon_mace",        "Weapon: Mace",     0x32, bcd(1)),
-    Field::new("weapon_sling",       "Weapon: Sling",    0x33, bcd(1)),
-    Field::new("weapon_axe",         "Weapon: Axe",      0x34, bcd(1)),
-    Field::new("weapon_bow",         "Weapon: Bow",      0x35, bcd(1)),
-    Field::new("weapon_sword",       "Weapon: Sword",    0x36, bcd(1)),
-    Field::new("weapon_2h_sword",    "Weapon: 2H Sword", 0x37, bcd(1)),
-    Field::new("weapon_axe_plus2",   "Weapon: +2 Axe",   0x38, bcd(1)),
-    Field::new("weapon_bow_plus2",   "Weapon: +2 Bow",   0x39, bcd(1)),
-    Field::new("weapon_sword_plus2", "Weapon: +2 Sword", 0x3A, bcd(1)),
-    Field::new("weapon_gloves",      "Weapon: Gloves",   0x3B, bcd(1)),
-    Field::new("weapon_axe_plus4",   "Weapon: +4 Axe",   0x3C, bcd(1)),
-    Field::new("weapon_bow_plus4",   "Weapon: +4 Bow",   0x3D, bcd(1)),
-    Field::new("weapon_sword_plus4", "Weapon: +4 Sword", 0x3E, bcd(1)),
-    Field::new("weapon_exotic",      "Weapon: Exotic",   0x3F, bcd(1)),
+    // Character
+    Field::new("name",         "Name",         0x00, FieldKind::Name { len: NAME_LEN }).in_section(S_CHARACTER),
+    Field::new("race",         "Race",         0x16, letter(RACE)).in_section(S_CHARACTER),
+    Field::new("class",        "Class",        0x17, letter(CLASS)).in_section(S_CHARACTER),
+    Field::new("gender",       "Gender",       0x18, letter(GENDER)).in_section(S_CHARACTER),
+    Field::new("status",       "Status",       0x11, letter(STATUS)).in_section(S_CHARACTER),
+    Field::new("in_party",     "In Party",     0x10, FieldKind::Bool).in_section(S_CHARACTER),
+    // Attributes
+    Field::new("strength",     "Strength",     0x12, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("dexterity",    "Dexterity",    0x13, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("intelligence", "Intelligence", 0x14, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("wisdom",       "Wisdom",       0x15, bcd(1)).in_section(S_ATTRIBUTES),
+    // Vitals
+    Field::new("hits",         "Hit Points",   0x1A, bcd(2)).in_section(S_VITALS),
+    Field::new("max_hits",     "Max Hits",     0x1C, bcd(2)).in_section(S_VITALS),
+    Field::new("magic",        "Magic Points", 0x19, bcd(1)).in_section(S_VITALS),
+    Field::new("experience",   "Experience",   0x1E, bcd(2)).in_section(S_VITALS),
+    // Resources
+    Field::new("food",         "Food",         0x21, bcd(2)).in_section(S_RESOURCES),
+    Field::new("food_frac",    "Food (frac)",  0x20, bcd(1)).in_section(S_RESOURCES),
+    Field::new("gold",         "Gold",         0x23, bcd(2)).in_section(S_RESOURCES),
+    Field::new("gems",         "Gems",         0x25, bcd(1)).in_section(S_RESOURCES),
+    Field::new("keys",         "Keys",         0x26, bcd(1)).in_section(S_RESOURCES),
+    Field::new("powders",      "Powders",      0x27, bcd(1)).in_section(S_RESOURCES),
+    Field::new("torches",      "Torches",      0x0F, bcd(1)).in_section(S_RESOURCES),
+    // Marks & Cards
+    Field::new("marks_cards",  "Marks/Cards",  0x0E, FieldKind::Bitfield { flags: MARKS_CARDS }).in_section(S_MARKS),
+    // Equipped
+    Field::new("worn_armor",   "Worn Armor",   0x28, FieldKind::Byte).in_section(S_EQUIPPED),
+    Field::new("weapon",       "Ready Weapon", 0x30, FieldKind::Byte).in_section(S_EQUIPPED),
+    // Inventory: Armor (BCD counts, letters B..H in the format spec)
+    Field::new("armor_cloth",        "Armor: Cloth",     0x29, bcd(1)).in_section(S_ARMOR),
+    Field::new("armor_leather",      "Armor: Leather",   0x2A, bcd(1)).in_section(S_ARMOR),
+    Field::new("armor_chain",        "Armor: Chain",     0x2B, bcd(1)).in_section(S_ARMOR),
+    Field::new("armor_plate",        "Armor: Plate",     0x2C, bcd(1)).in_section(S_ARMOR),
+    Field::new("armor_chain_plus2",  "Armor: +2 Chain",  0x2D, bcd(1)).in_section(S_ARMOR),
+    Field::new("armor_plate_plus2",  "Armor: +2 Plate",  0x2E, bcd(1)).in_section(S_ARMOR),
+    Field::new("armor_exotic",       "Armor: Exotic",    0x2F, bcd(1)).in_section(S_ARMOR),
+    // Inventory: Weapons (BCD counts, letters B..P in the format spec)
+    Field::new("weapon_dagger",      "Weapon: Dagger",   0x31, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_mace",        "Weapon: Mace",     0x32, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_sling",       "Weapon: Sling",    0x33, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_axe",         "Weapon: Axe",      0x34, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_bow",         "Weapon: Bow",      0x35, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_sword",       "Weapon: Sword",    0x36, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_2h_sword",    "Weapon: 2H Sword", 0x37, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_axe_plus2",   "Weapon: +2 Axe",   0x38, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_bow_plus2",   "Weapon: +2 Bow",   0x39, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_sword_plus2", "Weapon: +2 Sword", 0x3A, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_gloves",      "Weapon: Gloves",   0x3B, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_axe_plus4",   "Weapon: +4 Axe",   0x3C, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_bow_plus4",   "Weapon: +4 Bow",   0x3D, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_sword_plus4", "Weapon: +4 Sword", 0x3E, bcd(1)).in_section(S_WEAPONS),
+    Field::new("weapon_exotic",      "Weapon: Exotic",   0x3F, bcd(1)).in_section(S_WEAPONS),
 ];
 
 // --- Shared character-record helpers, parameterized by the record's base offset. ---
@@ -153,11 +171,17 @@ fn record_get(buf: &[u8], base: usize, key: &str) -> Option<String> {
     Some(schema::read_field(buf, base, field))
 }
 
-/// All known fields of the record at `base` as `(label, value)` pairs.
-fn record_inspect(buf: &[u8], base: usize) -> Vec<(&'static str, String)> {
+/// All known fields of the record at `base` as `(section, label, value)` tuples.
+fn record_inspect(buf: &[u8], base: usize) -> Vec<(&'static str, &'static str, String)> {
     FIELDS
         .iter()
-        .map(|f| (f.label, schema::read_field(buf, base, f)))
+        .map(|f| {
+            (
+                f.section.unwrap_or_default(),
+                f.label,
+                schema::read_field(buf, base, f),
+            )
+        })
         .collect()
 }
 
@@ -285,8 +309,8 @@ impl Ultima3Roster {
         record_get(&self.bytes, index * RECORD_LEN, key)
     }
 
-    /// All known fields of a character as `(label, value)` pairs.
-    pub fn inspect(&self, index: usize) -> Vec<(&'static str, String)> {
+    /// All known fields of a character as `(section, label, value)` tuples.
+    pub fn inspect(&self, index: usize) -> Vec<(&'static str, &'static str, String)> {
         record_inspect(&self.bytes, index * RECORD_LEN)
     }
 
@@ -407,8 +431,8 @@ impl Ultima3Party {
         record_get(&self.bytes, self.member_base(member), key)
     }
 
-    /// All known fields of a party member as `(label, value)` pairs.
-    pub fn inspect(&self, member: usize) -> Vec<(&'static str, String)> {
+    /// All known fields of a party member as `(section, label, value)` tuples.
+    pub fn inspect(&self, member: usize) -> Vec<(&'static str, &'static str, String)> {
         record_inspect(&self.bytes, self.member_base(member))
     }
 
