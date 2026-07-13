@@ -373,6 +373,42 @@ Run `fringe-retro inspect <file>` for the full decoded list of every character.
 
 ---
 
+## Ultima IV (party save)
+
+Ultima IV keeps the whole party in one file, **`PARTY.SAV`**, holding up to **8 character
+slots** plus shared party/game state. In the interactive editor these appear as a **"Party
+& Virtues"** entry (food, gold, the eight virtues, inventory, map position) followed by each
+character. For the CLI, party-wide fields are addressed by name, while a character's own
+fields use `--slot 1`…`8`:
+
+```bash
+fringe-retro inspect ultima4               # party state + every occupied slot
+fringe-retro get  ultima4 gold             # party gold
+fringe-retro get  ultima4 hp --slot 1      # slot 1's hit points
+fringe-retro set  ultima4 food 500         # party food
+fringe-retro set  ultima4 class Paladin --slot 6
+```
+
+### Ultima IV fields
+
+Numbers are plain little-endian binaries. Sex, class, status, weapon, and armor are enums;
+`set` accepts the name or the number.
+
+**Party & Virtues:** `food` (0–9999; stored ×100 on disk but shown/edited as the whole
+number), `gold` (0–9999); the eight virtues `honesty`, `compassion`, `valor`, `justice`,
+`sacrifice`, `honor`, `spirituality`, `humility` (0–99); `torches`, `gems`, `keys`,
+`sextants` (0–99); the eight reagents `reagent_ash`, `_ginseng`, `_garlic`, `_silk`, `_moss`,
+`_pearl`, `_nightshade`, `_mandrake` (0–99); and map `x` / `y`.
+
+**Per character (`--slot`):** `name` (≤ 15 chars), `sex` (Male, Female), `class` (Mage, Bard,
+Fighter, Druid, Tinker, Paladin, Ranger, Shepherd), `status` (Good, Poisoned, Sleeping,
+Dead), `strength` / `dexterity` / `intelligence` (0–99), `hp` / `hp_max` / `experience`
+(0–9999), `magic` (0–99), `weapon` and `armor` (the enums above).
+
+See [docs/formats/ultima4.md](docs/formats/ultima4.md) for the byte-level layout.
+
+---
+
 ## Library
 
 ### ✅ `games`

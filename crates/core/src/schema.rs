@@ -38,6 +38,15 @@ pub enum FieldKind {
         endian: Endian,
         max: u32,
     },
+    /// A binary integer stored as `value * scale` (e.g. Ultima IV food is stored ×100).
+    /// Displayed and edited as the un-scaled whole number; writing resets the sub-`scale`
+    /// remainder to zero. `max` is the maximum whole value.
+    Scaled {
+        bytes: usize,
+        endian: Endian,
+        scale: u32,
+        max: u32,
+    },
     /// Binary-coded decimal of `bytes` width (each nibble is a decimal digit).
     Bcd { bytes: usize, endian: Endian },
     /// A raw single byte (0..=255).
@@ -158,6 +167,12 @@ pub fn read_field(buf: &[u8], base: usize, field: &Field) -> String {
     match field.kind {
         FieldKind::Name { len } => read_name(buf, at, len),
         FieldKind::Int { bytes, endian, .. } => read_int(buf, at, bytes, endian).to_string(),
+        FieldKind::Scaled {
+            bytes,
+            endian,
+            scale,
+            ..
+        } => (read_int(buf, at, bytes, endian) / scale.max(1)).to_string(),
         FieldKind::Bcd { bytes, endian } => read_bcd(buf, at, bytes, endian).to_string(),
         FieldKind::Byte => buf[at].to_string(),
         FieldKind::Bool => match buf[at] {
@@ -200,6 +215,18 @@ pub fn write_field(buf: &mut [u8], base: usize, field: &Field, value: &str) -> R
                 return Err(range_error(field.label, max, n));
             }
             write_int(buf, at, bytes, endian, n);
+        }
+        FieldKind::Scaled {
+            bytes,
+            endian,
+            scale,
+            max,
+        } => {
+            let n = parse_number(value, field.label)?;
+            if n > max {
+                return Err(range_error(field.label, max, n));
+            }
+            write_int(buf, at, bytes, endian, n * scale);
         }
         FieldKind::Bcd { bytes, endian } => {
             let max = 10u32.pow(2 * bytes as u32) - 1;
@@ -412,6 +439,31 @@ mod tests {
         write_int(&mut buf, 0, 2, Endian::Little, 525);
         assert_eq!(&buf[0..2], &[0x0D, 0x02]);
         assert_eq!(read_int(&buf, 0, 2, Endian::Little), 525);
+    }
+
+    #[test]
+    fn scaled_int_shows_and_writes_the_whole_number() {
+        // Ultima IV food is a u32 LE stored ×100 (e.g. 299 food = 29900..29999 on disk).
+        let field = Field::new(
+            "food",
+            "Food",
+            0,
+            FieldKind::Scaled {
+                bytes: 4,
+                endian: Endian::Little,
+                scale: 100,
+                max: 9999,
+            },
+        );
+        let mut buf = vec![0u8; 4];
+        buf[0..4].copy_from_slice(&29989u32.to_le_bytes());
+        assert_eq!(read_field(&buf, 0, &field), "299"); // 29989 / 100
+
+        // Writing sets value ×100 (the sub-scale remainder resets to 0).
+        write_field(&mut buf, 0, &field, "500").unwrap();
+        assert_eq!(u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]), 50000);
+        assert_eq!(read_field(&buf, 0, &field), "500");
+        assert!(write_field(&mut buf, 0, &field, "99999").is_err()); // over max
     }
 
     #[test]

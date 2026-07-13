@@ -18,6 +18,7 @@ use fringe_retro_core::diff::diff_bytes;
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
 use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
+use fringe_retro_core::games::ultima4::{self, Ultima4Save};
 use fringe_retro_core::games::GameKind;
 
 use crate::config::Config;
@@ -137,6 +138,25 @@ fn main() -> Result<()> {
                         anyhow::bail!("unknown field '{field}'. Known fields: {}", keys.join(", "));
                     }
                 }
+            } else if bytes.len() == ultima4::SAVE_LEN {
+                let save = Ultima4Save::from_bytes(bytes)?;
+                // Party/game-state fields, or a player's field via `--slot`.
+                let member = roster_index(slot)?;
+                match save
+                    .party_get(&field)
+                    .or_else(|| save.player_get(member, &field))
+                {
+                    Some(value) => println!("{value}"),
+                    None => {
+                        let party: Vec<_> = Ultima4Save::party_field_keys().collect();
+                        let player: Vec<_> = Ultima4Save::player_field_keys().collect();
+                        anyhow::bail!(
+                            "unknown field '{field}'.\n  Party fields: {}\n  Player fields (use --slot): {}",
+                            party.join(", "),
+                            player.join(", ")
+                        );
+                    }
+                }
             } else if bytes.len() == ultima2::SAVE_LEN {
                 let save = Ultima2Save::from_bytes(bytes)?;
                 match save.get_field(&field) {
@@ -201,6 +221,33 @@ fn main() -> Result<()> {
                 let backup_path = backup::create(&path)?;
                 roster.write(&path)?;
                 println!("slot {slot} {field}: {old} -> {new}");
+                println!("backup: {}", backup_path.display());
+            } else if bytes.len() == ultima4::SAVE_LEN {
+                let mut save = Ultima4Save::from_bytes(bytes)?;
+                let member = roster_index(slot)?;
+                let is_party = Ultima4Save::party_field_keys().any(|k| k == field);
+                let read = |s: &Ultima4Save| {
+                    if is_party {
+                        s.party_get(&field)
+                    } else {
+                        s.player_get(member, &field)
+                    }
+                    .unwrap_or_else(|| "?".to_string())
+                };
+                let old = read(&save);
+                if is_party {
+                    save.party_set(&field, &value)?;
+                } else {
+                    save.player_set(member, &field, &value)?;
+                }
+                let new = read(&save);
+                let backup_path = backup::create(&path)?;
+                save.write(&path)?;
+                if is_party {
+                    println!("{field}: {old} -> {new}");
+                } else {
+                    println!("slot {slot} {field}: {old} -> {new}");
+                }
                 println!("backup: {}", backup_path.display());
             } else if bytes.len() == ultima2::SAVE_LEN {
                 let mut save = Ultima2Save::from_bytes(bytes)?;

@@ -35,6 +35,10 @@ save_dir = "/Applications/Ultima II™.app/Contents/Resources/game"
 platform = "gog"
 save_dir = "/Applications/Ultima III™.app/Contents/Resources/game"
 
+[games.ultima4]
+platform = "gog"
+save_dir = "/Applications/Ultima IV™.app/Contents/Resources/game"
+
 # Wasteland's save is an encrypted directory; inspect/edit support is still in progress.
 # `save_dir` should point at the save-slot directory (the one containing GAME1).
 [games.wasteland]

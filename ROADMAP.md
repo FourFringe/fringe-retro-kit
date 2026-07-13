@@ -23,9 +23,9 @@ Agreed next steps, in order:
 
 1. **Ultima I multi-slot** (quick win) — surface `PLAYER1.U1`…`PLAYER4.U1` through the
    existing file chooser by extending `GameKind::save_files`.
-2. **Ultima IV** (Phase 7) — the next real milestone. Same family as I–III and documented by
-   the `xu4` reimplementation, so it should be mostly a new schema table, proving that adding
-   a game is "schema data, not new code".
+2. **Ultima IV** (Phase 7) ✅ — the next real milestone. Same family as I–III and documented
+   by the `xu4` reimplementation; `PARTY.SAV` (players + party/virtue state) is readable and
+   editable, validated against a real 8-companion save.
 3. Then pick among **Phase 5** (Save Library), **Wasteland** records + the codec/Transform
    pipeline, or **Phase 6** (platform detection + CI).
 
@@ -219,7 +219,7 @@ Grouped by codec complexity (which parsing engine each needs):
 
 - **Done / in progress:** Ultima I ✅, Ultima II ✅, Ultima III ✅, Wasteland (MSQ cipher done,
   records in progress).
-- **Easy extensions — same family as the Ultimas:** Ultima IV (`xu4`), Ultima V, Ultima VI
+- **Easy extensions — same family as the Ultimas:** Ultima IV ✅ (`xu4`), Ultima V, Ultima VI
   (`Nuvie`).
 - **Candidates (owned & installed, to investigate after Wasteland):**
   - **Magic Carpet 1 & 2** (Bullfrog, DOS via GOG/DOSBox). Saves live inside the game
