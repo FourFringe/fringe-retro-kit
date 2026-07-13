@@ -80,6 +80,14 @@ Press `n` to take a **snapshot**: a manual backup of the current save file on di
 an identical backup already exists the snapshot is skipped, so repeatedly snapshotting an
 unchanged save won't pile up duplicates.
 
+### Templates
+
+Press `t` in the editor to open the **template picker**: a list of the [character
+templates](docs/templates.md) defined for that game, with a preview of the fields each one
+sets. Invalid templates are marked `✗` and can't be applied. Press `Enter` or `a` to apply
+the selected template — its fields are set on the current character (marking the session
+unsaved), just like editing them by hand. Apply as many as you like, then press `s` to save.
+
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` (or `k` / `j`) | Move selection · scroll one line |
@@ -87,8 +95,10 @@ unchanged save won't pile up duplicates.
 | `Enter` / `e` | Edit the selected field |
 | `s` | Save the session (backup + write) |
 | `b` | Open the backup browser (from the editor) |
+| `t` | Open the template picker (from the editor) |
 | `Enter` / `r` | Restore the selected backup (backup browser) |
 | `n` | Snapshot the current save (backup browser) |
+| `Enter` / `a` | Apply the selected template (template picker) |
 | `PgUp` / `PgDn` (or `Space`) | Scroll a page (messages / backup preview) |
 | `Home` / `End` | Jump to top / bottom (messages / backup preview) |
 | `Esc` (or `←` / `Backspace`) | Cancel edit · back one screen |
@@ -368,6 +378,25 @@ ultima2        Ultima II  [found]
 
 Games with `enabled = false` are hidden. See [Configuration](#configuration) to set up the
 manifest and [Game identifiers](#game-identifiers) to use these ids in other commands.
+
+### ✅ `templates`
+
+List your character templates and check that each one is valid for its game:
+
+```bash
+fringe-retro templates
+```
+
+```
+ultima1    Starter boost            3 field(s)  [ok]
+ultima2    Fighter                  5 field(s)  [ok]
+ultima2    Top up resources         2 field(s)  [ok]
+```
+
+Templates are read from `templates.toml` (or `$FRINGE_RETRO_TEMPLATES`). A template with an
+unknown field or an invalid value is shown with an `ERROR:` note and can't be applied. Apply
+templates interactively with `t` in the editor. See [docs/templates.md](docs/templates.md)
+for the file format and the allowed field names/values per game.
 
 ---
 

@@ -5,6 +5,7 @@
 mod config;
 mod edit;
 mod inspect;
+mod templates;
 mod tui;
 
 use std::path::{Path, PathBuf};
@@ -17,8 +18,10 @@ use fringe_retro_core::diff::diff_bytes;
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
 use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
+use fringe_retro_core::games::GameKind;
 
 use crate::config::Config;
+use crate::templates::{Template, TemplateSet};
 
 /// Fringe Retro Kit — inspect, edit, and back up classic game save files.
 #[derive(Debug, Parser)]
@@ -92,6 +95,8 @@ enum Command {
     },
     /// List the games configured in your library manifest.
     Games,
+    /// List character templates and whether each one is valid for its game.
+    Templates,
 }
 
 fn main() -> Result<()> {
@@ -261,8 +266,43 @@ fn main() -> Result<()> {
         Command::Games => {
             print_games(&config)?;
         }
+        Command::Templates => {
+            let set = TemplateSet::load()?;
+            print_templates(&set);
+        }
     }
     Ok(())
+}
+
+/// Print every template with its target game, field count, and validity.
+fn print_templates(set: &TemplateSet) {
+    if set.all().is_empty() {
+        println!("(no templates — see templates.example.toml)");
+        return;
+    }
+    for t in set.all() {
+        let status = match validate_template(t) {
+            Ok(()) => "ok".to_string(),
+            Err(e) => format!("ERROR: {e}"),
+        };
+        println!(
+            "{:<10} {:<24} {} field(s)  [{status}]",
+            t.game,
+            t.name,
+            t.fields.len()
+        );
+    }
+}
+
+/// Validate a template by dry-running its edits against an empty scratch save.
+fn validate_template(t: &Template) -> std::result::Result<(), String> {
+    let Some(kind) = GameKind::from_id(&t.game) else {
+        return Err(format!("unknown game '{}'", t.game));
+    };
+    let Some(mut scratch) = edit::Session::scratch(kind) else {
+        return Err(format!("game '{}' is not editable", t.game));
+    };
+    scratch.apply(0, &t.fields).map_err(|e| e.to_string())
 }
 
 /// Convert a 1-based character slot into a 0-based roster index.

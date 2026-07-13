@@ -12,6 +12,7 @@ use fringe_retro_core::backup;
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
 use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
+use fringe_retro_core::games::GameKind;
 use fringe_retro_core::schema::{Field, FieldKind};
 
 /// A loaded save of a known, editable game.
@@ -93,6 +94,48 @@ impl Session {
     /// The path of the save file this session edits.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Which game this session is editing.
+    pub fn kind(&self) -> GameKind {
+        match &self.save {
+            Loaded::Ultima1(_) => GameKind::Ultima1,
+            Loaded::Ultima2(_) => GameKind::Ultima2,
+            Loaded::Ultima3Roster(_) | Loaded::Ultima3Party(_) => GameKind::Ultima3,
+        }
+    }
+
+    /// An empty in-memory session for a game kind, backed by a zeroed buffer. Used to
+    /// dry-run edits (e.g. validating a template) without needing a real save file.
+    /// Returns `None` for games that aren't editable.
+    pub fn scratch(kind: GameKind) -> Option<Session> {
+        let save = match kind {
+            GameKind::Ultima1 => {
+                Loaded::Ultima1(Ultima1Save::from_bytes(vec![0u8; ultima1::SAVE_LEN]).ok()?)
+            }
+            GameKind::Ultima2 => {
+                Loaded::Ultima2(Ultima2Save::from_bytes(vec![0u8; ultima2::SAVE_LEN]).ok()?)
+            }
+            GameKind::Ultima3 => Loaded::Ultima3Roster(
+                Ultima3Roster::from_bytes(vec![0u8; ultima3::ROSTER_LEN]).ok()?,
+            ),
+            GameKind::Wasteland => return None,
+        };
+        Some(Session {
+            path: PathBuf::new(),
+            save,
+            dirty: false,
+        })
+    }
+
+    /// Apply several validated edits in sequence (e.g. a template's fields). Stops at the
+    /// first invalid edit; validate against a [`Session::scratch`] first to avoid partial
+    /// application.
+    pub fn apply(&mut self, entity: usize, fields: &[(String, String)]) -> Result<()> {
+        for (key, value) in fields {
+            self.set(entity, key, value)?;
+        }
+        Ok(())
     }
 
     /// The editable entities (characters). Single-character games return exactly one.

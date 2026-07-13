@@ -18,6 +18,7 @@ use ratatui::{DefaultTerminal, Frame};
 
 use crate::config::Config;
 use crate::edit::{Entity, FieldRow, Session};
+use crate::templates::TemplateSet;
 
 /// One game shown in the browser.
 struct GameRow {
@@ -39,6 +40,8 @@ enum Screen {
     Edit(Editor),
     /// A browser of the current save's timestamped backups, with a preview of each.
     Backups(BackupList),
+    /// A picker of character templates to apply to the current character.
+    Templates(TemplateList),
     /// A read-only message (unsupported games, errors).
     Inspect(Inspector),
     /// An unsaved-changes prompt.
@@ -69,6 +72,27 @@ struct BackupList {
     list: ListState,
     preview: Inspector,
     /// A transient one-line message (e.g. the result of a snapshot).
+    status: Option<String>,
+}
+
+/// One template shown in the picker, with the result of validating it against the game.
+struct TemplateItem {
+    name: String,
+    description: Option<String>,
+    fields: Vec<(String, String)>,
+    /// `Some(reason)` when the template is invalid for this game and cannot be applied.
+    error: Option<String>,
+}
+
+/// A picker of character templates for the current game: a list on the left, a preview of
+/// the selected template's fields (and any validation error) on the right.
+struct TemplateList {
+    title: String,
+    /// The editor entity (character) a chosen template is applied to.
+    entity: usize,
+    entries: Vec<TemplateItem>,
+    list: ListState,
+    preview: Inspector,
     status: Option<String>,
 }
 
@@ -184,6 +208,9 @@ impl Inspector {
 /// stack of screens (the top is the current view).
 struct App {
     games: Vec<GameRow>,
+    templates: TemplateSet,
+    /// A load error for the templates file, surfaced when the picker is opened.
+    template_error: Option<String>,
     session: Option<Session>,
     stack: Vec<Screen>,
     running: bool,
@@ -201,6 +228,8 @@ enum Action {
     OpenBackups,
     RequestRestore,
     Snapshot,
+    OpenTemplates,
+    ApplyTemplate,
     ConfirmSave,
     ConfirmDiscard,
     ConfirmAccept,
@@ -215,6 +244,8 @@ impl App {
         }
         App {
             games,
+            templates: TemplateSet::default(),
+            template_error: None,
             session: None,
             stack: vec![Screen::Games(list)],
             running: true,
@@ -409,6 +440,108 @@ impl App {
         }
     }
 
+    /// Open the template picker for the current game, validating each template against it.
+    fn open_templates(&mut self) {
+        let (kind, entity, editor_title) = match (self.session.as_ref(), self.stack.last()) {
+            (Some(s), Some(Screen::Edit(ed))) => (s.kind(), ed.entity, ed.title.clone()),
+            _ => return,
+        };
+        if let Some(err) = &self.template_error {
+            let msg = vec!["Could not read templates:".to_string(), err.clone()];
+            self.stack.push(Screen::Inspect(Inspector::new(
+                "Templates".to_string(),
+                msg,
+            )));
+            return;
+        }
+        let templates = self.templates.for_game(kind.id());
+        if templates.is_empty() {
+            let msg = vec![
+                format!("No templates defined for {}.", kind.title()),
+                String::new(),
+                "Add some to templates.toml (see templates.example.toml).".to_string(),
+            ];
+            self.stack.push(Screen::Inspect(Inspector::new(
+                "Templates".to_string(),
+                msg,
+            )));
+            return;
+        }
+        let entries: Vec<TemplateItem> = templates
+            .iter()
+            .map(|t| {
+                let error = match Session::scratch(kind) {
+                    Some(mut scratch) => scratch
+                        .apply(entity, &t.fields)
+                        .err()
+                        .map(|e| e.to_string()),
+                    None => Some("game is not editable".to_string()),
+                };
+                TemplateItem {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                    fields: t.fields.clone(),
+                    error,
+                }
+            })
+            .collect();
+        let mut list = ListState::default();
+        list.select(Some(0));
+        let content = template_preview(&entries[0]);
+        let preview = Inspector::new("Preview".to_string(), content);
+        self.stack.push(Screen::Templates(TemplateList {
+            title: format!("Templates — {editor_title}"),
+            entity,
+            entries,
+            list,
+            preview,
+            status: None,
+        }));
+    }
+
+    /// Apply the selected template's fields to the current character (in memory), unless it
+    /// is invalid. Marks the session dirty; the user still saves manually.
+    fn apply_template_selected(&mut self) {
+        let selected = match self.stack.last() {
+            Some(Screen::Templates(tl)) => tl
+                .list
+                .selected()
+                .and_then(|i| tl.entries.get(i))
+                .map(|e| (e.name.clone(), e.fields.clone(), e.error.clone(), tl.entity)),
+            _ => None,
+        };
+        let Some((name, fields, error, entity)) = selected else {
+            return;
+        };
+        if let Some(err) = error {
+            if let Some(Screen::Templates(tl)) = self.stack.last_mut() {
+                tl.status = Some(format!("Cannot apply '{name}': {err}"));
+            }
+            return;
+        }
+        let result = self.session.as_mut().map(|s| s.apply(entity, &fields));
+        // Return to the editor beneath the picker.
+        if matches!(self.stack.last(), Some(Screen::Templates(_))) {
+            self.stack.pop();
+        }
+        let status = match result {
+            Some(Ok(())) => format!(
+                "Applied '{name}' ({} field(s)). Press s to save.",
+                fields.len()
+            ),
+            Some(Err(e)) => format!("Apply failed: {e}"),
+            None => "No character loaded.".to_string(),
+        };
+        let rows = self.session.as_ref().map(|s| s.rows(entity));
+        if let Some(Screen::Edit(ed)) = self.stack.last_mut() {
+            if let Some(rows) = rows {
+                ed.rows = rows;
+            }
+            ed.input = None;
+            ed.status = Some(status);
+        }
+    }
+
     /// Open the selected game: load an editing session and show its character(s).
     fn open_game(&mut self, index: usize) {
         let Some(row) = self.games.get(index) else {
@@ -600,6 +733,7 @@ impl App {
                         KeyCode::Enter | KeyCode::Char('e') => ed.begin_edit(),
                         KeyCode::Char('s') => action = Action::Save,
                         KeyCode::Char('b') => action = Action::OpenBackups,
+                        KeyCode::Char('t') => action = Action::OpenTemplates,
                         _ => {}
                     }
                 }
@@ -627,6 +761,31 @@ impl App {
                     KeyCode::End => bl.preview.end(),
                     KeyCode::Enter | KeyCode::Char('r') => action = Action::RequestRestore,
                     KeyCode::Char('n') => action = Action::Snapshot,
+                    _ => {}
+                }
+            }
+            Screen::Templates(tl) => {
+                let len = tl.entries.len();
+                match code {
+                    KeyCode::Char('q') => action = Action::Quit,
+                    KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => {
+                        action = Action::Back;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        select_wrap(&mut tl.list, len, 1);
+                        tl.status = None;
+                        refresh_template_preview(tl);
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        select_wrap(&mut tl.list, len, -1);
+                        tl.status = None;
+                        refresh_template_preview(tl);
+                    }
+                    KeyCode::PageDown | KeyCode::Char(' ') => tl.preview.page_down(),
+                    KeyCode::PageUp => tl.preview.page_up(),
+                    KeyCode::Home => tl.preview.home(),
+                    KeyCode::End => tl.preview.end(),
+                    KeyCode::Enter | KeyCode::Char('a') => action = Action::ApplyTemplate,
                     _ => {}
                 }
             }
@@ -668,6 +827,8 @@ impl App {
             Action::OpenBackups => self.open_backups(),
             Action::RequestRestore => self.request_restore(),
             Action::Snapshot => self.snapshot_current(),
+            Action::OpenTemplates => self.open_templates(),
+            Action::ApplyTemplate => self.apply_template_selected(),
             Action::ConfirmSave => self.confirm_save(),
             Action::ConfirmDiscard => self.confirm_discard(),
             Action::ConfirmAccept => self.complete_pending(),
@@ -690,6 +851,7 @@ impl App {
             Screen::Characters(cl) => draw_characters(frame, chunks[0], cl),
             Screen::Edit(ed) => draw_editor(frame, chunks[0], ed, dirty),
             Screen::Backups(bl) => draw_backups(frame, chunks[0], bl),
+            Screen::Templates(tl) => draw_templates(frame, chunks[0], tl),
             Screen::Inspect(insp) => {
                 insp.viewport = chunks[0].height.saturating_sub(2);
                 draw_inspector(frame, chunks[0], insp);
@@ -876,6 +1038,60 @@ fn draw_backups(frame: &mut Frame, area: Rect, bl: &mut BackupList) {
     draw_inspector(frame, cols[1], &bl.preview);
 }
 
+/// A preview of a template: its description, the field/value pairs it sets, and any error.
+fn template_preview(item: &TemplateItem) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(d) = &item.description {
+        lines.push(d.clone());
+        lines.push(String::new());
+    }
+    if item.fields.is_empty() {
+        lines.push("(no fields)".to_string());
+    } else {
+        for (k, v) in &item.fields {
+            lines.push(format!("  {k:<18} = {v}"));
+        }
+    }
+    if let Some(err) = &item.error {
+        lines.push(String::new());
+        lines.push(format!("⚠ invalid: {err}"));
+    }
+    lines
+}
+
+/// Rebuild the preview pane for whichever template is currently selected.
+fn refresh_template_preview(tl: &mut TemplateList) {
+    let content = match tl.list.selected().and_then(|i| tl.entries.get(i)) {
+        Some(e) => template_preview(e),
+        None => vec!["(no templates)".to_string()],
+    };
+    tl.preview = Inspector::new("Preview".to_string(), content);
+}
+
+fn draw_templates(frame: &mut Frame, area: Rect, tl: &mut TemplateList) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(30), Constraint::Min(1)])
+        .split(area);
+
+    let items: Vec<ListItem> = tl
+        .entries
+        .iter()
+        .map(|e| {
+            let (label, style) = match &e.error {
+                Some(_) => (format!("{}  ✗", e.name), Style::default().fg(Color::Red)),
+                None => (e.name.clone(), Style::default()),
+            };
+            ListItem::new(Line::from(label)).style(style)
+        })
+        .collect();
+    let list = selectable_list(items, format!(" {} ", tl.title));
+    frame.render_stateful_widget(list, cols[0], &mut tl.list);
+
+    tl.preview.viewport = cols[1].height.saturating_sub(2);
+    draw_inspector(frame, cols[1], &tl.preview);
+}
+
 /// The context-dependent bottom line: key hints, the field input prompt, or a status.
 fn bottom_line(screen: &Screen) -> String {
     match screen {
@@ -891,7 +1107,8 @@ fn bottom_line(screen: &Screen) -> String {
             } else if let Some(status) = &ed.status {
                 format!("  {status}")
             } else {
-                " ↑/↓ field · Enter/e edit · s save · b backups · Esc back · q quit ".to_string()
+                " ↑/↓ field · Enter/e edit · s save · b backups · t templates · Esc back · q quit "
+                    .to_string()
             }
         }
         Screen::Inspect(_) => " ↑/↓ scroll · PgUp/PgDn page · Esc back · q quit ".to_string(),
@@ -900,6 +1117,12 @@ fn bottom_line(screen: &Screen) -> String {
             None => {
                 " ↑/↓ select · PgUp/PgDn preview · Enter/r restore · n snapshot · Esc back · q quit "
                     .to_string()
+            }
+        },
+        Screen::Templates(tl) => match &tl.status {
+            Some(s) => format!("  {s}"),
+            None => {
+                " ↑/↓ select · PgUp/PgDn preview · Enter/a apply · Esc back · q quit ".to_string()
             }
         },
         Screen::Confirm(c) => match &c.pending {
@@ -939,8 +1162,13 @@ pub fn run(config: Config) -> Result<()> {
         })
         .collect();
 
+    let mut app = App::new(games);
+    match TemplateSet::load() {
+        Ok(set) => app.templates = set,
+        Err(e) => app.template_error = Some(e.to_string()),
+    }
     let mut terminal = ratatui::init();
-    let result = run_loop(&mut terminal, App::new(games));
+    let result = run_loop(&mut terminal, app);
     ratatui::restore();
     result
 }
@@ -1196,6 +1424,59 @@ mod tests {
 
         app.handle_key(KeyCode::Char('n')); // identical file -> no-op
         assert_eq!(backups_len(&app), before + 1);
+    }
+
+    fn app_with_template(fields: Vec<(&str, &str)>, game: &str) -> (tempfile::TempDir, App) {
+        let (dir, mut app) = app_with_ultima1();
+        let tpl = crate::templates::Template {
+            game: game.to_string(),
+            name: "Fighter".to_string(),
+            description: Some("test template".to_string()),
+            fields: fields
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        app.templates = TemplateSet::from_templates(vec![tpl]);
+        (dir, app)
+    }
+
+    #[test]
+    fn no_templates_for_game_shows_message() {
+        let (_dir, mut app) = app_with_ultima1(); // no templates configured
+        app.handle_key(KeyCode::Enter); // editor
+        app.handle_key(KeyCode::Char('t'));
+        assert!(matches!(app.stack.last(), Some(Screen::Inspect(_))));
+    }
+
+    #[test]
+    fn apply_valid_template_updates_fields_and_dirties() {
+        let (_dir, mut app) =
+            app_with_template(vec![("gold", "250"), ("strength", "30")], "ultima1");
+        app.handle_key(KeyCode::Enter); // editor
+        app.handle_key(KeyCode::Char('t')); // template picker
+        assert!(matches!(app.stack.last(), Some(Screen::Templates(_))));
+
+        app.handle_key(KeyCode::Enter); // apply the (only, valid) template
+        assert!(matches!(app.stack.last(), Some(Screen::Edit(_))));
+        assert_eq!(editor_value(&app, "gold"), "250");
+        assert_eq!(editor_value(&app, "strength"), "30");
+        assert!(app.session_dirty()); // applied but not yet saved
+    }
+
+    #[test]
+    fn invalid_template_is_flagged_and_not_applied() {
+        // Gold's max is 9999, so this template fails validation.
+        let (_dir, mut app) = app_with_template(vec![("gold", "999999")], "ultima1");
+        app.handle_key(KeyCode::Enter); // editor
+        app.handle_key(KeyCode::Char('t'));
+        match app.stack.last() {
+            Some(Screen::Templates(tl)) => assert!(tl.entries[0].error.is_some()),
+            _ => panic!("expected the template picker"),
+        }
+        app.handle_key(KeyCode::Enter); // attempt to apply -> refused
+        assert!(matches!(app.stack.last(), Some(Screen::Templates(_))));
+        assert!(!app.session_dirty());
     }
 
     #[test]

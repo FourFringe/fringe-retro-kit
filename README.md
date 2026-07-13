@@ -41,11 +41,12 @@ In progress:
 
 Next up:
 
-- Fallout 1 & 2
 - Ultima IV / V / VI
 
 Candidates (owned or of interest; may or may not be reached):
 
+- Magic Carpet / Magic Carpet 2
+- Bard's Tale Trilogy (remaster)
 - SSI Gold Box games
 - Might & Magic 3–5 (World of Xeen)
 - Dungeon Master
@@ -53,6 +54,8 @@ Candidates (owned or of interest; may or may not be reached):
 - Daggerfall
 - Wizardry
 - Bard's Tale (original)
+
+Deferred (no test machine): Fallout 1 & 2 — Windows-only from the current setup.
 
 Byte-level format notes for implemented games live in
 [docs/formats/](docs/formats/README.md). Support for additional games should grow through

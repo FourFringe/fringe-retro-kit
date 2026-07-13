@@ -1,0 +1,38 @@
+# Character templates for Fringe Retro Kit.
+#
+# Copy this file to `templates.toml` (or point $FRINGE_RETRO_TEMPLATES at it) and edit.
+# Each [[template]] is a named set of field values that you apply on top of an *existing*
+# character. Applying a template is exactly like editing those fields by hand: the changes
+# are made in memory and are only written when you save (press `s` in the editor).
+#
+#   game    A known game id: ultima1, ultima2, or ultima3.
+#   name    A short label shown in the picker and in `fringe-retro templates`.
+#   fields  Field key -> value. Keys and value syntax match the editor; enum fields accept
+#           the value name (e.g. "Sword") or its number. See docs/templates.md for the full
+#           list of field names and allowed values per game.
+#
+# List your templates and check that they are valid with:  fringe-retro templates
+
+[[template]]
+game = "ultima1"
+name = "Starter boost"
+description = "A gentle leg-up for a new Ultima I character."
+fields = { gold = 500, food = 900, hits = 200 }
+
+[[template]]
+game = "ultima2"
+name = "Fighter"
+description = "A melee bruiser: high strength/stamina, sword and plate armour."
+fields = { strength = 35, stamina = 40, weapon = "Sword", armor = "Plate", food = 3000 }
+
+[[template]]
+game = "ultima2"
+name = "Top up resources"
+description = "Refill food and gold without touching stats or equipment."
+fields = { food = 3000, gold = 9999 }
+
+[[template]]
+game = "ultima3"
+name = "Tank"
+description = "Beef up a single Ultima III character's vitals."
+fields = { strength = 75, dexterity = 75, hits = 150, max_hits = 150 }

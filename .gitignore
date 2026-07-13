@@ -27,6 +27,9 @@ target
 # Copy config.example.toml -> config.toml and edit locally; never committed.
 /config.toml
 
+# Local character templates. Copy templates.example.toml -> templates.toml and edit.
+/templates.toml
+
 # Private, real game save files kept locally for manual/integration testing.
 # Never commit real game save data — committed tests use synthetic fixtures.
 /tests/fixtures/local/*

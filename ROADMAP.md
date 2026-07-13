@@ -111,7 +111,8 @@ The TUI (Ratatui + Crossterm) becomes the primary interface here. Launched by ru
 - [x] Game / save browsing (games list) and per-character drill-down (Ultima III roster slots & party members)
 - [x] Inspector: read-only view of known fields (scrollable, paged; shares formatting with `inspect`)
 - [x] Auto-generated editors driven by the field schema (text / enum / boolean fields) — batch edits in memory, validated on commit, one backup + write on save, with an unsaved-changes guard
-- [x] Backup browser — list a save's backups with a decoded preview, restore with confirmation (auto safety backup, no-op when already identical)
+- [x] Backup browser — list a save's backups with a decoded preview, restore with confirmation (auto safety backup, no-op when already identical); snapshot the current save on demand
+- [x] Character templates — apply saved sets of field values to a character (`templates.toml`), validated up front and applied as ordinary in-memory edits
 
 Illustrative mockups (not final):
 
@@ -199,17 +200,18 @@ Grouped by codec complexity (which parsing engine each needs):
 
 - **Done / in progress:** Ultima I ✅, Ultima II ✅, Ultima III ✅, Wasteland (MSQ cipher done,
   records in progress).
-- **Next — plain structured binary + container (no encryption):** **Fallout 1 & 2** (owned;
-  big-endian ints, save-as-directory; well RE'd by TeamX / F12se). A gentle step up from the
-  Ultimas.
 - **Easy extensions — same family as the Ultimas:** Ultima IV (`xu4`), Ultima V, Ultima VI
   (`Nuvie`).
+- **Candidates (owned & installed, to investigate after Wasteland):** Magic Carpet & Magic
+  Carpet 2 (GOG); the **Bard's Tale Trilogy** remaster (Steam) — a modern Krome/inXile
+  rebuild with its own save format, distinct from the 1985 originals, and the version most
+  likely to actually be played here.
 - **Candidates (kept in the list; may never get to them, and that's fine):** SSI Gold Box,
   Might & Magic 3–5 / World of Xeen (`OpenXeen`), Dungeon Master, Eye of the Beholder,
   Daggerfall (Daggerfall Unity; introduces RLE decompression), Wizardry, original Bard's Tale.
-
-Note: the Bard's Tale Trilogy remaster is a from-scratch Krome rebuild with a modern save
-format, **not** the original — out of scope for preservation of the original formats.
+- **Deferred — no test machine:** **Fallout 1 & 2** (owned on Steam; big-endian ints,
+  save-as-directory, well RE'd by TeamX / F12se) is Windows-only from this Mac, so it's on
+  hold until a Windows system is available.
 
 ---
 
