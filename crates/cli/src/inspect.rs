@@ -7,6 +7,7 @@ use fringe_retro_core::games::ultima1::Ultima1Save;
 use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 use fringe_retro_core::games::ultima4::{self, Ultima4Save};
+use fringe_retro_core::games::ultima5::{self, Ultima5Save};
 
 /// Produce the human-readable inspection lines for a save file's bytes.
 pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
@@ -70,6 +71,33 @@ pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
             out.push(format!("Player {}: {}", i + 1, save.player_summary(i)));
             let mut current_section = "";
             for (section, label, value) in save.player_inspect(i) {
+                if section != current_section {
+                    out.push(format!("  {section}:"));
+                    current_section = section;
+                }
+                out.push(format!("    {label:<16} {value}"));
+            }
+        }
+    } else if bytes.len() == ultima5::SAVE_LEN {
+        let save = Ultima5Save::from_bytes(bytes.to_vec())?;
+        out.push("Party & Provisions:".to_string());
+        let mut current_section = "";
+        for (section, label, value) in save.party_inspect() {
+            if section != current_section {
+                out.push(format!("  {section}:"));
+                current_section = section;
+            }
+            out.push(format!("    {label:<16} {value}"));
+        }
+        for i in save.occupied_characters() {
+            out.push(String::new());
+            out.push(format!(
+                "Character {}: {}",
+                i + 1,
+                save.character_summary(i)
+            ));
+            let mut current_section = "";
+            for (section, label, value) in save.character_inspect(i) {
                 if section != current_section {
                     out.push(format!("  {section}:"));
                     current_section = section;

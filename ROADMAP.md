@@ -14,20 +14,25 @@ Conservative by design: solve one problem well before expanding.
 
 ## Current status & near-term plan
 
-Phases 1–4 are effectively complete: all three Ultimas are fully readable and editable via
-both the CLI and the interactive TUI — a section-grouped editor with an enum picker,
-automatic backups + on-demand snapshots, character templates (with in-app capture), and a
-per-game save-file chooser.
+Phases 1–4 are effectively complete: all four Ultimas (I–IV) plus Ultima V are fully
+readable and editable via both the CLI and the interactive TUI — a section-grouped editor
+with an enum picker, automatic backups + on-demand snapshots, character templates (with
+in-app capture), and a per-game save-file chooser.
 
 Agreed next steps, in order:
 
-1. **Ultima I multi-slot** (quick win) — surface `PLAYER1.U1`…`PLAYER4.U1` through the
+1. **Ultima I multi-slot** (quick win) ✅ — surface `PLAYER1.U1`…`PLAYER4.U1` through the
    existing file chooser by extending `GameKind::save_files`.
-2. **Ultima IV** (Phase 7) ✅ — the next real milestone. Same family as I–III and documented
-   by the `xu4` reimplementation; `PARTY.SAV` (players + party/virtue state) is readable and
-   editable, validated against a real 8-companion save.
-3. Then pick among **Phase 5** (Save Library), **Wasteland** records + the codec/Transform
-   pipeline, or **Phase 6** (platform detection + CI).
+2. **Ultima IV** (Phase 7) ✅ — same family as I–III and documented by the `xu4`
+   reimplementation; `PARTY.SAV` (players + party/virtue state) is readable and editable,
+   validated against a real 8-companion save.
+3. **Ultima V** (Phase 7) ✅ — `SAVED.GAM` (4192-byte RAM snapshot): sixteen 32-byte
+   character records plus party/game state (provisions, inventory, reagents, date, karma,
+   location). Plain little-endian binary; readable and editable, verified against a real
+   save.
+4. Then pick among **Phase 5** (Save Library), **Wasteland** records + the codec/Transform
+   pipeline, or **Phase 6** (platform detection + CI). **Ultima VI** is a much larger effort
+   (object-based, LZW-compressed, party-as-objects across ~70 files) and is deferred.
 
 ---
 
@@ -217,10 +222,10 @@ save format effectively a published, tested spec.
 
 Grouped by codec complexity (which parsing engine each needs):
 
-- **Done / in progress:** Ultima I ✅, Ultima II ✅, Ultima III ✅, Wasteland (MSQ cipher done,
-  records in progress).
-- **Easy extensions — same family as the Ultimas:** Ultima IV ✅ (`xu4`), Ultima V, Ultima VI
-  (`Nuvie`).
+- **Done / in progress:** Ultima I ✅, Ultima II ✅, Ultima III ✅, Ultima IV ✅, Ultima V ✅,
+  Wasteland (MSQ cipher done, records in progress).
+- **Easy extensions — same family as the Ultimas:** Ultima VI (`Nuvie`) — larger effort:
+  object-based, LZW-compressed, party stored as world objects across ~70 files.
 - **Candidates (owned & installed, to investigate after Wasteland):**
   - **Magic Carpet 1 & 2** (Bullfrog, DOS via GOG/DOSBox). Saves live inside the game
     directory — `…\SAVE` for Magic Carpet, `…\GAME\NETHERW\SAVE` for Magic Carpet 2.

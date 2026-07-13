@@ -13,6 +13,7 @@ use fringe_retro_core::games::ultima1::{self, Ultima1Save};
 use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 use fringe_retro_core::games::ultima4::{self, Ultima4Save};
+use fringe_retro_core::games::ultima5::{self, Ultima5Save};
 use fringe_retro_core::games::GameKind;
 use fringe_retro_core::schema::{Field, FieldKind};
 
@@ -23,6 +24,7 @@ enum Loaded {
     Ultima3Roster(Ultima3Roster),
     Ultima3Party(Ultima3Party),
     Ultima4(Ultima4Save),
+    Ultima5(Ultima5Save),
 }
 
 /// A character/slot within a save that can be edited.
@@ -72,6 +74,8 @@ impl Session {
             Loaded::Ultima3Roster(Ultima3Roster::from_bytes(bytes)?)
         } else if bytes.len() == ultima4::SAVE_LEN {
             Loaded::Ultima4(Ultima4Save::from_bytes(bytes)?)
+        } else if bytes.len() == ultima5::SAVE_LEN {
+            Loaded::Ultima5(Ultima5Save::from_bytes(bytes)?)
         } else if bytes.len() == ultima2::SAVE_LEN {
             Loaded::Ultima2(Ultima2Save::from_bytes(bytes)?)
         } else if bytes.len() == ultima1::SAVE_LEN {
@@ -103,6 +107,7 @@ impl Session {
             Loaded::Ultima2(_) => GameKind::Ultima2,
             Loaded::Ultima3Roster(_) | Loaded::Ultima3Party(_) => GameKind::Ultima3,
             Loaded::Ultima4(_) => GameKind::Ultima4,
+            Loaded::Ultima5(_) => GameKind::Ultima5,
         }
     }
 
@@ -122,6 +127,9 @@ impl Session {
             ),
             GameKind::Ultima4 => {
                 Loaded::Ultima4(Ultima4Save::from_bytes(vec![0u8; ultima4::SAVE_LEN]).ok()?)
+            }
+            GameKind::Ultima5 => {
+                Loaded::Ultima5(Ultima5Save::from_bytes(vec![0u8; ultima5::SAVE_LEN]).ok()?)
             }
             GameKind::Wasteland => return None,
         };
@@ -186,6 +194,18 @@ impl Session {
                 }));
                 entities
             }
+            Loaded::Ultima5(s) => {
+                // Entity 0 is the party/game state; entities 1..=n are the characters.
+                let mut entities = vec![Entity {
+                    index: 0,
+                    label: "Party & Provisions".to_string(),
+                }];
+                entities.extend(s.occupied_characters().into_iter().map(|i| Entity {
+                    index: i + 1,
+                    label: format!("{}. {}", i + 1, s.character_summary(i)),
+                }));
+                entities
+            }
         }
     }
 
@@ -208,6 +228,13 @@ impl Session {
                     ultima4::player_fields()
                 }
             }
+            Loaded::Ultima5(_) => {
+                if entity == 0 {
+                    ultima5::party_fields()
+                } else {
+                    ultima5::character_fields()
+                }
+            }
         }
     }
 
@@ -228,6 +255,13 @@ impl Session {
                     s.party_get(key)
                 } else {
                     s.player_get(entity - 1, key)
+                }
+            }
+            Loaded::Ultima5(s) => {
+                if entity == 0 {
+                    s.party_get(key)
+                } else {
+                    s.character_get(entity - 1, key)
                 }
             }
         }
@@ -268,6 +302,13 @@ impl Session {
                     s.player_set(entity - 1, key, value)
                 }
             }
+            Loaded::Ultima5(s) => {
+                if entity == 0 {
+                    s.party_set(key, value)
+                } else {
+                    s.character_set(entity - 1, key, value)
+                }
+            }
         }
         .map_err(|e| anyhow!("{e}"))?;
         self.dirty = true;
@@ -284,6 +325,7 @@ impl Session {
             Loaded::Ultima3Roster(r) => r.write(&self.path),
             Loaded::Ultima3Party(p) => p.write(&self.path),
             Loaded::Ultima4(s) => s.write(&self.path),
+            Loaded::Ultima5(s) => s.write(&self.path),
         }?;
         self.dirty = false;
         Ok(backup_path)

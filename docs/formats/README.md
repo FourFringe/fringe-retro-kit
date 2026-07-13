@@ -28,6 +28,7 @@ diffing live saves (see that page's provenance notes).
 | [Ultima II](ultima2.md) | `PLAYER` | BCD (big-endian) | plain file | **Original research** |
 | [Ultima III](ultima3.md) | `ROSTER.ULT`, `PARTY.ULT` | BCD (little-endian) | plain file | Corroborates the Codex of Ultima Wisdom wiki |
 | [Ultima IV](ultima4.md) | `PARTY.SAV` | LE binary (`u16`/`u32`) | plain file | Matches the `xu4` reimplementation; verified against a real save |
+| [Ultima V](ultima5.md) | `SAVED.GAM` | LE binary (`u16`/`u8`) | plain file | Follows the Codex of Ultima Wisdom wiki; verified against a real save |
 | [Wasteland](wasteland.md) | `GAME1` (in a save directory) | binary | **encrypted MSQ blocks** | Cipher documented; record layout in progress |
 
 ## How these were produced

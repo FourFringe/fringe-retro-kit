@@ -409,6 +409,43 @@ See [docs/formats/ultima4.md](docs/formats/ultima4.md) for the byte-level layout
 
 ---
 
+## Ultima V (game save)
+
+Ultima V keeps the whole game in one file, **`SAVED.GAM`** (a 4192-byte RAM snapshot),
+holding up to **16 character slots** plus shared party/game state. In the interactive editor
+these appear as a **"Party & Provisions"** entry (food, gold, party size, inventory,
+reagents, date/time, karma, map position) followed by each character. For the CLI,
+party-wide fields are addressed by name, while a character's own fields use `--slot 1`…`16`:
+
+```bash
+fringe-retro inspect ultima5               # party state + every occupied character
+fringe-retro get  ultima5 gold             # party gold
+fringe-retro get  ultima5 hp --slot 1      # slot 1's hit points
+fringe-retro set  ultima5 food 500         # party food
+fringe-retro set  ultima5 class Mage --slot 1
+```
+
+### Ultima V fields
+
+Numbers are plain little-endian binaries. Sex is a numeric enum; class and status are ASCII
+letters; `set` accepts the name, letter, or number.
+
+**Party & Provisions:** `food`, `gold` (0–9999); `members` (party size, 1–6); the inventory
+counts `keys`, `gems`, `torches`, `magic_carpets`, `skull_keys`, `sextants` (0–99); the eight
+reagents `reagent_ash`, `_ginseng`, `_garlic`, `_silk`, `_moss`, `_pearl`, `_nightshade`,
+`_mandrake` (0–99); `year`, `month`, `day`, `hour`, `minute`; `karma`; and `location`, `z`,
+`x`, `y` (raw map coordinates).
+
+**Per character (`--slot`):** `name` (≤ 8 chars), `sex` (Male, Female), `class` (Avatar,
+Bard, Fighter, Mage), `status` (Good, Poisoned, Charmed, Asleep, Dead), `strength` /
+`dexterity` / `intelligence` (1–30), `magic` (0–99), `hp` / `hp_max` / `experience`
+(0–9999), `level` (1–8), `months_inn`, and equipment `helmet`, `armor`, `weapon_left`,
+`weapon_right`, `ring`, `amulet` (raw item indices, `0xFF` = none).
+
+See [docs/formats/ultima5.md](docs/formats/ultima5.md) for the byte-level layout.
+
+---
+
 ## Library
 
 ### ✅ `games`

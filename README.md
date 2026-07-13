@@ -35,6 +35,7 @@ Implemented:
 - Ultima II
 - Ultima III
 - Ultima IV
+- Ultima V
 
 In progress:
 
@@ -42,7 +43,7 @@ In progress:
 
 Next up:
 
-- Ultima V / VI
+- Ultima VI
 
 Candidates (owned or of interest; may or may not be reached):
 
