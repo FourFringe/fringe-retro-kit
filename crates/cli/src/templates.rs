@@ -12,7 +12,7 @@
 //! template is applied or listed.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -106,6 +106,64 @@ impl TemplateSet {
     }
 }
 
+/// The path the templates file is read from (and written to when capturing).
+pub fn templates_path() -> PathBuf {
+    std::env::var_os(TEMPLATES_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_TEMPLATES_FILE))
+}
+
+/// Append a new `[[template]]` block to the templates file at `path`, creating the file if
+/// needed. Existing content is preserved verbatim (this never rewrites the file), so any
+/// comments or hand-authored templates are left untouched.
+pub fn append_template(
+    path: &Path,
+    game: &str,
+    name: &str,
+    fields: &[(String, String)],
+) -> Result<()> {
+    use std::io::Write as _;
+
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let mut block = String::new();
+    // Ensure a blank line separates the new block from any existing content.
+    if !existing.is_empty() && !existing.ends_with('\n') {
+        block.push('\n');
+    }
+    block.push('\n');
+    block.push_str("[[template]]\n");
+    block.push_str(&format!("game = {}\n", toml_string(game)));
+    block.push_str(&format!("name = {}\n", toml_string(name)));
+    let pairs: Vec<String> = fields
+        .iter()
+        .map(|(k, v)| format!("{k} = {}", toml_scalar(v)))
+        .collect();
+    block.push_str(&format!("fields = {{ {} }}\n", pairs.join(", ")));
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    file.write_all(block.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+/// Quote and escape a string as a TOML basic string.
+fn toml_string(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Render a captured field value: a bare integer when it's all digits, else a quoted string.
+fn toml_scalar(v: &str) -> String {
+    if !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()) {
+        v.to_string()
+    } else {
+        toml_string(v)
+    }
+}
+
 /// Render a TOML value as the string the editor's field parser expects.
 fn value_to_string(v: &toml::Value) -> String {
     match v {
@@ -174,5 +232,35 @@ mod tests {
             .fields
             .iter()
             .any(|(k, v)| k == "weapon" && v == "Sword"));
+    }
+
+    #[test]
+    fn append_writes_reloadable_blocks_and_preserves_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("templates.toml");
+        std::fs::write(&path, "# my templates\n").unwrap();
+
+        append_template(
+            &path,
+            "ultima1",
+            "Rich",
+            &[
+                ("gold".into(), "500".into()),
+                ("name".into(), "Enki".into()),
+            ],
+        )
+        .unwrap();
+        append_template(&path, "ultima2", "Fed", &[("food".into(), "3000".into())]).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        // The hand-authored comment is preserved.
+        assert!(text.contains("# my templates"));
+        // Numeric values are bare; string values are quoted.
+        assert!(text.contains("gold = 500"));
+        assert!(text.contains("name = \"Enki\""));
+
+        // Both blocks parse back into templates.
+        let raw: TemplatesFile = toml::from_str(&text).unwrap();
+        assert_eq!(raw.template.len(), 2);
     }
 }

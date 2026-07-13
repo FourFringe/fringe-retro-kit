@@ -5,6 +5,7 @@
 //! and a scrollable inspector for the selected game's save. Editing and the Save Library
 //! come later (see `ROADMAP.md`).
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -107,6 +108,19 @@ struct Editor {
     input: Option<String>,
     /// A one-line message (last edit, validation error, or save result).
     status: Option<String>,
+    /// Field keys changed this session (manual edits or applied templates); used to
+    /// pre-check fields when capturing a template.
+    edited: BTreeSet<&'static str>,
+    /// `Some` while capturing the current character's fields into a new template.
+    capture: Option<Capture>,
+}
+
+/// In-progress capture of the current character's fields into a new template.
+struct Capture {
+    /// One flag per editor row (parallel to `Editor::rows`): whether it's included.
+    selected: Vec<bool>,
+    /// `Some(buf)` while typing the new template's name.
+    naming: Option<String>,
 }
 
 impl Editor {
@@ -123,6 +137,20 @@ impl Editor {
             self.input = Some(value);
             self.status = hint;
         }
+    }
+
+    /// Begin capturing a template, pre-checking the fields edited this session.
+    fn begin_capture(&mut self) {
+        let selected = self
+            .rows
+            .iter()
+            .map(|r| self.edited.contains(r.key))
+            .collect();
+        self.capture = Some(Capture {
+            selected,
+            naming: None,
+        });
+        self.status = None;
     }
 }
 
@@ -230,6 +258,7 @@ enum Action {
     Snapshot,
     OpenTemplates,
     ApplyTemplate,
+    SaveTemplate(String),
     ConfirmSave,
     ConfirmDiscard,
     ConfirmAccept,
@@ -524,6 +553,7 @@ impl App {
         if matches!(self.stack.last(), Some(Screen::Templates(_))) {
             self.stack.pop();
         }
+        let applied_ok = matches!(result, Some(Ok(())));
         let status = match result {
             Some(Ok(())) => format!(
                 "Applied '{name}' ({} field(s)). Press s to save.",
@@ -537,8 +567,61 @@ impl App {
             if let Some(rows) = rows {
                 ed.rows = rows;
             }
+            if applied_ok {
+                let keys: std::collections::HashSet<&str> =
+                    fields.iter().map(|(k, _)| k.as_str()).collect();
+                for r in &ed.rows {
+                    if keys.contains(r.key) {
+                        ed.edited.insert(r.key);
+                    }
+                }
+            }
             ed.input = None;
             ed.status = Some(status);
+        }
+    }
+
+    /// Write the fields selected in capture mode as a new template, then reload the set.
+    fn save_template(&mut self, name: String) {
+        let (game, fields) = match (self.session.as_ref(), self.stack.last()) {
+            (Some(s), Some(Screen::Edit(ed))) => {
+                let Some(cap) = &ed.capture else {
+                    return;
+                };
+                let fields: Vec<(String, String)> = ed
+                    .rows
+                    .iter()
+                    .zip(&cap.selected)
+                    .filter(|(_, selected)| **selected)
+                    .map(|(r, _)| (r.key.to_string(), r.value.clone()))
+                    .collect();
+                (s.kind().id().to_string(), fields)
+            }
+            _ => return,
+        };
+        let path = crate::templates::templates_path();
+        let outcome = if fields.is_empty() {
+            Err("no fields selected".to_string())
+        } else {
+            crate::templates::append_template(&path, &game, &name, &fields)
+                .map_err(|e| e.to_string())
+        };
+        if outcome.is_ok() {
+            if let Ok(set) = crate::templates::TemplateSet::load() {
+                self.templates = set;
+                self.template_error = None;
+            }
+        }
+        if let Some(Screen::Edit(ed)) = self.stack.last_mut() {
+            ed.capture = None;
+            ed.status = Some(match outcome {
+                Ok(()) => format!(
+                    "Saved template '{name}' ({} field(s)) → {}",
+                    fields.len(),
+                    path.display()
+                ),
+                Err(e) => format!("Save template failed: {e}"),
+            });
         }
     }
 
@@ -636,6 +719,8 @@ impl App {
             list,
             input: None,
             status: None,
+            edited: BTreeSet::new(),
+            capture: None,
         }));
     }
 
@@ -661,6 +746,7 @@ impl App {
             match result {
                 Ok(()) => {
                     ed.input = None;
+                    ed.edited.insert(key);
                     ed.status = Some(format!("Set {key} = {value}"));
                 }
                 Err(e) => ed.status = Some(e.to_string()), // keep input so it can be fixed
@@ -723,6 +809,8 @@ impl App {
                         KeyCode::Char(c) => buf.push(c),
                         _ => {}
                     }
+                } else if ed.capture.is_some() {
+                    handle_capture_key(ed, code, &mut action);
                 } else {
                     let len = ed.rows.len();
                     match code {
@@ -734,6 +822,7 @@ impl App {
                         KeyCode::Char('s') => action = Action::Save,
                         KeyCode::Char('b') => action = Action::OpenBackups,
                         KeyCode::Char('t') => action = Action::OpenTemplates,
+                        KeyCode::Char('T') => ed.begin_capture(),
                         _ => {}
                     }
                 }
@@ -829,6 +918,7 @@ impl App {
             Action::Snapshot => self.snapshot_current(),
             Action::OpenTemplates => self.open_templates(),
             Action::ApplyTemplate => self.apply_template_selected(),
+            Action::SaveTemplate(name) => self.save_template(name),
             Action::ConfirmSave => self.confirm_save(),
             Action::ConfirmDiscard => self.confirm_discard(),
             Action::ConfirmAccept => self.complete_pending(),
@@ -874,6 +964,79 @@ fn select_wrap(list: &mut ListState, len: usize, delta: i32) {
     let current = list.selected().unwrap_or(0) as i32;
     let next = (current + delta).rem_euclid(len as i32) as usize;
     list.select(Some(next));
+}
+
+/// Handle a keypress while the editor is in template-capture mode (selecting fields, then
+/// naming the template).
+fn handle_capture_key(ed: &mut Editor, code: KeyCode, action: &mut Action) {
+    let naming = ed.capture.as_ref().is_some_and(|c| c.naming.is_some());
+    if naming {
+        let submit = {
+            let buf = ed
+                .capture
+                .as_mut()
+                .and_then(|c| c.naming.as_mut())
+                .expect("naming buffer");
+            match code {
+                KeyCode::Enter => (!buf.trim().is_empty()).then(|| buf.trim().to_string()),
+                KeyCode::Backspace => {
+                    buf.pop();
+                    None
+                }
+                KeyCode::Char(c) => {
+                    buf.push(c);
+                    None
+                }
+                _ => None,
+            }
+        };
+        if let Some(name) = submit {
+            *action = Action::SaveTemplate(name);
+        } else if code == KeyCode::Esc {
+            if let Some(c) = ed.capture.as_mut() {
+                c.naming = None; // back to field selection
+            }
+        }
+        return;
+    }
+
+    let len = ed.rows.len();
+    match code {
+        KeyCode::Esc => {
+            ed.capture = None;
+            ed.status = None;
+        }
+        KeyCode::Down | KeyCode::Char('j') => select_wrap(&mut ed.list, len, 1),
+        KeyCode::Up | KeyCode::Char('k') => select_wrap(&mut ed.list, len, -1),
+        KeyCode::Char(' ') => {
+            let index = ed.list.selected();
+            if let (Some(i), Some(c)) = (index, ed.capture.as_mut()) {
+                if let Some(flag) = c.selected.get_mut(i) {
+                    *flag = !*flag;
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            if let Some(c) = ed.capture.as_mut() {
+                let all = c.selected.iter().all(|s| *s);
+                c.selected.iter_mut().for_each(|s| *s = !all);
+            }
+        }
+        KeyCode::Enter => {
+            let any = ed
+                .capture
+                .as_ref()
+                .is_some_and(|c| c.selected.iter().any(|s| *s));
+            if any {
+                if let Some(c) = ed.capture.as_mut() {
+                    c.naming = Some(String::new());
+                }
+            } else {
+                ed.status = Some("Select at least one field (Space).".to_string());
+            }
+        }
+        _ => {}
+    }
 }
 
 fn selectable_list<'a>(items: Vec<ListItem<'a>>, title: String) -> List<'a> {
@@ -926,13 +1089,33 @@ fn draw_characters(frame: &mut Frame, area: Rect, cl: &mut CharList) {
 }
 
 fn draw_editor(frame: &mut Frame, area: Rect, ed: &mut Editor, dirty: bool) {
+    let selected = ed.capture.as_ref().map(|c| &c.selected);
     let items: Vec<ListItem> = ed
         .rows
         .iter()
-        .map(|r| ListItem::new(Line::from(format!("{:<16} {}", r.label, r.value))))
+        .enumerate()
+        .map(|(i, r)| {
+            let text = match selected {
+                Some(flags) => {
+                    let mark = if *flags.get(i).unwrap_or(&false) {
+                        "[x]"
+                    } else {
+                        "[ ]"
+                    };
+                    format!("{mark} {:<16} {}", r.label, r.value)
+                }
+                None => format!("{:<16} {}", r.label, r.value),
+            };
+            ListItem::new(Line::from(text))
+        })
         .collect();
-    let marker = if dirty { "● " } else { "" };
-    let widget = selectable_list(items, format!(" {marker}{} ", ed.title));
+    let title = if ed.capture.is_some() {
+        format!(" Capture template — {} ", ed.title)
+    } else {
+        let marker = if dirty { "● " } else { "" };
+        format!(" {marker}{} ", ed.title)
+    };
+    let widget = selectable_list(items, title);
     frame.render_stateful_widget(widget, area, &mut ed.list);
 }
 
@@ -1104,11 +1287,22 @@ fn bottom_line(screen: &Screen) -> String {
                     Some(s) => format!("  {label}: {input}_   {s}"),
                     None => format!("  {label}: {input}_   (Enter commit · Esc cancel)"),
                 }
+            } else if let Some(cap) = &ed.capture {
+                if let Some(buf) = &cap.naming {
+                    format!("  Template name: {buf}_   (Enter save · Esc back)")
+                } else {
+                    let n = cap.selected.iter().filter(|s| **s).count();
+                    match &ed.status {
+                        Some(s) => format!("  {s}"),
+                        None => {
+                            format!(" Space toggle · a all · Enter name · Esc cancel · {n} selected ")
+                        }
+                    }
+                }
             } else if let Some(status) = &ed.status {
                 format!("  {status}")
             } else {
-                " ↑/↓ field · Enter/e edit · s save · b backups · t templates · Esc back · q quit "
-                    .to_string()
+                " ↑/↓ field · Enter/e edit · s save · b backups · t templates · T capture · Esc back · q quit ".to_string()
             }
         }
         Screen::Inspect(_) => " ↑/↓ scroll · PgUp/PgDn page · Esc back · q quit ".to_string(),
@@ -1477,6 +1671,78 @@ mod tests {
         app.handle_key(KeyCode::Enter); // attempt to apply -> refused
         assert!(matches!(app.stack.last(), Some(Screen::Templates(_))));
         assert!(!app.session_dirty());
+    }
+
+    fn capture_selection(app: &App) -> Vec<bool> {
+        match app.stack.last() {
+            Some(Screen::Edit(ed)) => ed.capture.as_ref().unwrap().selected.clone(),
+            _ => panic!("expected the editor in capture mode"),
+        }
+    }
+
+    #[test]
+    fn capture_prechecks_edited_fields() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter); // editor
+        set_field_via_ui(&mut app, "gold", "100"); // marks `gold` edited
+        app.handle_key(KeyCode::Char('T')); // begin capture
+
+        let flags = capture_selection(&app);
+        let (gold_i, name_i) = match app.stack.last() {
+            Some(Screen::Edit(ed)) => (
+                ed.rows.iter().position(|r| r.key == "gold").unwrap(),
+                ed.rows.iter().position(|r| r.key == "name").unwrap(),
+            ),
+            _ => panic!("expected the editor"),
+        };
+        assert!(flags[gold_i]); // edited field pre-checked
+        assert!(!flags[name_i]); // untouched field not checked
+    }
+
+    #[test]
+    fn capture_toggle_all_and_enter_starts_naming() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Char('T')); // capture, nothing pre-checked
+        assert!(capture_selection(&app).iter().all(|s| !*s));
+
+        app.handle_key(KeyCode::Char('a')); // select all
+        assert!(capture_selection(&app).iter().all(|s| *s));
+
+        app.handle_key(KeyCode::Enter); // proceed to naming
+        match app.stack.last() {
+            Some(Screen::Edit(ed)) => assert!(ed.capture.as_ref().unwrap().naming.is_some()),
+            _ => panic!("expected the editor"),
+        }
+    }
+
+    #[test]
+    fn capture_writes_template_and_reloads() {
+        let dir = tempfile::tempdir().unwrap();
+        let templates_path = dir.path().join("templates.toml");
+        std::env::set_var("FRINGE_RETRO_TEMPLATES", &templates_path);
+
+        let (_save_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter); // editor
+        set_field_via_ui(&mut app, "gold", "777"); // one edited field, pre-checked
+        app.handle_key(KeyCode::Char('T')); // capture (gold pre-checked)
+        app.handle_key(KeyCode::Enter); // -> naming
+        for c in "Rich".chars() {
+            app.handle_key(KeyCode::Char(c));
+        }
+        app.handle_key(KeyCode::Enter); // save template
+
+        // Capture mode ended and the new template is now loaded and applicable.
+        match app.stack.last() {
+            Some(Screen::Edit(ed)) => assert!(ed.capture.is_none()),
+            _ => panic!("expected the editor"),
+        }
+        let written = std::fs::read_to_string(&templates_path).unwrap();
+        assert!(written.contains("name = \"Rich\""));
+        assert!(written.contains("gold = 777"));
+        assert!(!app.templates.for_game("ultima1").is_empty());
+
+        std::env::remove_var("FRINGE_RETRO_TEMPLATES");
     }
 
     #[test]

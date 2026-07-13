@@ -78,6 +78,23 @@ ultima3    Tank                     4 field(s)  [ok]
    the session is marked unsaved (`●`).
 5. Apply more templates or edit fields as you like, then press `s` to save.
 
+## Capturing a template (interactive UI)
+
+Rather than hand-writing a template, you can capture one from a character you've set up:
+
+1. In the editor, arrange the character the way you want (edit fields, or apply other
+   templates).
+2. Press `T` (capital). The field list gains checkboxes; any fields you changed this session
+   are **pre-checked**.
+3. `Space` toggles the selected field, `a` toggles all. Pick the fields the template should
+   set.
+4. Press `Enter`, type a name, and press `Enter` again.
+
+The template is **appended** to `templates.toml` — existing templates and comments are left
+untouched — and becomes available in the picker straight away. Captured numeric values are
+written as plain numbers and enum/letter values as their names (e.g. `weapon = "Sword"`).
+Descriptions aren't captured; add one by editing the file if you like.
+
 ---
 
 ## Field reference

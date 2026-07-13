@@ -88,6 +88,12 @@ sets. Invalid templates are marked `✗` and can't be applied. Press `Enter` or 
 the selected template — its fields are set on the current character (marking the session
 unsaved), just like editing them by hand. Apply as many as you like, then press `s` to save.
 
+Press `T` (capital) to **capture** the current character into a new template: the field list
+gains checkboxes (any fields you've changed this session are pre-checked). Use `Space` to
+toggle a field, `a` to toggle all, then `Enter` to name it and save. The template is
+**appended** to `templates.toml` (existing content is preserved) and becomes available in
+the picker immediately.
+
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` (or `k` / `j`) | Move selection · scroll one line |
@@ -96,6 +102,7 @@ unsaved), just like editing them by hand. Apply as many as you like, then press 
 | `s` | Save the session (backup + write) |
 | `b` | Open the backup browser (from the editor) |
 | `t` | Open the template picker (from the editor) |
+| `T` | Capture the current character as a new template (from the editor) |
 | `Enter` / `r` | Restore the selected backup (backup browser) |
 | `n` | Snapshot the current save (backup browser) |
 | `Enter` / `a` | Apply the selected template (template picker) |

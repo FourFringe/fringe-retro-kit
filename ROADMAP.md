@@ -112,7 +112,7 @@ The TUI (Ratatui + Crossterm) becomes the primary interface here. Launched by ru
 - [x] Inspector: read-only view of known fields (scrollable, paged; shares formatting with `inspect`)
 - [x] Auto-generated editors driven by the field schema (text / enum / boolean fields) — batch edits in memory, validated on commit, one backup + write on save, with an unsaved-changes guard
 - [x] Backup browser — list a save's backups with a decoded preview, restore with confirmation (auto safety backup, no-op when already identical); snapshot the current save on demand
-- [x] Character templates — apply saved sets of field values to a character (`templates.toml`), validated up front and applied as ordinary in-memory edits
+- [x] Character templates — apply saved sets of field values to a character (`templates.toml`), validated up front and applied as ordinary in-memory edits; capture new templates from a character in the editor
 
 Illustrative mockups (not final):
 
