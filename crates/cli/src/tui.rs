@@ -103,6 +103,8 @@ struct Editor {
     entity: usize,
     title: String,
     rows: Vec<FieldRow>,
+    /// The rendered rows: section headers interleaved with fields. Selection indexes this.
+    display: Vec<DisplayRow>,
     list: ListState,
     /// `Some` while the selected field's value is being typed.
     input: Option<String>,
@@ -131,9 +133,58 @@ struct Picker {
     index: usize,
 }
 
+/// One rendered row of the editor: either a (non-selectable) section header or a field
+/// (an index into `Editor::rows`).
+enum DisplayRow {
+    Header(&'static str),
+    Field(usize),
+}
+
+/// Build the rendered rows for a field list, inserting a header whenever the section
+/// changes. Fields without a section produce no headers (a flat list).
+fn build_display(rows: &[FieldRow]) -> Vec<DisplayRow> {
+    let mut display = Vec::new();
+    let mut current: Option<&'static str> = None;
+    for (i, row) in rows.iter().enumerate() {
+        if let Some(section) = row.section {
+            if current != Some(section) {
+                display.push(DisplayRow::Header(section));
+                current = Some(section);
+            }
+        }
+        display.push(DisplayRow::Field(i));
+    }
+    display
+}
+
 impl Editor {
+    /// The `rows` index of the currently selected field, if a field (not a header) is
+    /// selected.
+    fn selected_field(&self) -> Option<usize> {
+        match self.list.selected().and_then(|i| self.display.get(i)) {
+            Some(DisplayRow::Field(i)) => Some(*i),
+            _ => None,
+        }
+    }
+
     fn selected_row(&self) -> Option<&FieldRow> {
-        self.list.selected().and_then(|i| self.rows.get(i))
+        self.selected_field().and_then(|i| self.rows.get(i))
+    }
+
+    /// Move the selection by `delta`, skipping section headers and wrapping around.
+    fn move_selection(&mut self, delta: i32) {
+        let n = self.display.len();
+        if n == 0 {
+            return;
+        }
+        let mut idx = self.list.selected().unwrap_or(0) as i32;
+        for _ in 0..n {
+            idx = (idx + delta).rem_euclid(n as i32);
+            if matches!(self.display[idx as usize], DisplayRow::Field(_)) {
+                self.list.select(Some(idx as usize));
+                return;
+            }
+        }
     }
 
     /// Begin editing the selected field. Enum/letter/boolean fields open a value picker;
@@ -723,14 +774,18 @@ impl App {
             Some(session) => session.rows(entity),
             None => return,
         };
+        let display = build_display(&rows);
         let mut list = ListState::default();
-        if !rows.is_empty() {
-            list.select(Some(0));
-        }
+        list.select(
+            display
+                .iter()
+                .position(|d| matches!(d, DisplayRow::Field(_))),
+        );
         self.stack.push(Screen::Edit(Editor {
             entity,
             title,
             rows,
+            display,
             list,
             input: None,
             picker: None,
@@ -856,12 +911,11 @@ impl App {
                 } else if ed.capture.is_some() {
                     handle_capture_key(ed, code, &mut action);
                 } else {
-                    let len = ed.rows.len();
                     match code {
                         KeyCode::Char('q') => action = Action::Quit,
                         KeyCode::Esc | KeyCode::Left => action = Action::Back,
-                        KeyCode::Down | KeyCode::Char('j') => select_wrap(&mut ed.list, len, 1),
-                        KeyCode::Up | KeyCode::Char('k') => select_wrap(&mut ed.list, len, -1),
+                        KeyCode::Down | KeyCode::Char('j') => ed.move_selection(1),
+                        KeyCode::Up | KeyCode::Char('k') => ed.move_selection(-1),
                         KeyCode::Enter | KeyCode::Char('e') => ed.begin_edit(),
                         KeyCode::Char('s') => action = Action::Save,
                         KeyCode::Char('b') => action = Action::OpenBackups,
@@ -1082,18 +1136,17 @@ fn handle_capture_key(ed: &mut Editor, code: KeyCode, action: &mut Action) {
         return;
     }
 
-    let len = ed.rows.len();
     match code {
         KeyCode::Esc => {
             ed.capture = None;
             ed.status = None;
         }
-        KeyCode::Down | KeyCode::Char('j') => select_wrap(&mut ed.list, len, 1),
-        KeyCode::Up | KeyCode::Char('k') => select_wrap(&mut ed.list, len, -1),
+        KeyCode::Down | KeyCode::Char('j') => ed.move_selection(1),
+        KeyCode::Up | KeyCode::Char('k') => ed.move_selection(-1),
         KeyCode::Char(' ') => {
-            let index = ed.list.selected();
-            if let (Some(i), Some(c)) = (index, ed.capture.as_mut()) {
-                if let Some(flag) = c.selected.get_mut(i) {
+            let field = ed.selected_field();
+            if let (Some(fi), Some(c)) = (field, ed.capture.as_mut()) {
+                if let Some(flag) = c.selected.get_mut(fi) {
                     *flag = !*flag;
                 }
             }
@@ -1171,35 +1224,44 @@ fn draw_characters(frame: &mut Frame, area: Rect, cl: &mut CharList) {
 }
 
 fn draw_editor(frame: &mut Frame, area: Rect, ed: &mut Editor, dirty: bool) {
-    let selected = ed.capture.as_ref().map(|c| &c.selected);
+    let capture = ed.capture.as_ref().map(|c| &c.selected);
     let picker = ed.picker.as_ref();
     let cursor = ed.list.selected();
     let items: Vec<ListItem> = ed
-        .rows
+        .display
         .iter()
         .enumerate()
-        .map(|(i, r)| {
-            let text = match selected {
-                Some(flags) => {
-                    let mark = if *flags.get(i).unwrap_or(&false) {
-                        "[x]"
-                    } else {
-                        "[ ]"
-                    };
-                    format!("{mark} {:<16} {}", r.label, r.value)
-                }
-                None => {
-                    // While picking, show the pending value on the active row.
-                    let value = match (picker, cursor) {
-                        (Some(p), Some(c)) if c == i => {
-                            p.options.get(p.index).cloned().unwrap_or_default()
-                        }
-                        _ => r.value.clone(),
-                    };
-                    format!("{:<16} {}", r.label, value)
-                }
-            };
-            ListItem::new(Line::from(text))
+        .map(|(di, d)| match d {
+            DisplayRow::Header(section) => ListItem::new(Line::from(Span::styled(
+                section.to_string(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ))),
+            DisplayRow::Field(fi) => {
+                let r = &ed.rows[*fi];
+                let text = match capture {
+                    Some(flags) => {
+                        let mark = if *flags.get(*fi).unwrap_or(&false) {
+                            "[x]"
+                        } else {
+                            "[ ]"
+                        };
+                        format!("{mark} {:<16} {}", r.label, r.value)
+                    }
+                    None => {
+                        // While picking, show the pending value on the active row.
+                        let value = match (picker, cursor) {
+                            (Some(p), Some(c)) if c == di => {
+                                p.options.get(p.index).cloned().unwrap_or_default()
+                            }
+                            _ => r.value.clone(),
+                        };
+                        format!("  {:<16} {}", r.label, value)
+                    }
+                };
+                ListItem::new(Line::from(text))
+            }
         })
         .collect();
     let title = if ed.capture.is_some() {
@@ -1437,21 +1499,51 @@ fn draw_inspector(frame: &mut Frame, area: Rect, insp: &Inspector) {
 
 /// Run the interactive browser. Sets up and restores the terminal, and blocks until quit.
 pub fn run(config: Config) -> Result<()> {
-    let games = config
-        .games()?
-        .into_iter()
-        .map(|g| {
-            let save_path = g.save_dir.map(|dir| dir.join(g.kind.default_save_file()));
-            let found = save_path.as_ref().is_some_and(|p| p.exists());
-            GameRow {
+    let mut games = Vec::new();
+    for g in config.games()? {
+        let title = g.kind.title().to_string();
+        let inspectable = g.kind.is_inspectable();
+        let Some(dir) = g.save_dir else {
+            // No save directory configured: one row, marked missing.
+            games.push(GameRow {
                 id: g.id,
-                title: g.kind.title().to_string(),
-                inspectable: g.kind.is_inspectable(),
-                save_path,
+                title,
+                inspectable,
+                save_path: None,
+                found: false,
+            });
+            continue;
+        };
+        let files = g.kind.save_files();
+        // Show a row per known save file that exists; if none exist, show the default.
+        let existing: Vec<&str> = files
+            .iter()
+            .copied()
+            .filter(|f| dir.join(f).exists())
+            .collect();
+        let shown: Vec<&str> = if existing.is_empty() {
+            vec![g.kind.default_save_file()]
+        } else {
+            existing
+        };
+        let multi = files.len() > 1;
+        for file in shown {
+            let save_path = dir.join(file);
+            let found = save_path.exists();
+            let row_title = if multi {
+                format!("{title} ({file})")
+            } else {
+                title.clone()
+            };
+            games.push(GameRow {
+                id: g.id.clone(),
+                title: row_title,
+                inspectable,
+                save_path: Some(save_path),
                 found,
-            }
-        })
-        .collect();
+            });
+        }
+    }
 
     let mut app = App::new(games);
     match TemplateSet::load() {
@@ -1555,10 +1647,34 @@ mod tests {
         (dir, app)
     }
 
+    fn app_with_ultima3_party() -> (tempfile::TempDir, App) {
+        use fringe_retro_core::games::ultima3;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("PARTY.ULT");
+        let mut bytes = vec![0u8; ultima3::PARTY_LEN];
+        bytes[0x00] = 0x3F; // transport: On Foot
+        bytes[0x07] = 1; // party size: 1
+        bytes[0x12..0x16].copy_from_slice(b"Bob\0"); // member 0 name
+        std::fs::write(&path, &bytes).unwrap();
+        let app = App::new(vec![GameRow {
+            id: "u3".to_string(),
+            title: "Ultima III".to_string(),
+            inspectable: true,
+            save_path: Some(path),
+            found: true,
+        }]);
+        (dir, app)
+    }
+
     fn select_field(app: &mut App, key: &str) {
         if let Some(Screen::Edit(ed)) = app.stack.last_mut() {
-            let idx = ed.rows.iter().position(|r| r.key == key).unwrap();
-            ed.list.select(Some(idx));
+            let fi = ed.rows.iter().position(|r| r.key == key).unwrap();
+            let di = ed
+                .display
+                .iter()
+                .position(|d| matches!(d, DisplayRow::Field(i) if *i == fi))
+                .unwrap();
+            ed.list.select(Some(di));
         }
     }
 
@@ -1574,6 +1690,44 @@ mod tests {
         let (_dir, mut app) = app_with_ultima1();
         app.handle_key(KeyCode::Enter);
         assert!(matches!(app.stack.last(), Some(Screen::Edit(_))));
+    }
+
+    #[test]
+    fn u1_editor_groups_fields_into_sections() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter);
+        match app.stack.last() {
+            Some(Screen::Edit(ed)) => {
+                assert!(ed.display.len() > ed.rows.len()); // section headers were inserted
+                assert!(matches!(ed.display.first(), Some(DisplayRow::Header(_))));
+                assert!(ed.selected_field().is_some()); // selection starts on a field
+            }
+            _ => panic!("expected the editor"),
+        }
+    }
+
+    #[test]
+    fn u3_party_header_is_editable() {
+        let (_dir, mut app) = app_with_ultima3_party();
+        app.handle_key(KeyCode::Enter); // characters list: "Party settings" + members
+        assert!(matches!(app.stack.last(), Some(Screen::Characters(_))));
+        app.handle_key(KeyCode::Enter); // open "Party settings" (entity 0)
+        match app.stack.last() {
+            Some(Screen::Edit(ed)) => {
+                assert!(ed.rows.iter().any(|r| r.key == "transport"));
+                assert!(ed
+                    .display
+                    .iter()
+                    .any(|d| matches!(d, DisplayRow::Header(_))));
+            }
+            _ => panic!("expected the party-header editor"),
+        }
+        select_field(&mut app, "transport"); // enum field -> picker
+        app.handle_key(KeyCode::Enter);
+        app.handle_key(KeyCode::Right); // On Foot -> Horse
+        app.handle_key(KeyCode::Enter); // commit
+        assert_eq!(editor_value(&app, "transport"), "Horse");
+        assert!(app.session_dirty());
     }
 
     #[test]

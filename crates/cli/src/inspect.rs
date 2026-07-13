@@ -46,9 +46,15 @@ pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
     } else if bytes.len() == ultima2::SAVE_LEN {
         let save = Ultima2Save::from_bytes(bytes.to_vec())?;
         out.push("Ultima II (partial — reverse-engineering in progress):".to_string());
-        for (label, value, tentative) in save.inspect() {
+        let mut current_section = "";
+        for (section, label, value, tentative) in save.inspect() {
+            if section != current_section {
+                out.push(String::new());
+                out.push(format!("{section}:"));
+                current_section = section;
+            }
             let mark = if tentative { "  (?)" } else { "" };
-            out.push(format!("  {label:<12} {value}{mark}"));
+            out.push(format!("  {label:<16} {value}{mark}"));
         }
     } else {
         let save = Ultima1Save::from_bytes(bytes.to_vec())?;

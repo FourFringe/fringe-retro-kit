@@ -195,6 +195,45 @@ pub fn record_fields() -> &'static [Field] {
     FIELDS
 }
 
+// --- Party header (`PARTY.ULT`, offsets within the 18-byte header). ---
+
+/// Party transport (header byte `0x00`); its values aren't a simple 0-based index.
+const PARTY_TRANSPORT: Variants = &[(0x3F, "On Foot"), (0x0A, "Horse"), (0x0B, "Ship")];
+
+/// The editable fields of the `PARTY.ULT` header.
+#[rustfmt::skip]
+const HEADER_FIELDS: &[Field] = &[
+    Field::new("transport",  "Transport",    0x00, FieldKind::Enum { bytes: 1, endian: Endian::Little, variants: PARTY_TRANSPORT }).in_section("Party"),
+    Field::new("moves",      "Moves",        0x03, FieldKind::Bcd { bytes: 4, endian: Endian::Little }).in_section("Party"),
+    Field::new("party_size", "Party Size",   0x07, FieldKind::Byte).in_section("Party"),
+    Field::new("x",          "Map X",        0x08, FieldKind::Byte).in_section("Party"),
+    Field::new("y",          "Map Y",        0x09, FieldKind::Byte).in_section("Party"),
+    Field::new("order_1",    "Order slot 1", 0x0A, FieldKind::Byte).in_section("Order (roster slots)"),
+    Field::new("order_2",    "Order slot 2", 0x0B, FieldKind::Byte).in_section("Order (roster slots)"),
+    Field::new("order_3",    "Order slot 3", 0x0C, FieldKind::Byte).in_section("Order (roster slots)"),
+    Field::new("order_4",    "Order slot 4", 0x0D, FieldKind::Byte).in_section("Order (roster slots)"),
+];
+
+/// Format a party-header field by key, or `None` for an unknown key.
+fn header_get(buf: &[u8], key: &str) -> Option<String> {
+    let field = HEADER_FIELDS.iter().find(|f| f.key == key)?;
+    Some(schema::read_field(buf, 0, field))
+}
+
+/// Set a party-header field by key, validating the value first.
+fn header_set(buf: &mut [u8], key: &str, value: &str) -> Result<()> {
+    let field = HEADER_FIELDS
+        .iter()
+        .find(|f| f.key == key)
+        .ok_or_else(|| Error::Format(format!("unknown field '{key}'")))?;
+    schema::write_field(buf, 0, field, value)
+}
+
+/// The schema field table for the `PARTY.ULT` header.
+pub fn header_fields() -> &'static [Field] {
+    HEADER_FIELDS
+}
+
 /// A parsed Ultima III roster: 20 fixed 64-byte character records.
 #[derive(Clone)]
 pub struct Ultima3Roster {
@@ -376,6 +415,16 @@ impl Ultima3Party {
     /// The keys of all known character fields.
     pub fn field_keys() -> impl Iterator<Item = &'static str> {
         record_field_keys()
+    }
+
+    /// Format a party-header field by key, or `None` for an unknown key.
+    pub fn header_get_field(&self, key: &str) -> Option<String> {
+        header_get(&self.bytes, key)
+    }
+
+    /// Set a party-header field by key, validating the value first.
+    pub fn header_set_field(&mut self, key: &str, value: &str) -> Result<()> {
+        header_set(&mut self.bytes, key, value)
     }
 
     /// Set a field of a party member by key, validating the value first.

@@ -54,6 +54,11 @@ games (Ultima I/II) go straight to a field editor, while multi-character games (
 rosters and parties) first show a list of characters to drill into. The editor lists every
 field the tool understands as `label: value`.
 
+Ultima III keeps two save files — the character **roster** (`ROSTER.ULT`) and the active
+**party** (`PARTY.ULT`) — so each is listed separately (e.g. `Ultima III (ROSTER.ULT)` and
+`Ultima III (PARTY.ULT)`) when present. The party file is the one that includes the "Party
+settings" entry.
+
 To change a field, select it and press `Enter` (or `e`). **Enum fields** (race, class,
 weapon, and the like) and boolean fields open a **picker**: use `←`/`→` to cycle through the
 valid values and `Enter` to set the chosen one. **Text and number fields** open an inline
@@ -63,8 +68,11 @@ accumulate in memory — a `●` in the title marks unsaved changes — and are 
 disk when you press `s`, which takes a single timestamped backup and one write. Leaving a
 game or quitting with unsaved edits prompts you to save, discard, or cancel.
 
-Section grouping (Ultima I) and the party header (Ultima III) are not shown in the editor's
-flat field list; use the `inspect` command to see those.
+Related fields are grouped under **section headers** in the editor (e.g. Ultima I's
+Character / Attributes / Status / Inventory groups). For **Ultima III party files**
+(`PARTY.ULT`), the party's own settings appear as a **"Party settings"** entry alongside the
+characters — open it to edit the transport, move count, party size, map position, and marching
+order.
 
 ### Backup browser
 

@@ -65,6 +65,18 @@ impl GameKind {
         }
     }
 
+    /// The known save files this game may keep in its save directory (the default first).
+    /// Ultima III has two: the character roster and the active party (which alone holds the
+    /// party header).
+    pub fn save_files(self) -> &'static [&'static str] {
+        match self {
+            GameKind::Ultima1 => &["PLAYER1.U1"],
+            GameKind::Ultima2 => &["PLAYER"],
+            GameKind::Ultima3 => &["ROSTER.ULT", "PARTY.ULT"],
+            GameKind::Wasteland => &["GAME1"],
+        }
+    }
+
     /// Whether the headless CLI can currently inspect/edit this game's saves.
     /// (Wasteland's encrypted records aren't wired into `inspect` yet.)
     pub fn is_inspectable(self) -> bool {

@@ -75,52 +75,61 @@ const fn letter(variants: Variants) -> FieldKind {
     FieldKind::Letter { variants }
 }
 
+// Display sections, used to group the interactive editor's field list.
+const S_CHARACTER: &str = "Character";
+const S_ATTRIBUTES: &str = "Attributes";
+const S_STATUS: &str = "Status";
+const S_LOCATION: &str = "Location";
+const S_EQUIPPED: &str = "Equipped";
+const S_WEAPONS: &str = "Inventory: Weapons";
+const S_ARMOUR: &str = "Inventory: Armour";
+
 /// Fields mapped so far. Confirmed against a snapshot of HP 14, Food 289, XP 0, Gold 400.
 #[rustfmt::skip]
 const FIELDS: &[Field] = &[
-    Field::new("name",  "Name",  0x00, FieldKind::Name { len: NAME_LEN }),
-    Field::new("sex",   "Sex",   0x10, letter(SEX)),
-    Field::new("class", "Class", 0x11, enum1(CLASS)),
-    Field::new("race",  "Race",  0x12, enum1(RACE)),
+    Field::new("name",  "Name",  0x00, FieldKind::Name { len: NAME_LEN }).in_section(S_CHARACTER),
+    Field::new("sex",   "Sex",   0x10, letter(SEX)).in_section(S_CHARACTER),
+    Field::new("class", "Class", 0x11, enum1(CLASS)).in_section(S_CHARACTER),
+    Field::new("race",  "Race",  0x12, enum1(RACE)).in_section(S_CHARACTER),
     // Attributes: six 1-byte BCD values at 0x15..0x1A, stored *adjusted* (after race/class/gender
     // bonuses). Order and encoding confirmed with the FRINGE character (all-distinct values).
-    Field::new("strength",     "Strength",     0x15, bcd(1)),
-    Field::new("agility",      "Agility",      0x16, bcd(1)),
-    Field::new("stamina",      "Stamina",      0x17, bcd(1)),
-    Field::new("charisma",     "Charisma",     0x18, bcd(1)),
-    Field::new("wisdom",       "Wisdom",       0x19, bcd(1)),
-    Field::new("intelligence", "Intelligence", 0x1A, bcd(1)),
-    Field::new("hits", "Hits", 0x1B, bcd(2)),
-    Field::new("food", "Food", 0x1D, bcd(2)),
-    Field::new("experience", "Experience", 0x20, bcd(2)),
-    Field::new("gold", "Gold", 0x22, bcd(2)),
+    Field::new("strength",     "Strength",     0x15, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("agility",      "Agility",      0x16, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("stamina",      "Stamina",      0x17, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("charisma",     "Charisma",     0x18, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("wisdom",       "Wisdom",       0x19, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("intelligence", "Intelligence", 0x1A, bcd(1)).in_section(S_ATTRIBUTES),
+    Field::new("hits", "Hits", 0x1B, bcd(2)).in_section(S_STATUS),
+    Field::new("food", "Food", 0x1D, bcd(2)).in_section(S_STATUS),
+    Field::new("experience", "Experience", 0x20, bcd(2)).in_section(S_STATUS),
+    Field::new("gold", "Gold", 0x22, bcd(2)).in_section(S_STATUS),
     // Map position (raw binary bytes), confirmed by moving left/right (X) and up/down (Y).
-    Field::new("x", "Map X", 0x24, FieldKind::Byte),
-    Field::new("y", "Map Y", 0x25, FieldKind::Byte),
+    Field::new("x", "Map X", 0x24, FieldKind::Byte).in_section(S_LOCATION),
+    Field::new("y", "Map Y", 0x25, FieldKind::Byte).in_section(S_LOCATION),
     // Readied weapon (0x2B) and worn armour (0x2C), single index into the item order (0 = none).
     // Confirmed by Wield/Wear diffs (Dagger..Bow -> 1..4; Cloth/Leather -> 1/2).
-    Field::new("weapon", "Weapon (readied)", 0x2B, enum1(WEAPON)),
-    Field::new("armor",  "Armour (worn)",    0x2C, enum1(ARMOR)),
+    Field::new("weapon", "Weapon (readied)", 0x2B, enum1(WEAPON)).in_section(S_EQUIPPED),
+    Field::new("armor",  "Armour (worn)",    0x2C, enum1(ARMOR)).in_section(S_EQUIPPED),
     // Weapons owned (counts), 0x41..0x49 in weapon order (Dagger..Quicksword); array base 0x40 is
     // Hands. Dagger..Sword confirmed by purchase diffs (5/4/3/2/1). Encoding assumed 1-byte BCD to
     // match the rest of U2 — verify with a count >= 10 (10 would read as 0x10).
-    Field::new("weapon_dagger",     "Daggers",      0x41, bcd(1)).tentative(),
-    Field::new("weapon_mace",       "Maces",        0x42, bcd(1)).tentative(),
-    Field::new("weapon_axe",        "Axes",         0x43, bcd(1)).tentative(),
-    Field::new("weapon_bow",        "Bows",         0x44, bcd(1)).tentative(),
-    Field::new("weapon_sword",      "Swords",       0x45, bcd(1)).tentative(),
-    Field::new("weapon_greatsword", "Great swords", 0x46, bcd(1)).tentative(),
-    Field::new("weapon_lightsword", "Light swords", 0x47, bcd(1)).tentative(),
-    Field::new("weapon_phaser",     "Phasers",      0x48, bcd(1)).tentative(),
-    Field::new("weapon_quicksword", "Quickswords",  0x49, bcd(1)).tentative(),
+    Field::new("weapon_dagger",     "Daggers",      0x41, bcd(1)).in_section(S_WEAPONS).tentative(),
+    Field::new("weapon_mace",       "Maces",        0x42, bcd(1)).in_section(S_WEAPONS).tentative(),
+    Field::new("weapon_axe",        "Axes",         0x43, bcd(1)).in_section(S_WEAPONS).tentative(),
+    Field::new("weapon_bow",        "Bows",         0x44, bcd(1)).in_section(S_WEAPONS).tentative(),
+    Field::new("weapon_sword",      "Swords",       0x45, bcd(1)).in_section(S_WEAPONS).tentative(),
+    Field::new("weapon_greatsword", "Great swords", 0x46, bcd(1)).in_section(S_WEAPONS).tentative(),
+    Field::new("weapon_lightsword", "Light swords", 0x47, bcd(1)).in_section(S_WEAPONS).tentative(),
+    Field::new("weapon_phaser",     "Phasers",      0x48, bcd(1)).in_section(S_WEAPONS).tentative(),
+    Field::new("weapon_quicksword", "Quickswords",  0x49, bcd(1)).in_section(S_WEAPONS).tentative(),
     // Armour owned (counts), 0x61..0x66 in armour order (Cloth..Power); array base 0x60 is Skin.
     // Cloth..Plate confirmed by purchase diffs. Same BCD-vs-binary caveat as weapons.
-    Field::new("armor_cloth",   "Cloth armour",   0x61, bcd(1)).tentative(),
-    Field::new("armor_leather", "Leather armour", 0x62, bcd(1)).tentative(),
-    Field::new("armor_chain",   "Chain armour",   0x63, bcd(1)).tentative(),
-    Field::new("armor_plate",   "Plate armour",   0x64, bcd(1)).tentative(),
-    Field::new("armor_reflect", "Reflect armour", 0x65, bcd(1)).tentative(),
-    Field::new("armor_power",   "Power armour",   0x66, bcd(1)).tentative(),
+    Field::new("armor_cloth",   "Cloth armour",   0x61, bcd(1)).in_section(S_ARMOUR).tentative(),
+    Field::new("armor_leather", "Leather armour", 0x62, bcd(1)).in_section(S_ARMOUR).tentative(),
+    Field::new("armor_chain",   "Chain armour",   0x63, bcd(1)).in_section(S_ARMOUR).tentative(),
+    Field::new("armor_plate",   "Plate armour",   0x64, bcd(1)).in_section(S_ARMOUR).tentative(),
+    Field::new("armor_reflect", "Reflect armour", 0x65, bcd(1)).in_section(S_ARMOUR).tentative(),
+    Field::new("armor_power",   "Power armour",   0x66, bcd(1)).in_section(S_ARMOUR).tentative(),
 ];
 
 /// A parsed Ultima II `PLAYER` save file.
@@ -157,11 +166,18 @@ impl Ultima2Save {
         Some(schema::read_field(&self.bytes, 0, field))
     }
 
-    /// All known fields as `(label, value, tentative)` triples.
-    pub fn inspect(&self) -> Vec<(&'static str, String, bool)> {
+    /// All known fields as `(section, label, value, tentative)` tuples.
+    pub fn inspect(&self) -> Vec<(&'static str, &'static str, String, bool)> {
         FIELDS
             .iter()
-            .map(|f| (f.label, schema::read_field(&self.bytes, 0, f), f.tentative))
+            .map(|f| {
+                (
+                    f.section.unwrap_or_default(),
+                    f.label,
+                    schema::read_field(&self.bytes, 0, f),
+                    f.tentative,
+                )
+            })
             .collect()
     }
 
@@ -193,6 +209,11 @@ impl Ultima2Save {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_field_has_a_section() {
+        assert!(FIELDS.iter().all(|f| f.section.is_some()));
+    }
 
     /// A synthetic save matching a real snapshot: HP 14, Food 289, XP 0, Gold 400.
     /// A synthetic save matching the confirmed pristine FRINGE snapshot:

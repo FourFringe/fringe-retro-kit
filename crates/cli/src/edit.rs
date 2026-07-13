@@ -29,12 +29,14 @@ pub struct Entity {
     pub label: String,
 }
 
-/// One editable field: its stable key, display label, current value, and schema kind.
+/// One editable field: its stable key, display label, current value, schema kind, and
+/// optional display section (used to group the editor's field list).
 pub struct FieldRow {
     pub key: &'static str,
     pub label: &'static str,
     pub value: String,
     pub kind: FieldKind,
+    pub section: Option<&'static str>,
 }
 
 impl FieldRow {
@@ -152,22 +154,33 @@ impl Session {
                 })
                 .collect(),
             Loaded::Ultima3Party(p) => {
+                // Entity 0 is the party header; entities 1..=n are the party members.
+                let mut entities = vec![Entity {
+                    index: 0,
+                    label: "Party settings".to_string(),
+                }];
                 let members = p.party_size().min(ultima3::PARTY_MEMBER_COUNT);
-                (0..members)
-                    .map(|m| Entity {
-                        index: m,
-                        label: format!("{}. {}", m + 1, p.summary(m)),
-                    })
-                    .collect()
+                entities.extend((0..members).map(|m| Entity {
+                    index: m + 1,
+                    label: format!("{}. {}", m + 1, p.summary(m)),
+                }));
+                entities
             }
         }
     }
 
-    fn fields(&self) -> &'static [Field] {
+    fn fields(&self, entity: usize) -> &'static [Field] {
         match &self.save {
             Loaded::Ultima1(_) => Ultima1Save::fields(),
             Loaded::Ultima2(_) => Ultima2Save::fields(),
-            Loaded::Ultima3Roster(_) | Loaded::Ultima3Party(_) => ultima3::record_fields(),
+            Loaded::Ultima3Roster(_) => ultima3::record_fields(),
+            Loaded::Ultima3Party(_) => {
+                if entity == 0 {
+                    ultima3::header_fields()
+                } else {
+                    ultima3::record_fields()
+                }
+            }
         }
     }
 
@@ -176,19 +189,26 @@ impl Session {
             Loaded::Ultima1(s) => s.get_field(key),
             Loaded::Ultima2(s) => s.get_field(key),
             Loaded::Ultima3Roster(r) => r.get_field(entity, key),
-            Loaded::Ultima3Party(p) => p.get_field(entity, key),
+            Loaded::Ultima3Party(p) => {
+                if entity == 0 {
+                    p.header_get_field(key)
+                } else {
+                    p.get_field(entity - 1, key)
+                }
+            }
         }
     }
 
     /// The editable fields (with current in-memory values) of the given entity.
     pub fn rows(&self, entity: usize) -> Vec<FieldRow> {
-        self.fields()
+        self.fields(entity)
             .iter()
             .map(|f| FieldRow {
                 key: f.key,
                 label: f.label,
                 value: self.value(entity, f.key).unwrap_or_default(),
                 kind: f.kind,
+                section: f.section,
             })
             .collect()
     }
@@ -200,7 +220,13 @@ impl Session {
             Loaded::Ultima1(s) => s.set_field(key, value),
             Loaded::Ultima2(s) => s.set_field(key, value),
             Loaded::Ultima3Roster(r) => r.set_field(entity, key, value),
-            Loaded::Ultima3Party(p) => p.set_field(entity, key, value),
+            Loaded::Ultima3Party(p) => {
+                if entity == 0 {
+                    p.header_set_field(key, value)
+                } else {
+                    p.set_field(entity - 1, key, value)
+                }
+            }
         }
         .map_err(|e| anyhow!("{e}"))?;
         self.dirty = true;

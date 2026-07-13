@@ -181,3 +181,8 @@ Templates apply to a single character (a roster slot or party member).
 **Armour counts (0–99):** `armor_cloth` `armor_leather` `armor_chain` `armor_plate` `armor_chain_plus2` `armor_plate_plus2` `armor_exotic`
 
 **Weapon counts (0–99):** `weapon_dagger` `weapon_mace` `weapon_sling` `weapon_axe` `weapon_bow` `weapon_sword` `weapon_2h_sword` `weapon_axe_plus2` `weapon_bow_plus2` `weapon_sword_plus2` `weapon_gloves` `weapon_axe_plus4` `weapon_bow_plus4` `weapon_sword_plus4` `weapon_exotic`
+
+**Party header (`PARTY.ULT` only, the "Party settings" entry):** `transport` (On Foot, Horse,
+Ship) · `moves` (0–99999999) · `party_size` · `x` · `y` · `order_1`…`order_4` (roster slot
+numbers). These belong to the party as a whole, not to a character, so a template of them only
+applies when the "Party settings" entry is open.
