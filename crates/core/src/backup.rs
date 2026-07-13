@@ -72,6 +72,20 @@ pub fn restore(backup: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<Opt
     Ok(Some(pre_restore))
 }
 
+/// Take a manual snapshot of `path`: create a timestamped backup, but only if no existing
+/// backup is already byte-identical to the current file. Returns the new backup's path, or
+/// `None` when an identical backup already exists (nothing to bookmark).
+pub fn snapshot(path: impl AsRef<Path>) -> Result<Option<PathBuf>> {
+    let path = path.as_ref();
+    let bytes = std::fs::read(path)?;
+    for existing in list(path)? {
+        if std::fs::read(&existing).is_ok_and(|b| b == bytes) {
+            return Ok(None);
+        }
+    }
+    Ok(Some(create(path)?))
+}
+
 fn file_name(path: &Path) -> Result<String> {
     Ok(path
         .file_name()
@@ -119,5 +133,25 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"original");
         // No safety backup was created.
         assert_eq!(list(&path).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn snapshot_skips_identical_and_creates_when_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("PLAYER1.U1");
+        std::fs::write(&path, b"first").unwrap();
+
+        // First snapshot creates a backup.
+        assert!(snapshot(&path).unwrap().is_some());
+        assert_eq!(list(&path).unwrap().len(), 1);
+
+        // Snapshotting identical content again is a no-op.
+        assert!(snapshot(&path).unwrap().is_none());
+        assert_eq!(list(&path).unwrap().len(), 1);
+
+        // After the file changes, a new snapshot is created.
+        std::fs::write(&path, b"second").unwrap();
+        assert!(snapshot(&path).unwrap().is_some());
+        assert_eq!(list(&path).unwrap().len(), 2);
     }
 }

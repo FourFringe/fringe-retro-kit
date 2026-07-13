@@ -75,6 +75,11 @@ fresh safety backup of the current file is made first, and the editor reloads to
 restored values. Restoring a backup that already matches the current file is a no-op (no
 write, no extra backup).
 
+Press `n` to take a **snapshot**: a manual backup of the current save file on disk (a
+"bookmark" of the state you just saved in-game), even when you haven't edited anything. If
+an identical backup already exists the snapshot is skipped, so repeatedly snapshotting an
+unchanged save won't pile up duplicates.
+
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` (or `k` / `j`) | Move selection · scroll one line |
@@ -83,6 +88,7 @@ write, no extra backup).
 | `s` | Save the session (backup + write) |
 | `b` | Open the backup browser (from the editor) |
 | `Enter` / `r` | Restore the selected backup (backup browser) |
+| `n` | Snapshot the current save (backup browser) |
 | `PgUp` / `PgDn` (or `Space`) | Scroll a page (messages / backup preview) |
 | `Home` / `End` | Jump to top / bottom (messages / backup preview) |
 | `Esc` (or `←` / `Backspace`) | Cancel edit · back one screen |

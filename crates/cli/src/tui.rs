@@ -68,6 +68,8 @@ struct BackupList {
     entries: Vec<BackupEntry>,
     list: ListState,
     preview: Inspector,
+    /// A transient one-line message (e.g. the result of a snapshot).
+    status: Option<String>,
 }
 
 /// A field editor for one character within the current session.
@@ -198,6 +200,7 @@ enum Action {
     Save,
     OpenBackups,
     RequestRestore,
+    Snapshot,
     ConfirmSave,
     ConfirmDiscard,
     ConfirmAccept,
@@ -324,6 +327,7 @@ impl App {
             entries,
             list,
             preview,
+            status: None,
         }));
     }
 
@@ -378,6 +382,30 @@ impl App {
             }
             ed.input = None;
             ed.status = Some(status);
+        }
+    }
+
+    /// Snapshot the current save on disk into a new backup (a manual "bookmark"), skipping
+    /// it when an identical backup already exists. Refreshes the backup list in place.
+    fn snapshot_current(&mut self) {
+        let Some(path) = self.session.as_ref().map(|s| s.path().to_path_buf()) else {
+            return;
+        };
+        let (status, changed) = match backup::snapshot(&path) {
+            Ok(Some(p)) => (format!("Snapshot saved: {}", backup_stamp(&p, &path)), true),
+            Ok(None) => (
+                "An identical backup already exists; no snapshot made.".to_string(),
+                false,
+            ),
+            Err(e) => (format!("Snapshot failed: {e}"), false),
+        };
+        if let Some(Screen::Backups(bl)) = self.stack.last_mut() {
+            if changed {
+                bl.entries = build_backup_entries(&path);
+                bl.list.select((!bl.entries.is_empty()).then_some(0));
+                refresh_backup_preview(bl);
+            }
+            bl.status = Some(status);
         }
     }
 
@@ -585,10 +613,12 @@ impl App {
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         select_wrap(&mut bl.list, len, 1);
+                        bl.status = None;
                         refresh_backup_preview(bl);
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         select_wrap(&mut bl.list, len, -1);
+                        bl.status = None;
                         refresh_backup_preview(bl);
                     }
                     KeyCode::PageDown | KeyCode::Char(' ') => bl.preview.page_down(),
@@ -596,6 +626,7 @@ impl App {
                     KeyCode::Home => bl.preview.home(),
                     KeyCode::End => bl.preview.end(),
                     KeyCode::Enter | KeyCode::Char('r') => action = Action::RequestRestore,
+                    KeyCode::Char('n') => action = Action::Snapshot,
                     _ => {}
                 }
             }
@@ -636,6 +667,7 @@ impl App {
             Action::Save => self.save_from_editor(),
             Action::OpenBackups => self.open_backups(),
             Action::RequestRestore => self.request_restore(),
+            Action::Snapshot => self.snapshot_current(),
             Action::ConfirmSave => self.confirm_save(),
             Action::ConfirmDiscard => self.confirm_discard(),
             Action::ConfirmAccept => self.complete_pending(),
@@ -863,9 +895,13 @@ fn bottom_line(screen: &Screen) -> String {
             }
         }
         Screen::Inspect(_) => " ↑/↓ scroll · PgUp/PgDn page · Esc back · q quit ".to_string(),
-        Screen::Backups(_) => {
-            " ↑/↓ select · PgUp/PgDn preview · Enter/r restore · Esc back · q quit ".to_string()
-        }
+        Screen::Backups(bl) => match &bl.status {
+            Some(s) => format!("  {s}"),
+            None => {
+                " ↑/↓ select · PgUp/PgDn preview · Enter/r restore · n snapshot · Esc back · q quit "
+                    .to_string()
+            }
+        },
         Screen::Confirm(c) => match &c.pending {
             Pending::Restore { .. } => " y restore · Esc cancel ".to_string(),
             _ => " s save · d discard · Esc cancel ".to_string(),
@@ -1136,6 +1172,30 @@ mod tests {
         assert!(matches!(app.stack.last(), Some(Screen::Edit(_))));
         assert_eq!(editor_value(&app, "gold"), "100");
         assert!(!app.session_dirty());
+    }
+
+    fn backups_len(app: &App) -> usize {
+        match app.stack.last() {
+            Some(Screen::Backups(bl)) => bl.entries.len(),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn snapshot_from_browser_creates_then_dedupes() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter); // editor (gold 0)
+        set_field_via_ui(&mut app, "gold", "100");
+        app.handle_key(KeyCode::Char('s')); // save: backup of gold 0, disk now gold 100
+
+        app.handle_key(KeyCode::Char('b')); // browser: the save produced one backup
+        let before = backups_len(&app);
+
+        app.handle_key(KeyCode::Char('n')); // snapshot the on-disk save (gold 100)
+        assert_eq!(backups_len(&app), before + 1);
+
+        app.handle_key(KeyCode::Char('n')); // identical file -> no-op
+        assert_eq!(backups_len(&app), before + 1);
     }
 
     #[test]
