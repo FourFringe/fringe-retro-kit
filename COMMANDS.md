@@ -50,11 +50,12 @@ fringe-retro
 ```
 
 The interactive UI is a **batch editor**. Each game appears once in the list. Selecting a
-game that has more than one save file (e.g. Ultima III's character **roster**, `ROSTER.ULT`,
-and the active **party**, `PARTY.ULT`) shows a **file chooser** first; games with a single
-save file open straight away. Single-character saves (Ultima I/II) go to a field editor,
-while multi-character saves (an Ultima III roster or party) show a list of characters to
-drill into. The editor lists every field the tool understands as `label: value`.
+game that has more than one save file present shows a **file chooser** first; games with a
+single save file open straight away. Examples of multi-file games: **Ultima I**'s character
+slots (`PLAYER1.U1`…`PLAYER4.U1`) and **Ultima III**'s character **roster** (`ROSTER.ULT`)
+plus active **party** (`PARTY.ULT`). Single-character saves (Ultima I/II) go to a field
+editor, while multi-character saves (an Ultima III roster or party) show a list of characters
+to drill into. The editor lists every field the tool understands as `label: value`.
 
 The party file is the one that includes the **"Party settings"** entry (the party header).
 `Esc` from a character list steps back to the file chooser, then to the games list.

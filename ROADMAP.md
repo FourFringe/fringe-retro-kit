@@ -12,6 +12,25 @@ Conservative by design: solve one problem well before expanding.
 
 ---
 
+## Current status & near-term plan
+
+Phases 1–4 are effectively complete: all three Ultimas are fully readable and editable via
+both the CLI and the interactive TUI — a section-grouped editor with an enum picker,
+automatic backups + on-demand snapshots, character templates (with in-app capture), and a
+per-game save-file chooser.
+
+Agreed next steps, in order:
+
+1. **Ultima I multi-slot** (quick win) — surface `PLAYER1.U1`…`PLAYER4.U1` through the
+   existing file chooser by extending `GameKind::save_files`.
+2. **Ultima IV** (Phase 7) — the next real milestone. Same family as I–III and documented by
+   the `xu4` reimplementation, so it should be mostly a new schema table, proving that adding
+   a game is "schema data, not new code".
+3. Then pick among **Phase 5** (Save Library), **Wasteland** records + the codec/Transform
+   pipeline, or **Phase 6** (platform detection + CI).
+
+---
+
 ## Phase 1 — Foundation + Hardcoded Ultima I MVP
 
 Detailed plan: **[PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md)**.
@@ -202,10 +221,19 @@ Grouped by codec complexity (which parsing engine each needs):
   records in progress).
 - **Easy extensions — same family as the Ultimas:** Ultima IV (`xu4`), Ultima V, Ultima VI
   (`Nuvie`).
-- **Candidates (owned & installed, to investigate after Wasteland):** Magic Carpet & Magic
-  Carpet 2 (GOG); the **Bard's Tale Trilogy** remaster (Steam) — a modern Krome/inXile
-  rebuild with its own save format, distinct from the 1985 originals, and the version most
-  likely to actually be played here.
+- **Candidates (owned & installed, to investigate after Wasteland):**
+  - **Magic Carpet 1 & 2** (Bullfrog, DOS via GOG/DOSBox). Saves live inside the game
+    directory — `…\SAVE` for Magic Carpet, `…\GAME\NETHERW\SAVE` for Magic Carpet 2.
+    **No published byte-level save-format spec found** (PCGamingWiki documents only the
+    locations, and there's no known open-source reimplementation) — a from-scratch
+    reverse-engineering target, and these are action games so the "save" is world/mission
+    state, not a character sheet.
+  - **Bard's Tale Trilogy** remaster (Krome / inXile, **Unity 2017.4**). Saves live in Unity's
+    persistent-data folder (`%USERPROFILE%\AppData\LocalLow\InXile Entertainment\The Bard's
+    Tale Trilogy\saves`; the macOS equivalent lives under `~/Library`), with **only a single
+    autosave shared across all three games**. Closed-source Unity and **no published format
+    spec** — almost certainly a Unity-serialized blob (binary or JSON) that would need RE.
+    Distinct from the 1985 originals.
 - **Candidates (kept in the list; may never get to them, and that's fine):** SSI Gold Box,
   Might & Magic 3–5 / World of Xeen (`OpenXeen`), Dungeon Master, Eye of the Beholder,
   Daggerfall (Daggerfall Unity; introduces RLE decompression), Wizardry, original Bard's Tale.
