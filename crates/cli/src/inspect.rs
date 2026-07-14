@@ -8,11 +8,36 @@ use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 use fringe_retro_core::games::ultima4::{self, Ultima4Save};
 use fringe_retro_core::games::ultima5::{self, Ultima5Save};
+use fringe_retro_core::games::wasteland::WastelandSave;
 
 /// Produce the human-readable inspection lines for a save file's bytes.
 pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
     let mut out = Vec::new();
-    if bytes.len() == ultima3::PARTY_LEN {
+    if bytes.starts_with(b"msq0") {
+        let save = WastelandSave::from_bytes(bytes.to_vec())?;
+        let occupied = save.occupied_characters();
+        if occupied.is_empty() {
+            out.push("(no characters in this save)".to_string());
+        }
+        for i in occupied {
+            if !out.is_empty() {
+                out.push(String::new());
+            }
+            out.push(format!(
+                "Character {}: {}",
+                i + 1,
+                save.character_summary(i)
+            ));
+            let mut current_section = "";
+            for (section, label, value) in save.character_inspect(i) {
+                if section != current_section {
+                    out.push(format!("  {section}:"));
+                    current_section = section;
+                }
+                out.push(format!("    {label:<16} {value}"));
+            }
+        }
+    } else if bytes.len() == ultima3::PARTY_LEN {
         let party = Ultima3Party::from_bytes(bytes.to_vec())?;
         out.push("Party:".to_string());
         for (label, value) in party.header_inspect() {

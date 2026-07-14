@@ -233,7 +233,8 @@ save format effectively a published, tested spec.
 Grouped by codec complexity (which parsing engine each needs):
 
 - **Done / in progress:** Ultima I ✅, Ultima II ✅, Ultima III ✅, Ultima IV ✅, Ultima V ✅,
-  Wasteland (MSQ cipher done, records in progress).
+  Wasteland ✅ (MSQ cipher + block scan + character sheets, byte-faithful writes; skills &
+  items not yet exposed).
 - **Easy extensions — same family as the Ultimas:** Ultima VI (`Nuvie`) — larger effort:
   object-based, LZW-compressed, party stored as world objects across ~70 files.
 - **Candidates (owned & installed, to investigate after Wasteland):**

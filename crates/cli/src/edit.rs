@@ -14,6 +14,7 @@ use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 use fringe_retro_core::games::ultima4::{self, Ultima4Save};
 use fringe_retro_core::games::ultima5::{self, Ultima5Save};
+use fringe_retro_core::games::wasteland::{self, WastelandSave};
 use fringe_retro_core::games::GameKind;
 use fringe_retro_core::schema::{Field, FieldKind};
 
@@ -25,6 +26,7 @@ enum Loaded {
     Ultima3Party(Ultima3Party),
     Ultima4(Ultima4Save),
     Ultima5(Ultima5Save),
+    Wasteland(WastelandSave),
 }
 
 /// A character/slot within a save that can be edited.
@@ -68,7 +70,9 @@ impl Session {
     /// Load a save file if it's a known, editable game; `Ok(None)` if the size is unknown.
     pub fn load(path: &Path) -> Result<Option<Session>> {
         let bytes = std::fs::read(path)?;
-        let save = if bytes.len() == ultima3::PARTY_LEN {
+        let save = if bytes.starts_with(b"msq0") {
+            Loaded::Wasteland(WastelandSave::from_bytes(bytes)?)
+        } else if bytes.len() == ultima3::PARTY_LEN {
             Loaded::Ultima3Party(Ultima3Party::from_bytes(bytes)?)
         } else if bytes.len() == ultima3::ROSTER_LEN {
             Loaded::Ultima3Roster(Ultima3Roster::from_bytes(bytes)?)
@@ -108,6 +112,7 @@ impl Session {
             Loaded::Ultima3Roster(_) | Loaded::Ultima3Party(_) => GameKind::Ultima3,
             Loaded::Ultima4(_) => GameKind::Ultima4,
             Loaded::Ultima5(_) => GameKind::Ultima5,
+            Loaded::Wasteland(_) => GameKind::Wasteland,
         }
     }
 
@@ -206,6 +211,14 @@ impl Session {
                 }));
                 entities
             }
+            Loaded::Wasteland(s) => s
+                .occupied_characters()
+                .into_iter()
+                .map(|i| Entity {
+                    index: i,
+                    label: format!("{}. {}", i + 1, s.character_summary(i)),
+                })
+                .collect(),
         }
     }
 
@@ -235,6 +248,7 @@ impl Session {
                     ultima5::character_fields()
                 }
             }
+            Loaded::Wasteland(_) => wasteland::character_fields(),
         }
     }
 
@@ -264,6 +278,7 @@ impl Session {
                     s.character_get(entity - 1, key)
                 }
             }
+            Loaded::Wasteland(s) => s.character_get(entity, key),
         }
     }
 
@@ -309,6 +324,7 @@ impl Session {
                     s.character_set(entity - 1, key, value)
                 }
             }
+            Loaded::Wasteland(s) => s.character_set(entity, key, value),
         }
         .map_err(|e| anyhow!("{e}"))?;
         self.dirty = true;
@@ -326,6 +342,7 @@ impl Session {
             Loaded::Ultima3Party(p) => p.write(&self.path),
             Loaded::Ultima4(s) => s.write(&self.path),
             Loaded::Ultima5(s) => s.write(&self.path),
+            Loaded::Wasteland(s) => s.write(&self.path),
         }?;
         self.dirty = false;
         Ok(backup_path)

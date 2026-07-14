@@ -92,9 +92,8 @@ impl GameKind {
     }
 
     /// Whether the headless CLI can currently inspect/edit this game's saves.
-    /// (Wasteland's encrypted records aren't wired into `inspect` yet.)
     pub fn is_inspectable(self) -> bool {
-        !matches!(self, GameKind::Wasteland)
+        true
     }
 }
 

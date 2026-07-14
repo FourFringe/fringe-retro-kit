@@ -1,13 +1,12 @@
 # Wasteland — Save Format (`GAME1`)
 
-**Work in progress.** Unlike the Ultima games, Wasteland's save is a **directory of
-files** and the mutable data is **encrypted**. This page documents the parts we've
-solved (the container and the MSQ cipher) and marks the rest as in-progress.
+Unlike the Ultima games, Wasteland's save is a **directory of files** and the mutable data
+is **encrypted**. `fringe-retro` can now inspect and edit the character sheets in `GAME1`.
 
-> **Provenance:** the MSQ cipher and block structure are taken from Klaus Reimer's
+> **Provenance:** the MSQ cipher and block/record structure are taken from Klaus Reimer's
 > `wlandsuite` (the definitive open-source Wasteland file library) and verified against a
-> real Steam ("The Original Classic") save on macOS. The savegame record layout has not
-> yet been mapped in this project.
+> real Steam ("The Original Classic") save on macOS — including a byte-for-byte round trip.
+> One correction to `wlandsuite` was needed for that fidelity (see the checksum note below).
 
 ## A save is a directory
 
@@ -38,8 +37,10 @@ two **seed** bytes, then the encrypted body:
 +6  ciphertext ...       (rest of block)
 ```
 
-Blocks are located by scanning for the `msq`+digit boundary. The **first** block in
-`GAME1` is the save game (party + characters); the remaining blocks are visited maps.
+Blocks are located by scanning for the `msq`+digit boundary. A `GAME1` holds ~24 blocks;
+most are visited maps. The **savegame** block is the one whose size is exactly **4614
+bytes** and whose first decrypted bytes are a valid party order (bytes 1..7 each in `0..=7`,
+non-zero values unique). It is *not* the first block — you must scan for it.
 
 ## The cipher — rotating XOR
 
@@ -52,30 +53,71 @@ for each ciphertext byte c:
     key   = (key + 0x1F) & 0xFF
 ```
 
-The two seed bytes also encode a **checksum** used to verify writes: on save the game
-computes `checksum = (checksum - plain) & 0xFFFF` accumulated over the plaintext, stores
-it little-endian as `seed0,seed1`, and derives the initial key as `seed0 XOR seed1`.
-Editing therefore requires **recomputing and rewriting the seed/checksum** — unlike the
-Ultima games, you cannot just poke a byte in place.
+The two seed bytes also encode a **checksum**. Bytes of the plaintext body are summed into
+a 16-bit accumulator; on each 16-bit overflow the carry is folded back as `+0x100` (an
+artifact of the original game's byte-wise add-with-carry). The seed is the two's-complement
+negation of that sum, stored little-endian, and the initial key is `seed0 XOR seed1`.
+Editing therefore requires **recomputing and rewriting the seed/checksum**.
+
+> **Note — `wlandsuite` divergence:** `wlandsuite` stores a plain negated sum (no carry
+> fold), so its rewritten seeds differ from the game's. Its *reads* still work (the seed→key
+> relation is unchanged) and the game tolerates it, but it is not byte-faithful. The carry
+> fold above reproduces the original game's saves exactly (validated against every
+> uncompressed block — the savegame and all shop-list blocks — in a real `GAME1`).
 
 **Verified:** in a real `GAME1`, seed `bf f0` gives `key = 0x4F` and decrypts the leading
-body bytes to a run of `0xBB` (the save's initial fill). See
-`crates/core/src/games/wasteland.rs` for the implementation and test vector.
+body bytes to a run of `0xBB`. See `crates/core/src/games/wasteland.rs` for the
+implementation and test vectors.
+
+## Savegame block layout
+
+The decrypted savegame body is `0x1200` (4608) bytes:
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| `0x000` | `0x38` | Parties (member order + positions) |
+| `0x038` | 200 | Assorted state (viewport, current party/map, time, serial, …) |
+| `0x100` | `0x100`×7 | **Seven character records** (256 bytes each) |
+| `0x800` | 2560 | Padding |
+
+### Character record (256 bytes)
+
+All little-endian; `int3` = 3-byte integer. Names are null-terminated ASCII (not the 5-bit
+map-string encoding).
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| `0x00` | 14 | Name (null-terminated) |
+| `0x0E`–`0x14` | 1 each | Strength, IQ, Luck, Speed, Agility, Dexterity, Charisma |
+| `0x15` | int3 | Money |
+| `0x18` | 1 | Gender (0 male, 1 female) |
+| `0x19` | 1 | Nationality (0 US … 4 Chinese) |
+| `0x1A` | 1 | Armor class |
+| `0x1B` | 2 | Max CON |
+| `0x1D` | 2 | CON (current HP) |
+| `0x20` | 1 | Skill points |
+| `0x21` | int3 | Experience |
+| `0x24` | 1 | Level |
+| `0x26` | 2 | Last CON |
+| `0x28` | 1 | Afflictions (bitmap) |
+| `0x29` | 1 | NPC flag |
+| `0x32` | 25 | Rank (null-terminated ASCII) |
+| `0x80` | 60 | Skills (30 × id/level) — *not yet exposed* |
+| `0xBD` | var | Item list — *not yet exposed* |
 
 ## Strings
 
-Wasteland does **not** store map/character text as plain ASCII; it uses a 5-bit
-character-table encoding (a glyph table appears near the start of the decrypted save
-block). Decoding this is required before names become readable — another reason the
-"field schema over plaintext" layer needs pluggable **string codecs**.
+Character **names** and **ranks** are plain null-terminated ASCII, so they read and edit
+directly. Map/dialog text elsewhere in `GAME1` uses a 5-bit character-table encoding (a
+glyph table appears near the start of each map block); decoding that is only needed for the
+map/story content, which this tool does not edit.
 
 ## Still to map
 
-- The savegame record layout (party lists + per-character sheets: name, STR/IQ/LCK/SPD/AGL/
-  DEX/CHA, skills, CON/max-CON, inventory). Reference: `wlandsuite`'s `Char`/`Savegame`
-  classes, and/or diffing the decrypted `GAME1` before/after known in-game changes.
-- The 5-bit string decoder.
-- The write path (re-encrypt + checksum) needed for editing.
+- Per-character **skills** (`0x80`) and **item list** (`0xBD`) — layouts are known from
+  `wlandsuite` but not yet surfaced as editable fields.
+- The `0x038`–`0x100` party/state region (only partially labelled).
+- The 5-bit string decoder (only needed for map/story text).
 
 ## References
 
