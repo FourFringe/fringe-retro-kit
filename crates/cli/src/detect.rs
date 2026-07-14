@@ -1,12 +1,15 @@
 //! Best-effort detection of installed games and their save directories.
 //!
-//! Phase 6, macOS + GOG only. GOG wraps each DOS game in an application bundle under
-//! `/Applications`, with the save files inside `Contents/Resources/game`. We scan those
-//! roots for bundles whose name matches a known game, confirm the save directory exists, and
-//! report what we find. Optionally we append the newly-found games to the config manifest.
+//! Phase 6, macOS only. Two stores are wired up:
+//! - **GOG** wraps each DOS game in an application bundle under `/Applications`, with the
+//!   save files inside `Contents/Resources/game`.
+//! - **Steam** records installs in `steamapps/appmanifest_<appid>.acf` (libraries listed in
+//!   `libraryfolders.vdf`); a game's saves may live elsewhere (e.g. Wasteland saves to
+//!   `~/Library/Application Support/Wasteland/<slot>`).
 //!
-//! The design is deliberately structured so other platforms/stores (Steam, Windows, Linux)
-//! can slot in later; today only GOG-on-macOS is wired up.
+//! We confirm each known game is installed, resolve its save directory, and report what we
+//! find. Optionally we append the newly-found games to the config manifest. The design is
+//! structured so more stores/platforms can slot in later.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -23,9 +26,9 @@ const GOG_MAC_SAVE_SUBPATH: &str = "Contents/Resources/game";
 /// A game found on disk, with the paths we resolved for it.
 pub struct DetectedGame {
     pub kind: GameKind,
-    /// The store the game came from (currently always `gog`).
+    /// The store the game came from (`gog` or `steam`).
     pub platform: &'static str,
-    /// The game's install directory (the `.app` bundle).
+    /// The game's install directory.
     pub install_dir: PathBuf,
     /// The directory holding the save files.
     pub save_dir: PathBuf,
@@ -75,7 +78,24 @@ fn normalize(name: &str) -> String {
 
 /// Detect installed games using the default macOS roots.
 pub fn detect_games() -> Vec<DetectedGame> {
-    detect_in_roots(&default_roots())
+    let mut found = detect_in_roots(&default_roots());
+    let mut seen: HashSet<GameKind> = found.iter().map(|g| g.kind).collect();
+    if let (Some(steam), Some(home)) = (default_steam_root(), home_dir()) {
+        for game in detect_steam(&steam, &home) {
+            if seen.insert(game.kind) {
+                found.push(game);
+            }
+        }
+    }
+    found
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+fn default_steam_root() -> Option<PathBuf> {
+    home_dir().map(|h| h.join("Library/Application Support/Steam"))
 }
 
 /// Detect games by scanning the given roots (injectable for tests).
@@ -114,6 +134,124 @@ fn detect_in_roots(roots: &[PathBuf]) -> Vec<DetectedGame> {
                 }
             }
         }
+    }
+    found
+}
+
+// --- Steam ---------------------------------------------------------------------------
+
+/// The Steam app id for a game, if we know how to detect it via Steam.
+fn steam_app_id(kind: GameKind) -> Option<u32> {
+    match kind {
+        GameKind::Wasteland => Some(259130), // "Wasteland 1 - The Original Classic"
+        _ => None,
+    }
+}
+
+/// Where a Steam game keeps its saves (which is often *not* the install directory), resolving
+/// any active save slot. `home` is the user's home directory.
+fn steam_save_dir(kind: GameKind, home: &Path) -> Option<PathBuf> {
+    match kind {
+        GameKind::Wasteland => wasteland_slot(&home.join("Library/Application Support/Wasteland")),
+        _ => None,
+    }
+}
+
+/// The active Wasteland save slot under `root`: the one named by `LASTSAVE`, else the first
+/// slot directory that contains a `GAME1` save.
+fn wasteland_slot(root: &Path) -> Option<PathBuf> {
+    if !root.is_dir() {
+        return None;
+    }
+    // The real slot directories (those holding a GAME1 save), in stable order.
+    let mut slots: Vec<PathBuf> = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join("GAME1").is_file())
+        .collect();
+    slots.sort();
+    // Prefer the slot named by LASTSAVE (matched case-insensitively; the folder is usually
+    // upper-cased while LASTSAVE stores the party name as typed).
+    if let Ok(last) = std::fs::read_to_string(root.join("LASTSAVE")) {
+        let name = last.trim();
+        if let Some(hit) = slots.iter().find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.eq_ignore_ascii_case(name))
+        }) {
+            return Some(hit.clone());
+        }
+    }
+    slots.into_iter().next()
+}
+
+/// Steam library roots: the default root plus any listed in `libraryfolders.vdf`.
+fn steam_libraries(steam_root: &Path) -> Vec<PathBuf> {
+    let mut libs = vec![steam_root.to_path_buf()];
+    let vdf = steam_root.join("steamapps/libraryfolders.vdf");
+    if let Ok(text) = std::fs::read_to_string(&vdf) {
+        for line in text.lines() {
+            if let Some(path) = vdf_value(line, "path") {
+                let path = PathBuf::from(path);
+                if !libs.contains(&path) {
+                    libs.push(path);
+                }
+            }
+        }
+    }
+    libs
+}
+
+/// Find the app manifest for `app_id` across `libraries`, returning its library and the
+/// game's `installdir`.
+fn steam_manifest(libraries: &[PathBuf], app_id: u32) -> Option<(PathBuf, String)> {
+    for lib in libraries {
+        let acf = lib.join(format!("steamapps/appmanifest_{app_id}.acf"));
+        if let Ok(text) = std::fs::read_to_string(&acf) {
+            let installdir = text
+                .lines()
+                .find_map(|l| vdf_value(l, "installdir"))
+                .unwrap_or_default();
+            return Some((lib.clone(), installdir));
+        }
+    }
+    None
+}
+
+/// Extract the quoted value following `"key"` on a VDF/ACF line, e.g. `"path"  "/x"` -> `/x`.
+fn vdf_value(line: &str, key: &str) -> Option<String> {
+    let rest = line.trim().strip_prefix(&format!("\"{key}\""))?;
+    let start = rest.find('"')? + 1;
+    let end = rest[start..].find('"')? + start;
+    Some(rest[start..end].to_string())
+}
+
+/// Detect Steam-installed games, given the Steam root and the user's home directory.
+fn detect_steam(steam_root: &Path, home: &Path) -> Vec<DetectedGame> {
+    let libraries = steam_libraries(steam_root);
+    let mut found = Vec::new();
+    for kind in GameKind::ALL {
+        let Some(app_id) = steam_app_id(kind) else {
+            continue;
+        };
+        let Some((lib, installdir)) = steam_manifest(&libraries, app_id) else {
+            continue;
+        };
+        let Some(save_dir) = steam_save_dir(kind, home) else {
+            continue;
+        };
+        if !save_dir.is_dir() {
+            continue;
+        }
+        let save_present = save_dir.join(kind.default_save_file()).is_file();
+        found.push(DetectedGame {
+            kind,
+            platform: "steam",
+            install_dir: lib.join("steamapps/common").join(installdir),
+            save_dir,
+            save_present,
+        });
     }
     found
 }
@@ -221,6 +359,84 @@ mod tests {
         // Right name, but not a DOSBox bundle (no Contents/Resources/game).
         std::fs::create_dir_all(root.path().join("Ultima IV™.app")).unwrap();
         assert!(detect_in_roots(&[root.path().to_path_buf()]).is_empty());
+    }
+
+    /// Build a fake Steam library (with a Wasteland manifest) and a Wasteland save slot under
+    /// one temp "home", returning the steam root and home path.
+    fn fake_steam_home(with_lastsave: bool) -> tempfile::TempDir {
+        let home = tempfile::tempdir().unwrap();
+        let steam = home.path().join("Library/Application Support/Steam");
+        std::fs::create_dir_all(steam.join("steamapps/common/Wasteland")).unwrap();
+        std::fs::write(
+            steam.join("steamapps/appmanifest_259130.acf"),
+            "\"AppState\"\n{\n\t\"appid\"\t\"259130\"\n\t\"installdir\"\t\"Wasteland\"\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            steam.join("steamapps/libraryfolders.vdf"),
+            format!(
+                "\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\"{}\"\n\t}}\n}}\n",
+                steam.display()
+            ),
+        )
+        .unwrap();
+
+        let ws = home.path().join("Library/Application Support/Wasteland");
+        let slot = ws.join("ENKI");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("GAME1"), b"save").unwrap();
+        if with_lastsave {
+            std::fs::write(ws.join("LASTSAVE"), "Enki\r\n").unwrap();
+        }
+        home
+    }
+
+    #[test]
+    fn detects_steam_wasteland() {
+        let home = fake_steam_home(true);
+        let steam = home.path().join("Library/Application Support/Steam");
+
+        let found = detect_steam(&steam, home.path());
+        assert_eq!(found.len(), 1);
+        let w = &found[0];
+        assert_eq!(w.kind, GameKind::Wasteland);
+        assert_eq!(w.platform, "steam");
+        assert!(w.save_present);
+        assert!(w.save_dir.ends_with("Wasteland/ENKI"));
+        assert!(w.install_dir.ends_with("steamapps/common/Wasteland"));
+    }
+
+    #[test]
+    fn wasteland_slot_falls_back_without_lastsave() {
+        let home = fake_steam_home(false); // no LASTSAVE file
+        let root = home.path().join("Library/Application Support/Wasteland");
+        assert_eq!(wasteland_slot(&root).unwrap(), root.join("ENKI"));
+    }
+
+    #[test]
+    fn steam_not_detected_without_manifest() {
+        // A Wasteland save exists, but the game isn't registered with Steam.
+        let home = tempfile::tempdir().unwrap();
+        let slot = home
+            .path()
+            .join("Library/Application Support/Wasteland/ENKI");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("GAME1"), b"save").unwrap();
+        let steam = home.path().join("Library/Application Support/Steam");
+        assert!(detect_steam(&steam, home.path()).is_empty());
+    }
+
+    #[test]
+    fn vdf_value_extracts_quoted_values() {
+        assert_eq!(
+            vdf_value("\t\"path\"\t\"/a/b\"", "path").as_deref(),
+            Some("/a/b")
+        );
+        assert_eq!(
+            vdf_value("  \"installdir\"  \"Wasteland\"", "installdir").as_deref(),
+            Some("Wasteland")
+        );
+        assert_eq!(vdf_value("\"other\" \"x\"", "path"), None);
     }
 
     #[test]

@@ -206,8 +206,8 @@ Library location examples:
 ## Phase 6 — Platform Integration
 
 - [ ] Proper per-OS path handling (`directories` crate)
-- [x] GOG detection (macOS) + `detect --write` to append found games to the config, or
-      `[detect] auto` to fold them in at runtime · Steam and other platforms deferred (need
+- [x] GOG (macOS) + Steam (macOS) detection + `detect --write` to append found games to the
+      config, or `[detect] auto` to fold them in at runtime · Windows/Linux deferred (need
       machines to test on) · manual path override still works
 - [ ] Windows & Linux support (deferred — no machines to test on; CI builds/tests them, but
       only macOS is published for now)

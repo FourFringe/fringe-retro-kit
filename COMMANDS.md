@@ -519,8 +519,10 @@ manifest and [Game identifiers](#game-identifiers) to use these ids in other com
 ### ✅ `detect [--write]`
 
 Scan for installed games and report where their saves live — so you don't have to find the
-paths by hand. Currently detects **GOG** games on **macOS** (they install to `/Applications`
-with saves inside `Contents/Resources/game`).
+paths by hand. Currently detects **GOG** and **Steam** games on **macOS**. GOG games install
+to `/Applications` with saves inside the bundle; Steam games are found via their app
+manifests, and their saves may live elsewhere (e.g. Wasteland saves to
+`~/Library/Application Support/Wasteland/<slot>`).
 
 ```bash
 fringe-retro detect          # report what's installed
@@ -542,8 +544,7 @@ Prefer not to write anything? Set `[detect] auto = true` in your config and ever
 scan and make detected games usable **in-memory** (they show as `(auto-detected)` in `games`,
 and your explicit entries always win). It's **off by default** so behavior stays predictable.
 
-Steam detection and other platforms are planned; for now, add those games to your config by
-hand (see [Configuration](#configuration)).
+Other platforms (Windows/Linux) are deferred until they're officially supported.
 
 ### ✅ `resources [<game>]`
 
