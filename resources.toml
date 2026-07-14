@@ -1,0 +1,96 @@
+# Fringe Retro Kit — curated web resources for the supported games.
+#
+# Each entry is keyed by the built-in game id (ultima1..ultima5, wasteland — the same ids
+# `fringe-retro games` shows). Fields: title, url, category. Category is a free label used to
+# group links in the UI; suggested values: wiki, walkthrough, map, format, play.
+#
+# These defaults ship with the tool. To add or override links, set the FRINGE_RETRO_RESOURCES
+# environment variable to your own file, or place a `resources.toml` in the working directory;
+# your entries are merged in (links with a URL already present are skipped).
+#
+# All URLs below were checked live. If one rots, please update it here.
+
+[[resources.ultima1]]
+title = "Ultima I — Ultima Codex wiki"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_I:_The_First_Age_of_Darkness"
+category = "wiki"
+
+[[resources.ultima1]]
+title = "Ultima I walkthrough"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_I_walkthrough"
+category = "walkthrough"
+
+[[resources.ultima1]]
+title = "Maps of Sosaria"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_I_maps_of_Sosaria"
+category = "map"
+
+[[resources.ultima2]]
+title = "Ultima II — Ultima Codex wiki"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_II:_The_Revenge_of_the_Enchantress"
+category = "wiki"
+
+[[resources.ultima2]]
+title = "Ultima II walkthrough"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_II_walkthrough"
+category = "walkthrough"
+
+[[resources.ultima3]]
+title = "Ultima III — Ultima Codex wiki"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_III:_Exodus"
+category = "wiki"
+
+[[resources.ultima3]]
+title = "Ultima III walkthrough"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_III_walkthrough"
+category = "walkthrough"
+
+[[resources.ultima3]]
+title = "Ultima III locations map"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_III_locations_map"
+category = "map"
+
+[[resources.ultima4]]
+title = "Ultima IV — Ultima Codex wiki"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_IV:_Quest_of_the_Avatar"
+category = "wiki"
+
+[[resources.ultima4]]
+title = "Ultima IV walkthrough"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_IV_walkthrough"
+category = "walkthrough"
+
+[[resources.ultima4]]
+title = "Ultima IV map of Britannia"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_IV_map_of_Britannia"
+category = "map"
+
+[[resources.ultima5]]
+title = "Ultima V — Ultima Codex wiki"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_V:_Warriors_of_Destiny"
+category = "wiki"
+
+[[resources.ultima5]]
+title = "Ultima V walkthrough"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_V_walkthrough"
+category = "walkthrough"
+
+[[resources.ultima5]]
+title = "Ultima V map of Britannia"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_V_map_of_Britannia"
+category = "map"
+
+[[resources.ultima5]]
+title = "Ultima V internal formats (save layout)"
+url = "https://wiki.ultimacodex.com/wiki/Ultima_V_internal_formats"
+category = "format"
+
+[[resources.wasteland]]
+title = "Wasteland — Wikipedia"
+url = "https://en.wikipedia.org/wiki/Wasteland_(video_game)"
+category = "wiki"
+
+[[resources.wasteland]]
+title = "Wasteland (1988) — play in browser at the Internet Archive"
+url = "https://archive.org/details/msdos_Wasteland_1988"
+category = "play"

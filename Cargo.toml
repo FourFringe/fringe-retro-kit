@@ -17,6 +17,7 @@ fringe-retro-core = { path = "crates/core" }
 anyhow = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
+open = "5" # Open URLs/files in the OS default handler; MIT.
 ratatui = "0.29" # Terminal UI (bundles crossterm); MIT.
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"

@@ -5,6 +5,7 @@
 mod config;
 mod edit;
 mod inspect;
+mod resources;
 mod templates;
 mod tui;
 
@@ -99,6 +100,14 @@ enum Command {
     Games,
     /// List character templates and whether each one is valid for its game.
     Templates,
+    /// List curated web resources for a game, or open one in your browser.
+    Resources {
+        /// Game id (e.g. `ultima4`). Omit to list resources for every game.
+        game: Option<String>,
+        /// Open link number N (as shown in the list) in your default browser.
+        #[arg(long, value_name = "N")]
+        open: Option<usize>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -364,6 +373,9 @@ fn main() -> Result<()> {
             let set = TemplateSet::load()?;
             print_templates(&set);
         }
+        Command::Resources { game, open } => {
+            run_resources(game.as_deref(), open)?;
+        }
     }
     Ok(())
 }
@@ -403,6 +415,55 @@ fn validate_template(t: &Template) -> std::result::Result<(), String> {
 fn roster_index(slot: usize) -> Result<usize> {
     anyhow::ensure!(slot >= 1, "slot must be >= 1");
     Ok(slot - 1)
+}
+
+/// List curated web resources, or open a chosen one in the browser.
+fn run_resources(game: Option<&str>, open: Option<usize>) -> Result<()> {
+    let all = resources::Resources::load()?;
+
+    // Opening a link requires a specific game and a 1-based index into its list.
+    if let Some(n) = open {
+        let game = game.ok_or_else(|| {
+            anyhow::anyhow!("`--open` needs a game, e.g. `resources ultima4 --open 1`")
+        })?;
+        let links = all.for_game(game);
+        anyhow::ensure!(!links.is_empty(), "no resources for '{game}'");
+        let link = links.get(n.wrapping_sub(1)).ok_or_else(|| {
+            anyhow::anyhow!("no link {n} for '{game}' (have 1..={})", links.len())
+        })?;
+        println!("Opening {} — {}", link.title, link.url);
+        return resources::open_url(&link.url);
+    }
+
+    // Otherwise, print a numbered listing (one game, or all).
+    let games: Vec<String> = match game {
+        Some(g) => vec![g.to_string()],
+        None => all.games().map(str::to_owned).collect(),
+    };
+    let mut printed = false;
+    for id in games {
+        let links = all.for_game(&id);
+        if links.is_empty() {
+            if game.is_some() {
+                anyhow::bail!("no resources for '{id}'");
+            }
+            continue;
+        }
+        if printed {
+            println!();
+        }
+        printed = true;
+        let title = GameKind::from_id(&id).map(|k| k.title()).unwrap_or(&id);
+        println!("{title} ({id}):");
+        for (i, link) in links.iter().enumerate() {
+            println!("  {:>2}. [{}] {}", i + 1, link.category, link.title);
+            println!("      {}", link.url);
+        }
+    }
+    if !printed {
+        println!("No resources configured.");
+    }
+    Ok(())
 }
 
 /// Print the games configured in the library manifest and whether their saves are present.

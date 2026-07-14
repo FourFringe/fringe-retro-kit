@@ -19,6 +19,7 @@ use ratatui::{DefaultTerminal, Frame};
 
 use crate::config::Config;
 use crate::edit::{Entity, FieldRow, Session};
+use crate::resources::{self, Resources};
 use crate::templates::TemplateSet;
 
 /// One save file a game may keep in its save directory.
@@ -59,6 +60,8 @@ enum Screen {
     Backups(BackupList),
     /// A picker of character templates to apply to the current character.
     Templates(TemplateList),
+    /// A list of curated web links for a game (opened in the OS browser).
+    Resources(ResourceList),
     /// A read-only message (unsupported games, errors).
     Inspect(Inspector),
     /// An unsaved-changes prompt.
@@ -83,6 +86,22 @@ struct FileList {
 struct FileEntry {
     label: String,
     path: PathBuf,
+}
+
+/// A list of a game's curated web resources.
+struct ResourceList {
+    game_title: String,
+    entries: Vec<ResourceItem>,
+    list: ListState,
+    /// A transient one-line message (e.g. the result of opening a link).
+    status: Option<String>,
+}
+
+/// One selectable web resource in the [`ResourceList`].
+struct ResourceItem {
+    title: String,
+    url: String,
+    category: String,
 }
 
 /// One timestamped backup file of the current save.
@@ -334,6 +353,8 @@ struct App {
     templates: TemplateSet,
     /// A load error for the templates file, surfaced when the picker is opened.
     template_error: Option<String>,
+    /// Curated web links per game (bundled defaults plus any user overrides).
+    resources: Resources,
     session: Option<Session>,
     stack: Vec<Screen>,
     running: bool,
@@ -355,6 +376,8 @@ enum Action {
     OpenTemplates,
     ApplyTemplate,
     SaveTemplate(String),
+    OpenResources(Option<usize>),
+    OpenResourceLink(Option<usize>),
     ConfirmSave,
     ConfirmDiscard,
     ConfirmAccept,
@@ -371,6 +394,7 @@ impl App {
             games,
             templates: TemplateSet::default(),
             template_error: None,
+            resources: Resources::bundled(),
             session: None,
             stack: vec![Screen::Games(list)],
             running: true,
@@ -725,6 +749,52 @@ impl App {
         }
     }
 
+    /// Open a list of the selected game's curated web resources.
+    fn open_resources(&mut self, index: usize) {
+        let Some(row) = self.games.get(index) else {
+            return;
+        };
+        let links = self.resources.for_game(&row.id);
+        if links.is_empty() {
+            self.stack.push(Screen::Inspect(Inspector::new(
+                format!("{} — Resources", row.title),
+                vec![
+                    String::new(),
+                    format!("  No web resources are configured for {}.", row.title),
+                ],
+            )));
+            return;
+        }
+        let entries: Vec<ResourceItem> = links
+            .iter()
+            .map(|r| ResourceItem {
+                title: r.title.clone(),
+                url: r.url.clone(),
+                category: r.category.clone(),
+            })
+            .collect();
+        let mut list = ListState::default();
+        list.select(Some(0));
+        self.stack.push(Screen::Resources(ResourceList {
+            game_title: row.title.clone(),
+            entries,
+            list,
+            status: None,
+        }));
+    }
+
+    /// Open the selected web resource in the operating system's default browser.
+    fn open_resource_link(&mut self, index: usize) {
+        if let Some(Screen::Resources(rl)) = self.stack.last_mut() {
+            if let Some(item) = rl.entries.get(index) {
+                rl.status = Some(match resources::open_url(&item.url) {
+                    Ok(()) => format!("Opened {} in your browser", item.title),
+                    Err(e) => format!("Could not open link: {e}"),
+                });
+            }
+        }
+    }
+
     /// Open the selected game: load an editing session and show its character(s).
     /// Open the selected game: choose among its save files, or open its only one directly.
     fn open_game(&mut self, index: usize) {
@@ -928,6 +998,7 @@ impl App {
                 KeyCode::Esc => action = Action::Back,
                 KeyCode::Down | KeyCode::Char('j') => select_wrap(list, games_len, 1),
                 KeyCode::Up | KeyCode::Char('k') => select_wrap(list, games_len, -1),
+                KeyCode::Char('r') => action = Action::OpenResources(list.selected()),
                 KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                     action = Action::OpenGame(list.selected());
                 }
@@ -1085,6 +1156,27 @@ impl App {
                 KeyCode::End | KeyCode::Char('G') => insp.end(),
                 _ => {}
             },
+            Screen::Resources(rl) => {
+                let len = rl.entries.len();
+                match code {
+                    KeyCode::Char('q') => action = Action::Quit,
+                    KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => {
+                        action = Action::Back;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        select_wrap(&mut rl.list, len, 1);
+                        rl.status = None;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        select_wrap(&mut rl.list, len, -1);
+                        rl.status = None;
+                    }
+                    KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('o') => {
+                        action = Action::OpenResourceLink(rl.list.selected());
+                    }
+                    _ => {}
+                }
+            }
             Screen::Confirm(c) => match &c.pending {
                 Pending::Restore { .. } => match code {
                     KeyCode::Char('y') | KeyCode::Enter => action = Action::ConfirmAccept,
@@ -1114,11 +1206,14 @@ impl App {
             Action::OpenTemplates => self.open_templates(),
             Action::ApplyTemplate => self.apply_template_selected(),
             Action::SaveTemplate(name) => self.save_template(name),
+            Action::OpenResources(Some(i)) => self.open_resources(i),
+            Action::OpenResourceLink(Some(i)) => self.open_resource_link(i),
             Action::ConfirmSave => self.confirm_save(),
             Action::ConfirmDiscard => self.confirm_discard(),
             Action::ConfirmAccept => self.complete_pending(),
             Action::ConfirmCancel => self.confirm_cancel(),
             Action::OpenGame(None) | Action::OpenSaveFile(None) | Action::OpenEntry(None) => {}
+            Action::OpenResources(None) | Action::OpenResourceLink(None) => {}
         }
     }
 
@@ -1138,6 +1233,7 @@ impl App {
             Screen::Edit(ed) => draw_editor(frame, chunks[0], ed, dirty),
             Screen::Backups(bl) => draw_backups(frame, chunks[0], bl),
             Screen::Templates(tl) => draw_templates(frame, chunks[0], tl),
+            Screen::Resources(rl) => draw_resources(frame, chunks[0], rl),
             Screen::Inspect(insp) => {
                 insp.viewport = chunks[0].height.saturating_sub(2);
                 draw_inspector(frame, chunks[0], insp);
@@ -1329,6 +1425,29 @@ fn draw_characters(frame: &mut Frame, area: Rect, cl: &mut CharList) {
         .collect();
     let widget = selectable_list(items, format!(" {} ", cl.title));
     frame.render_stateful_widget(widget, area, &mut cl.list);
+}
+
+fn draw_resources(frame: &mut Frame, area: Rect, rl: &mut ResourceList) {
+    let items: Vec<ListItem> = rl
+        .entries
+        .iter()
+        .map(|r| {
+            let heading = Line::from(vec![
+                Span::styled(
+                    format!("[{}] ", r.category),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::raw(r.title.clone()),
+            ]);
+            let url = Line::from(Span::styled(
+                format!("    {}", r.url),
+                Style::default().fg(Color::DarkGray),
+            ));
+            ListItem::new(vec![heading, url])
+        })
+        .collect();
+    let widget = selectable_list(items, format!(" {} — Resources ", rl.game_title));
+    frame.render_stateful_widget(widget, area, &mut rl.list);
 }
 
 fn draw_editor(frame: &mut Frame, area: Rect, ed: &mut Editor, dirty: bool) {
@@ -1541,7 +1660,7 @@ fn draw_templates(frame: &mut Frame, area: Rect, tl: &mut TemplateList) {
 /// The context-dependent bottom line: key hints, the field input prompt, or a status.
 fn bottom_line(screen: &Screen) -> String {
     match screen {
-        Screen::Games(_) => " ↑/↓ select · Enter open · q quit ".to_string(),
+        Screen::Games(_) => " ↑/↓ select · Enter open · r resources · q quit ".to_string(),
         Screen::SaveFiles(_) => {
             " ↑/↓ select · Enter open · Esc back · q quit ".to_string()
         }
@@ -1588,6 +1707,10 @@ fn bottom_line(screen: &Screen) -> String {
             None => {
                 " ↑/↓ select · PgUp/PgDn preview · Enter/a apply · Esc back · q quit ".to_string()
             }
+        },
+        Screen::Resources(rl) => match &rl.status {
+            Some(s) => format!("  {s}"),
+            None => " ↑/↓ select · Enter open in browser · Esc back · q quit ".to_string(),
         },
         Screen::Confirm(c) => match &c.pending {
             Pending::Restore { .. } => " y restore · Esc cancel ".to_string(),
@@ -1642,6 +1765,8 @@ pub fn run(config: Config) -> Result<()> {
         Ok(set) => app.templates = set,
         Err(e) => app.template_error = Some(e.to_string()),
     }
+    // Merge any user resource overrides; on a bad user file, keep the bundled defaults.
+    app.resources = Resources::load().unwrap_or_else(|_| Resources::bundled());
     let mut terminal = ratatui::init();
     let result = run_loop(&mut terminal, app);
     ratatui::restore();
@@ -1820,6 +1945,41 @@ mod tests {
         let (_dir, mut app) = app_with_ultima1();
         app.handle_key(KeyCode::Enter);
         assert!(matches!(app.stack.last(), Some(Screen::Edit(_))));
+    }
+
+    #[test]
+    fn resources_key_opens_link_list_for_a_game() {
+        // `ultima4` has bundled web resources.
+        let games = vec![GameRow {
+            id: "ultima4".to_string(),
+            title: "Ultima IV".to_string(),
+            inspectable: true,
+            files: Vec::new(),
+        }];
+        let mut app = App::new(games);
+        app.handle_key(KeyCode::Char('r'));
+        match app.stack.last() {
+            Some(Screen::Resources(rl)) => {
+                assert!(!rl.entries.is_empty());
+                assert!(rl.entries.iter().all(|e| e.url.starts_with("https://")));
+            }
+            _ => panic!("expected the resources screen"),
+        }
+        app.handle_key(KeyCode::Esc); // back to the games list
+        assert!(matches!(app.stack.last(), Some(Screen::Games(_))));
+    }
+
+    #[test]
+    fn resources_key_shows_message_when_game_has_none() {
+        let games = vec![GameRow {
+            id: "nonesuch".to_string(),
+            title: "Nonesuch".to_string(),
+            inspectable: true,
+            files: Vec::new(),
+        }];
+        let mut app = App::new(games);
+        app.handle_key(KeyCode::Char('r'));
+        assert!(matches!(app.stack.last(), Some(Screen::Inspect(_))));
     }
 
     #[test]

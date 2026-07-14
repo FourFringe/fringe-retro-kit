@@ -104,10 +104,19 @@ toggle a field, `a` to toggle all, then `Enter` to name it and save. The templat
 **appended** to `templates.toml` (existing content is preserved) and becomes available in
 the picker immediately.
 
+### Resources
+
+Press `r` on the **games list** to open a game's **web resources** — curated links to
+wikis, walkthroughs, maps, and save-format references. Select one and press `Enter` (or `o`)
+to open it in your operating system's default browser; the TUI keeps running underneath.
+`Esc` returns to the games list. See [`resources`](#-resources-game) below for how to add or
+override links.
+
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` (or `k` / `j`) | Move selection · scroll one line |
 | `Enter` (or `→`) | Open the selected game / character |
+| `r` | Open the selected game's web resources (games list) |
 | `Enter` / `e` | Edit the selected field |
 | `s` | Save the session (backup + write) |
 | `b` | Open the backup browser (from the editor) |
@@ -116,6 +125,7 @@ the picker immediately.
 | `Enter` / `r` | Restore the selected backup (backup browser) |
 | `n` | Snapshot the current save (backup browser) |
 | `Enter` / `a` | Apply the selected template (template picker) |
+| `Enter` / `o` | Open the selected link in your browser (resources) |
 | `PgUp` / `PgDn` (or `Space`) | Scroll a page (messages / backup preview) |
 | `Home` / `End` | Jump to top / bottom (messages / backup preview) |
 | `Esc` (or `←` / `Backspace`) | Cancel edit · back one screen |
@@ -468,6 +478,35 @@ ultima2        Ultima II  [found]
 
 Games with `enabled = false` are hidden. See [Configuration](#configuration) to set up the
 manifest and [Game identifiers](#game-identifiers) to use these ids in other commands.
+
+### ✅ `resources [<game>]`
+
+List curated **web resources** for a game — links to wikis, walkthroughs, maps, and
+save-format references — or open one in your browser.
+
+```bash
+fringe-retro resources                 # every game's links
+fringe-retro resources ultima5         # one game's links, numbered
+fringe-retro resources ultima5 --open 2 # open link #2 in your default browser
+```
+
+```
+Ultima V (ultima5):
+   1. [wiki] Ultima V — Ultima Codex wiki
+      https://wiki.ultimacodex.com/wiki/Ultima_V:_Warriors_of_Destiny
+   2. [walkthrough] Ultima V walkthrough
+      https://wiki.ultimacodex.com/wiki/Ultima_V_walkthrough
+   3. [map] Ultima V map of Britannia
+      https://wiki.ultimacodex.com/wiki/Ultima_V_map_of_Britannia
+   4. [format] Ultima V internal formats (save layout)
+      https://wiki.ultimacodex.com/wiki/Ultima_V_internal_formats
+```
+
+A curated default set ships with the tool (`resources.toml`). To add or override links, set
+`FRINGE_RETRO_RESOURCES` to your own file, or place a `resources.toml` in the working
+directory — your entries are merged in (links whose URL is already present are skipped). Each
+entry has a `title`, `url`, and free-form `category` (e.g. `wiki`, `walkthrough`, `map`,
+`format`, `play`). In the interactive UI, press `r` on a game to browse and open these links.
 
 ### ✅ `templates`
 
