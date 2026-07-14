@@ -108,6 +108,9 @@ enum Command {
         /// Append any newly-found games to your config (backing it up first).
         #[arg(long)]
         write: bool,
+        /// Also list recognized games that aren't supported for editing yet.
+        #[arg(long)]
+        all: bool,
     },
     /// List character templates and whether each one is valid for its game.
     Templates,
@@ -456,8 +459,8 @@ fn main() -> Result<()> {
         Command::Games => {
             print_games(&config)?;
         }
-        Command::Detect { write } => {
-            run_detect(&config, write)?;
+        Command::Detect { write, all } => {
+            run_detect(&config, write, all)?;
         }
         Command::Templates => {
             let set = TemplateSet::load()?;
@@ -712,11 +715,18 @@ fn run_resources(game: Option<&str>, open: Option<usize>) -> Result<()> {
     Ok(())
 }
 
-/// Scan for installed games and report them; with `write`, add new ones to the config.
-fn run_detect(config: &Config, write: bool) -> Result<()> {
+/// Scan for installed games and report them; with `write`, add new ones to the config;
+/// with `all`, also list recognized-but-unsupported games.
+fn run_detect(config: &Config, write: bool, all: bool) -> Result<()> {
     let found = detect::detect_games();
-    if found.is_empty() {
-        println!("No installed games detected (looked for GOG apps in /Applications).");
+    let unsupported = if all {
+        detect::detect_unsupported()
+    } else {
+        Vec::new()
+    };
+
+    if found.is_empty() && unsupported.is_empty() {
+        println!("No installed games detected (GOG apps in /Applications, Steam apps).");
         return Ok(());
     }
 
@@ -752,9 +762,29 @@ fn run_detect(config: &Config, write: bool) -> Result<()> {
                 println!("Previous config backed up to {}", backup.display());
             }
         }
-    } else {
+    } else if !found.is_empty() {
         println!();
         println!("Run `fringe-retro detect --write` to add new games to your config.");
+    }
+
+    if all {
+        println!();
+        if unsupported.is_empty() {
+            println!("No other recognized games installed.");
+        } else {
+            println!("Recognized but not yet supported (fringe-retro can't edit these):");
+            for g in &unsupported {
+                println!(
+                    "  {:<26} [{}]  {}",
+                    g.title,
+                    g.platform,
+                    g.install_dir.display()
+                );
+            }
+            println!();
+            println!("Want support for one of these? Open a feature request:");
+            println!("  https://github.com/FourFringe/fringe-retro-kit/issues");
+        }
     }
     Ok(())
 }

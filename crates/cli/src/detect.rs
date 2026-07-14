@@ -101,41 +101,48 @@ fn default_steam_root() -> Option<PathBuf> {
 /// Detect games by scanning the given roots (injectable for tests).
 fn detect_in_roots(roots: &[PathBuf]) -> Vec<DetectedGame> {
     let mut found = Vec::new();
-    let mut seen: HashSet<GameKind> = HashSet::new();
-
     for kind in GameKind::ALL {
-        let candidates = gog_mac_app_names(kind);
-        if candidates.is_empty() {
+        let names = gog_mac_app_names(kind);
+        if names.is_empty() {
             continue;
         }
-        let wanted: Vec<String> = candidates.iter().map(|c| normalize(c)).collect();
-
-        'roots: for root in roots {
-            let Ok(entries) = std::fs::read_dir(root) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if !name.ends_with(".app") || !wanted.contains(&normalize(&name)) {
-                    continue;
-                }
-                let install_dir = entry.path();
-                let save_dir = install_dir.join(GOG_MAC_SAVE_SUBPATH);
-                if save_dir.is_dir() && seen.insert(kind) {
-                    let save_present = save_dir.join(kind.default_save_file()).exists();
-                    found.push(DetectedGame {
-                        kind,
-                        platform: "gog",
-                        install_dir,
-                        save_dir,
-                        save_present,
-                    });
-                    break 'roots;
-                }
+        if let Some(install_dir) = find_gog_bundle(roots, names) {
+            // Confirm it's a DOSBox bundle by finding the save directory.
+            let save_dir = install_dir.join(GOG_MAC_SAVE_SUBPATH);
+            if save_dir.is_dir() {
+                let save_present = save_dir.join(kind.default_save_file()).exists();
+                found.push(DetectedGame {
+                    kind,
+                    platform: "gog",
+                    install_dir,
+                    save_dir,
+                    save_present,
+                });
             }
         }
     }
     found
+}
+
+/// The first `.app` bundle under `roots` whose name matches one of `names` (loosely; see
+/// [`normalize`]).
+fn find_gog_bundle(roots: &[PathBuf], names: &[&str]) -> Option<PathBuf> {
+    let wanted: Vec<String> = names.iter().map(|n| normalize(n)).collect();
+    if wanted.is_empty() {
+        return None;
+    }
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.ends_with(".app") && wanted.contains(&normalize(&name)) {
+                return Some(entry.path());
+            }
+        }
+    }
+    None
 }
 
 // --- Steam ---------------------------------------------------------------------------
@@ -252,6 +259,81 @@ fn detect_steam(steam_root: &Path, home: &Path) -> Vec<DetectedGame> {
             save_dir,
             save_present,
         });
+    }
+    found
+}
+
+// --- Recognized-but-unsupported games ------------------------------------------------
+
+/// A game we can *recognize* on disk but don't support editing yet (detect-only).
+pub struct UnsupportedGame {
+    pub title: String,
+    pub platform: &'static str,
+    pub install_dir: PathBuf,
+}
+
+/// Detection signature for a not-yet-supported game.
+struct UnsupportedSig {
+    title: &'static str,
+    gog_names: &'static [&'static str],
+    steam_app_id: Option<u32>,
+}
+
+/// Games we recognize but can't edit yet — surfaced by `detect --all` so you can see what's
+/// installed and request support. (Feel free to grow this list.)
+const UNSUPPORTED: &[UnsupportedSig] = &[
+    UnsupportedSig {
+        title: "Ultima VI",
+        gog_names: &["Ultima VI"],
+        steam_app_id: None,
+    },
+    UnsupportedSig {
+        title: "The Bard's Tale Trilogy",
+        gog_names: &["The Bard's Tale Trilogy", "Bard's Tale Trilogy"],
+        steam_app_id: Some(843260),
+    },
+    UnsupportedSig {
+        title: "Magic Carpet Plus",
+        gog_names: &["Magic Carpet Plus", "Magic Carpet"],
+        steam_app_id: None,
+    },
+    UnsupportedSig {
+        title: "Magic Carpet 2",
+        gog_names: &["Magic Carpet 2"],
+        steam_app_id: None,
+    },
+];
+
+/// Detect recognized-but-unsupported games installed on this machine.
+pub fn detect_unsupported() -> Vec<UnsupportedGame> {
+    let steam_libs = default_steam_root()
+        .map(|r| steam_libraries(&r))
+        .unwrap_or_default();
+    detect_unsupported_in(&default_roots(), &steam_libs)
+}
+
+/// Detect unsupported games against injected GOG roots and Steam libraries (for tests).
+fn detect_unsupported_in(roots: &[PathBuf], steam_libs: &[PathBuf]) -> Vec<UnsupportedGame> {
+    let mut found = Vec::new();
+    for sig in UNSUPPORTED {
+        // A Steam app manifest is an authoritative signal, so prefer it over a name-matched
+        // `.app` bundle (which may just be a leftover launcher).
+        if let Some((lib, installdir)) = sig
+            .steam_app_id
+            .and_then(|id| steam_manifest(steam_libs, id))
+        {
+            found.push(UnsupportedGame {
+                title: sig.title.to_string(),
+                platform: "steam",
+                install_dir: lib.join("steamapps/common").join(installdir),
+            });
+        } else if let Some(install_dir) = find_gog_bundle(roots, sig.gog_names) {
+            found.push(UnsupportedGame {
+                title: sig.title.to_string(),
+                platform: "gog",
+                install_dir,
+            });
+        }
     }
     found
 }
@@ -437,6 +519,42 @@ mod tests {
             Some("Wasteland")
         );
         assert_eq!(vdf_value("\"other\" \"x\"", "path"), None);
+    }
+
+    #[test]
+    fn detects_unsupported_gog_and_steam() {
+        let apps = tempfile::tempdir().unwrap();
+        // A GOG bundle we recognize but don't support (no save subdir needed).
+        std::fs::create_dir_all(apps.path().join("Magic Carpet Plus™.app")).unwrap();
+
+        // A Steam library with the Bard's Tale Trilogy manifest.
+        let steam = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(steam.path().join("steamapps")).unwrap();
+        std::fs::write(
+            steam.path().join("steamapps/appmanifest_843260.acf"),
+            "\"AppState\"\n{\n\t\"installdir\"\t\"The Bard's Tale Trilogy\"\n}\n",
+        )
+        .unwrap();
+
+        let found =
+            detect_unsupported_in(&[apps.path().to_path_buf()], &[steam.path().to_path_buf()]);
+        let titles: Vec<&str> = found.iter().map(|g| g.title.as_str()).collect();
+        assert!(titles.contains(&"Magic Carpet Plus"));
+        assert!(titles.contains(&"The Bard's Tale Trilogy"));
+
+        let mc = found
+            .iter()
+            .find(|g| g.title == "Magic Carpet Plus")
+            .unwrap();
+        assert_eq!(mc.platform, "gog");
+        let bt = found
+            .iter()
+            .find(|g| g.title == "The Bard's Tale Trilogy")
+            .unwrap();
+        assert_eq!(bt.platform, "steam");
+        assert!(bt
+            .install_dir
+            .ends_with("steamapps/common/The Bard's Tale Trilogy"));
     }
 
     #[test]

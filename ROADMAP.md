@@ -209,6 +209,9 @@ Library location examples:
 - [x] GOG (macOS) + Steam (macOS) detection + `detect --write` to append found games to the
       config, or `[detect] auto` to fold them in at runtime · Windows/Linux deferred (need
       machines to test on) · manual path override still works
+- [x] `detect --all` also lists recognized-but-unsupported games (Ultima VI, Bard's Tale
+      Trilogy, Magic Carpet 1/2) in a separate section, pointing at the issue tracker for
+      feature requests · display-only (never written to config / auto-detected)
 - [ ] Windows & Linux support (deferred — no machines to test on; CI builds/tests them, but
       only macOS is published for now)
 - [x] GitHub Actions CI: fmt + clippy + test matrix across macOS / Ubuntu / Windows

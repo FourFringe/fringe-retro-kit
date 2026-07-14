@@ -516,7 +516,7 @@ ultima2        Ultima II  [found]
 Games with `enabled = false` are hidden. See [Configuration](#configuration) to set up the
 manifest and [Game identifiers](#game-identifiers) to use these ids in other commands.
 
-### ✅ `detect [--write]`
+### ✅ `detect [--write] [--all]`
 
 Scan for installed games and report where their saves live — so you don't have to find the
 paths by hand. Currently detects **GOG** and **Steam** games on **macOS**. GOG games install
@@ -527,6 +527,7 @@ manifests, and their saves may live elsewhere (e.g. Wasteland saves to
 ```bash
 fringe-retro detect          # report what's installed
 fringe-retro detect --write  # also add new games to your config
+fringe-retro detect --all    # also list recognized-but-unsupported games
 ```
 
 ```
@@ -539,6 +540,17 @@ Plain `detect` only reports. With `--write`, any detected game **not already in 
 is appended to it (matched by game, so nothing is duplicated); your existing `config.toml` is
 **backed up first** (a timestamped `.bak` beside it), and its current entries are left
 untouched. Re-running is safe — already-configured games are skipped.
+
+With `--all`, `detect` also lists games it **recognizes but can't edit yet** in a separate
+section — handy for seeing what else is installed. These are display-only: they're never added
+to your config by `--write` and never auto-detected. If you'd like support for one, the output
+links to the project's issue tracker so you can file a request. It's **off by default**.
+
+```
+Recognized but not yet supported (fringe-retro can't edit these):
+  Magic Carpet Plus          [gog]  /Applications/Magic Carpet Plus™.app
+  The Bard's Tale Trilogy    [gog]  ~/Applications/The Bard's Tale Trilogy.app
+```
 
 Prefer not to write anything? Set `[detect] auto = true` in your config and every run will
 scan and make detected games usable **in-memory** (they show as `(auto-detected)` in `games`,
