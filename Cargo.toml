@@ -15,9 +15,11 @@ fringe-retro-core = { path = "crates/core" }
 
 # Shared third-party crates (all MIT or MIT/Apache-2.0).
 anyhow = "1"
+assert_cmd = "2" # CLI integration testing (dev-only); MIT/Apache-2.0.
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 open = "5" # Open URLs/files in the OS default handler; MIT.
+predicates = "3" # Assertions for CLI output (dev-only); MIT/Apache-2.0.
 ratatui = "0.29" # Terminal UI (bundles crossterm); MIT.
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"
