@@ -210,7 +210,9 @@ Library location examples:
 - [ ] Windows & Linux support (deferred — no machines to test on; CI builds/tests them, but
       only macOS is published for now)
 - [x] GitHub Actions CI: fmt + clippy + test matrix across macOS / Ubuntu / Windows
-- [ ] Release automation (`dist`) with GitHub Releases + a Homebrew tap
+- [x] Release automation: tag-triggered **macOS** builds (Apple Silicon + Intel) → GitHub
+      Releases with tarballs + SHA-256 checksums. Follow-ups: `cargo-dist` installers and a
+      Homebrew tap (needs a tap repo + token); publishing Windows/Linux binaries.
 
 ---
 

@@ -9,6 +9,10 @@ license = "MIT"
 authors = ["John Sheets <john@fourfringe.com>"]
 repository = "https://github.com/FourFringe/fringe-retro-kit"
 
+# Smaller, cleaner release binaries (used by the Release workflow).
+[profile.release]
+strip = true
+
 [workspace.dependencies]
 # Internal
 fringe-retro-core = { path = "crates/core" }
