@@ -509,7 +509,7 @@ directory — your entries are merged in (links whose URL is already present are
 entry has a `title`, `url`, and free-form `category` (e.g. `wiki`, `walkthrough`, `map`,
 `format`, `play`). In the interactive UI, press `r` on a game to browse and open these links.
 
-### ✅ `library` (`add` · `list` · `restore`)
+### ✅ `library` (`add` · `list` · `view` · `restore` · `rename` · `duplicate` · `delete`)
 
 The **Save Library** is your curated, permanent collection of named **snapshots** — kept
 separate from the automatic `.bak` backups. Each snapshot captures a game's **whole** save
@@ -522,7 +522,11 @@ in your config (see [Configuration](#configuration)); `~` expands to your home d
 fringe-retro library add ultima3 "Before the Dungeon" --notes "roster + party"
 fringe-retro lib list                    # every game's snapshots
 fringe-retro lib list ultima3            # one game's snapshots
+fringe-retro lib view ultima3 before-the-dungeon      # inspect without restoring
 fringe-retro lib restore ultima3 before-the-dungeon
+fringe-retro lib rename ultima3 before-the-dungeon "Deep Dungeon"
+fringe-retro lib duplicate ultima3 deep-dungeon --name "Backup"
+fringe-retro lib delete ultima3 deep-dungeon          # prompts; add -y to skip
 ```
 
 ```
@@ -538,13 +542,21 @@ Ultima III (ultima3):
   numeric suffix is added (you're told the final slug).
 - **`list [<game>]`** shows snapshots grouped by game, each with its slug, when it was last
   updated (from the save files' timestamps), and any notes.
+- **`view <game> <slug>`** decodes a snapshot's saved fields (like `inspect`) **without**
+  restoring it.
 - **`restore <game> <slug>`** copies a snapshot's files back into the game's active save
   directory. Any pre-existing active file is safety-backed-up first; files already identical
   are skipped (a full match is a no-op).
+- **`rename <game> <slug> <new-name>`** updates the snapshot's name and renames its folder to
+  the new slug.
+- **`duplicate <game> <slug> [--name <name>]`** copies a snapshot to a new one (defaulting to
+  `"<name> copy"`); notes are carried over.
+- **`delete <game> <slug> [-y]`** removes a snapshot. You're prompted to confirm unless you
+  pass `-y`/`--yes`.
 
 Snapshots are portable: each folder carries an `entry.toml` describing it, so you can move
-one to another machine or cloud folder and it stays valid. Rename / duplicate / delete and an
-in-app Library screen are planned.
+one to another machine or cloud folder and it stays valid. An in-app Library screen is
+planned.
 
 ### ✅ `templates`
 

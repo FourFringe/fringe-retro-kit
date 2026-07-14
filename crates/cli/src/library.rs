@@ -190,6 +190,87 @@ impl Library {
         Ok(outcome)
     }
 
+    /// Rename a snapshot: update its display name and rename its folder to the new slug.
+    ///
+    /// The `entry.toml` name is the source of truth; the folder slug is cosmetic. If the new
+    /// name yields the same slug, only the metadata changes; otherwise the folder is moved to
+    /// the new slug (numeric-suffixed on collision).
+    pub fn rename(&self, kind: GameKind, slug: &str, new_name: &str) -> Result<Snapshot> {
+        let game_dir = self.root.join(kind.id());
+        let dir = game_dir.join(slug);
+        if !dir.is_dir() {
+            anyhow::bail!("no snapshot '{}/{slug}' in the library", kind.id());
+        }
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            anyhow::bail!("a snapshot name cannot be empty");
+        }
+
+        let mut meta = read_entry(&dir).unwrap_or_else(|| EntryMeta {
+            game: kind.id().to_string(),
+            name: slug.to_string(),
+            notes: None,
+            created: String::new(),
+        });
+        meta.name = new_name.to_string();
+
+        let new_slug = slugify(new_name);
+        let final_dir = if new_slug == slug {
+            dir
+        } else {
+            let target = game_dir.join(unique_slug(&game_dir, &new_slug));
+            std::fs::rename(&dir, &target).with_context(|| {
+                format!("failed to move {} to {}", dir.display(), target.display())
+            })?;
+            target
+        };
+        write_entry(&final_dir, &meta)?;
+        Ok(self.read_snapshot(kind, &final_dir))
+    }
+
+    /// Copy a snapshot into a new one (with a new name, defaulting to `"<name> copy"`). The
+    /// duplicate gets a fresh `created` timestamp; notes are carried over.
+    pub fn duplicate(
+        &self,
+        kind: GameKind,
+        slug: &str,
+        new_name: Option<&str>,
+    ) -> Result<Snapshot> {
+        let src = self.get(kind, slug)?;
+        let name = new_name
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{} copy", src.name));
+
+        let game_dir = self.root.join(kind.id());
+        let dst_dir = game_dir.join(unique_slug(&game_dir, &slugify(&name)));
+        std::fs::create_dir_all(&dst_dir)
+            .with_context(|| format!("failed to create {}", dst_dir.display()))?;
+        for f in &src.files {
+            copy_file(&src.dir.join(f), &dst_dir.join(f))?;
+        }
+        let meta = EntryMeta {
+            game: kind.id().to_string(),
+            name,
+            notes: src.notes.clone(),
+            created: chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+        };
+        write_entry(&dst_dir, &meta)?;
+        Ok(self.read_snapshot(kind, &dst_dir))
+    }
+
+    /// Delete a snapshot folder and all its contents. Returns the deleted folder path.
+    pub fn delete(&self, kind: GameKind, slug: &str) -> Result<PathBuf> {
+        let dir = self.root.join(kind.id()).join(slug);
+        if !dir.is_dir() {
+            anyhow::bail!("no snapshot '{}/{slug}' in the library", kind.id());
+        }
+        std::fs::remove_dir_all(&dir)
+            .with_context(|| format!("failed to delete {}", dir.display()))?;
+        Ok(dir)
+    }
+
     /// Read a snapshot from its folder, synthesizing sensible values if `entry.toml` is
     /// missing or unreadable (the folder is still a valid snapshot of its files).
     fn read_snapshot(&self, kind: GameKind, dir: &Path) -> Snapshot {
@@ -410,5 +491,85 @@ mod tests {
         let outcome = library.restore(&snap, &save).unwrap();
         assert!(outcome.restored.is_empty());
         assert!(outcome.backups.is_empty());
+    }
+
+    #[test]
+    fn rename_moves_the_folder_and_updates_the_name() {
+        let lib_dir = tempfile::tempdir().unwrap();
+        let (_g, save) = ultima3_save_dir();
+        let library = Library::new(lib_dir.path());
+        let snap = library
+            .add(GameKind::Ultima3, &save, "Old Name", None)
+            .unwrap();
+        let old_dir = snap.dir.clone();
+
+        let renamed = library
+            .rename(GameKind::Ultima3, "old-name", "New Name")
+            .unwrap();
+        assert_eq!(renamed.name, "New Name");
+        assert_eq!(renamed.slug, "new-name");
+        assert!(!old_dir.exists()); // the old folder was moved
+        assert_eq!(
+            library.get(GameKind::Ultima3, "new-name").unwrap().name,
+            "New Name"
+        );
+        // Files travelled with the folder.
+        assert_eq!(renamed.files, vec!["PARTY.ULT", "ROSTER.ULT"]);
+    }
+
+    #[test]
+    fn rename_keeps_folder_when_slug_is_unchanged() {
+        let lib_dir = tempfile::tempdir().unwrap();
+        let (_g, save) = ultima3_save_dir();
+        let library = Library::new(lib_dir.path());
+        library
+            .add(GameKind::Ultima3, &save, "My Party", None)
+            .unwrap();
+
+        // "My Party!" slugifies to the same "my-party"; only the display name changes.
+        let renamed = library
+            .rename(GameKind::Ultima3, "my-party", "My Party!")
+            .unwrap();
+        assert_eq!(renamed.slug, "my-party");
+        assert_eq!(renamed.name, "My Party!");
+    }
+
+    #[test]
+    fn duplicate_copies_files_and_defaults_the_name() {
+        let lib_dir = tempfile::tempdir().unwrap();
+        let (_g, save) = ultima3_save_dir();
+        let library = Library::new(lib_dir.path());
+        library
+            .add(GameKind::Ultima3, &save, "Original", Some("keep me"))
+            .unwrap();
+
+        let dup = library
+            .duplicate(GameKind::Ultima3, "original", None)
+            .unwrap();
+        assert_eq!(dup.name, "Original copy");
+        assert_eq!(dup.slug, "original-copy");
+        assert_eq!(dup.notes.as_deref(), Some("keep me")); // notes carried over
+        assert_eq!(dup.files, vec!["PARTY.ULT", "ROSTER.ULT"]);
+        assert_eq!(library.list(Some(GameKind::Ultima3)).unwrap().len(), 2);
+
+        let named = library
+            .duplicate(GameKind::Ultima3, "original", Some("Backup Copy"))
+            .unwrap();
+        assert_eq!(named.slug, "backup-copy");
+    }
+
+    #[test]
+    fn delete_removes_the_snapshot() {
+        let lib_dir = tempfile::tempdir().unwrap();
+        let (_g, save) = ultima3_save_dir();
+        let library = Library::new(lib_dir.path());
+        library
+            .add(GameKind::Ultima3, &save, "Doomed", None)
+            .unwrap();
+
+        let dir = library.delete(GameKind::Ultima3, "doomed").unwrap();
+        assert!(!dir.exists());
+        assert!(library.get(GameKind::Ultima3, "doomed").is_err());
+        assert!(library.delete(GameKind::Ultima3, "doomed").is_err()); // already gone
     }
 }

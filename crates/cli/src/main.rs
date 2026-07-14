@@ -142,6 +142,42 @@ enum LibraryAction {
         /// The snapshot slug (as shown by `library list`).
         slug: String,
     },
+    /// Inspect a snapshot's saved fields without restoring it.
+    View {
+        /// Game id (manifest id or built-in id such as `ultima3`).
+        game: String,
+        /// The snapshot slug (as shown by `library list`).
+        slug: String,
+    },
+    /// Rename a snapshot (updates its name and folder slug).
+    Rename {
+        /// Game id (manifest id or built-in id such as `ultima3`).
+        game: String,
+        /// The snapshot slug to rename.
+        slug: String,
+        /// The new display name.
+        name: String,
+    },
+    /// Duplicate a snapshot under a new name.
+    Duplicate {
+        /// Game id (manifest id or built-in id such as `ultima3`).
+        game: String,
+        /// The snapshot slug to copy.
+        slug: String,
+        /// A name for the copy (defaults to "<name> copy").
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Delete a snapshot from the library.
+    Delete {
+        /// Game id (manifest id or built-in id such as `ultima3`).
+        game: String,
+        /// The snapshot slug to delete.
+        slug: String,
+        /// Skip the confirmation prompt.
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -503,8 +539,60 @@ fn run_library(config: &Config, action: LibraryAction) -> Result<()> {
                 }
             }
         }
+        LibraryAction::View { game, slug } => {
+            let kind = config.game_kind(&game)?;
+            let snap = library.get(kind, &slug)?;
+            println!("{} — {} [{}]", kind.title(), snap.name, snap.slug);
+            for file in &snap.files {
+                println!("\n{file}:");
+                let bytes = std::fs::read(snap.dir.join(file))?;
+                for line in inspect::inspect_lines(&bytes)? {
+                    println!("  {line}");
+                }
+            }
+        }
+        LibraryAction::Rename { game, slug, name } => {
+            let kind = config.game_kind(&game)?;
+            let snap = library.rename(kind, &slug, &name)?;
+            println!("Renamed to '{}' [{}]", snap.name, snap.slug);
+        }
+        LibraryAction::Duplicate { game, slug, name } => {
+            let kind = config.game_kind(&game)?;
+            let snap = library.duplicate(kind, &slug, name.as_deref())?;
+            println!("Created snapshot '{}' [{}]", snap.name, snap.slug);
+        }
+        LibraryAction::Delete { game, slug, yes } => {
+            let kind = config.game_kind(&game)?;
+            let snap = library.get(kind, &slug)?;
+            let ok = yes
+                || confirm(&format!(
+                    "Delete snapshot '{}' ({}/{})? [y/N] ",
+                    snap.name,
+                    kind.id(),
+                    snap.slug
+                ))?;
+            if !ok {
+                println!("Cancelled.");
+                return Ok(());
+            }
+            let dir = library.delete(kind, &slug)?;
+            println!("Deleted {}", dir.display());
+        }
     }
     Ok(())
+}
+
+/// Prompt on stdin for a yes/no confirmation (defaulting to no).
+fn confirm(prompt: &str) -> Result<bool> {
+    use std::io::Write;
+    print!("{prompt}");
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    Ok(matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 /// Print snapshots grouped by game, with their slug, last-updated time, and notes.

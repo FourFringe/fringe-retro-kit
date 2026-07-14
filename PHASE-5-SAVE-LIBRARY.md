@@ -173,10 +173,10 @@ addressed by two arguments — its game and slug (e.g. `... ultima3 my-thief-par
 | `library add <game> <name> [--notes <notes>]` | ✅ done | Copy the active save set of `<game>` into a new snapshot folder. Preserves mtimes. Warns + suffixes on slug collision. |
 | `library list [<game>]` | ✅ done | Scan the library; list snapshots grouped by game with name, "Last Updated", and notes. |
 | `library restore <game> <slug>` | ✅ done | Copy the snapshot's files back into the game's `save_dir`, with overwrite protection (see §8.1). |
-| `library view <game> <slug>` | planned | `inspect` the snapshot's files **without** restoring. |
-| `library rename <game> <slug> <new-name>` | planned | Update `entry.toml` name and rename the folder to the new slug. |
-| `library duplicate <game> <slug> [--name <name>]` | planned | Copy a snapshot to a new one. |
-| `library delete <game> <slug>` | planned | Delete the snapshot folder (confirm first). |
+| `library view <game> <slug>` | ✅ done | `inspect` the snapshot's files **without** restoring. |
+| `library rename <game> <slug> <new-name>` | ✅ done | Update `entry.toml` name and rename the folder to the new slug. |
+| `library duplicate <game> <slug> [--name <name>]` | ✅ done | Copy a snapshot to a new one. |
+| `library delete <game> <slug> [-y]` | ✅ done | Delete the snapshot folder (confirm first, or `-y` to skip). |
 
 The CLI command namespace is `library` (alias `lib`).
 
@@ -255,9 +255,9 @@ max_age_days = 90
 
 1. ✅ **`[library] path` config + library scan** (list snapshots by reading folders/`entry.toml`).
 2. ✅ **`library add`** (archive the active set; slug + collision handling; preserve mtimes).
-3. **`library list`** ✅ / **`view`** (list done; view planned).
+3. ✅ **`library list` / `view`**.
 4. ✅ **`library restore`** (with safety backup + overwrite protection).
-5. **`library rename` / `duplicate` / `delete`**.
+5. ✅ **`library rename` / `duplicate` / `delete`**.
 6. **TUI Library screen** + "Save to Library" action.
 7. **Auto-backup retention** (can be done at any point; independent).
 

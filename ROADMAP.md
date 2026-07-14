@@ -181,7 +181,7 @@ should never manipulate save files in a file manager.
 - [x] Named snapshots with notes and metadata (created date, "last updated" from file times)
 - [x] Browse archived saves by game (CLI `library list`)
 - [x] Restore into the active game, with overwrite protection (CLI `library restore`)
-- [ ] Duplicate / rename / delete
+- [x] Duplicate / rename / delete (CLI `library duplicate` / `rename` / `delete`)
 
 Example workflow and configurable locations:
 
