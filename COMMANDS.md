@@ -516,6 +516,35 @@ ultima2        Ultima II  [found]
 Games with `enabled = false` are hidden. See [Configuration](#configuration) to set up the
 manifest and [Game identifiers](#game-identifiers) to use these ids in other commands.
 
+### ✅ `detect [--write]`
+
+Scan for installed games and report where their saves live — so you don't have to find the
+paths by hand. Currently detects **GOG** games on **macOS** (they install to `/Applications`
+with saves inside `Contents/Resources/game`).
+
+```bash
+fringe-retro detect          # report what's installed
+fringe-retro detect --write  # also add new games to your config
+```
+
+```
+ultima4    Ultima IV    [gog]
+    app:   /Applications/Ultima IV™.app
+    saves: /Applications/Ultima IV™.app/Contents/Resources/game  (PARTY.SAV found)
+```
+
+Plain `detect` only reports. With `--write`, any detected game **not already in your config**
+is appended to it (matched by game, so nothing is duplicated); your existing `config.toml` is
+**backed up first** (a timestamped `.bak` beside it), and its current entries are left
+untouched. Re-running is safe — already-configured games are skipped.
+
+Prefer not to write anything? Set `[detect] auto = true` in your config and every run will
+scan and make detected games usable **in-memory** (they show as `(auto-detected)` in `games`,
+and your explicit entries always win). It's **off by default** so behavior stays predictable.
+
+Steam detection and other platforms are planned; for now, add those games to your config by
+hand (see [Configuration](#configuration)).
+
 ### ✅ `resources [<game>]`
 
 List curated **web resources** for a game — links to wikis, walkthroughs, maps, and

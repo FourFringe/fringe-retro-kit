@@ -16,6 +16,7 @@ use fringe_retro_core::backup::RetentionPolicy;
 use fringe_retro_core::games::GameKind;
 use serde::Deserialize;
 
+use crate::detect::{self, DetectedGame};
 use crate::library::Library;
 
 const CONFIG_ENV: &str = "FRINGE_RETRO_CONFIG";
@@ -34,6 +35,18 @@ pub struct Config {
     /// Automatic-backup retention policy (Phase 5).
     #[serde(default)]
     backups: BackupSettings,
+    /// Installed-game detection settings (Phase 6).
+    #[serde(default)]
+    detect: DetectSettings,
+}
+
+/// The `[detect]` table.
+#[derive(Debug, Default, Deserialize)]
+struct DetectSettings {
+    /// When true, scan for installed games on every run and make any not already configured
+    /// usable in-memory (nothing is written to disk). Off by default.
+    #[serde(default)]
+    auto: bool,
 }
 
 /// The `[library]` table.
@@ -67,6 +80,9 @@ struct GameEntry {
     platform: Option<String>,
     /// Where the game is installed. Descriptive only for now.
     install_dir: Option<PathBuf>,
+    /// True for entries injected by auto-detection (never read from the file).
+    #[serde(skip)]
+    detected: bool,
 }
 
 fn default_true() -> bool {
@@ -80,6 +96,8 @@ pub struct ResolvedGame {
     pub save_dir: Option<PathBuf>,
     pub platform: Option<String>,
     pub install_dir: Option<PathBuf>,
+    /// Whether this game came from auto-detection rather than the config file.
+    pub detected: bool,
 }
 
 impl GameEntry {
@@ -94,22 +112,49 @@ impl GameEntry {
             )
         })
     }
+
+    /// An entry synthesized from a detected install.
+    fn detected(game: &DetectedGame) -> Self {
+        GameEntry {
+            game: Some(game.kind.id().to_string()),
+            save_dir: Some(game.save_dir.clone()),
+            enabled: true,
+            platform: Some(game.platform.to_string()),
+            install_dir: Some(game.install_dir.clone()),
+            detected: true,
+        }
+    }
 }
 
 impl Config {
     /// Load the manifest from `FRINGE_RETRO_CONFIG` or `./config.toml`. A missing file is
     /// not an error — it yields an empty manifest.
     pub fn load() -> Result<Self> {
-        let path = std::env::var_os(CONFIG_ENV)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_FILE));
+        let path = config_path();
 
-        match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
+        let mut config: Config = match std::fs::read_to_string(&path) {
+            Ok(text) => toml::from_str(&text)
+                .with_context(|| format!("failed to parse {}", path.display()))?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
+            Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
+        };
+        // When enabled, fold auto-detected installs into the in-memory manifest.
+        if config.detect.auto {
+            config.merge_detected_from(&detect::detect_games());
+        }
+        Ok(config)
+    }
+
+    /// Merge detected games not already configured (by kind) into the in-memory manifest.
+    fn merge_detected_from(&mut self, found: &[DetectedGame]) {
+        let configured = self.configured_kinds();
+        for game in found {
+            if configured.contains(&game.kind) {
+                continue;
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
-            Err(e) => Err(e).with_context(|| format!("failed to read {}", path.display())),
+            self.games
+                .entry(game.kind.id().to_string())
+                .or_insert_with(|| GameEntry::detected(game));
         }
     }
 
@@ -162,6 +207,7 @@ impl Config {
                 save_dir: entry.save_dir.clone(),
                 platform: entry.platform.clone(),
                 install_dir: entry.install_dir.clone(),
+                detected: entry.detected,
             });
         }
         Ok(games)
@@ -179,6 +225,7 @@ impl Config {
             save_dir: entry.save_dir.clone(),
             platform: entry.platform.clone(),
             install_dir: entry.install_dir.clone(),
+            detected: entry.detected,
         })
     }
 
@@ -206,6 +253,22 @@ impl Config {
             max_age_days: self.backups.max_age_days.filter(|&d| d > 0),
         }
     }
+
+    /// The set of built-in games already present in the manifest (enabled or not), used to
+    /// avoid re-adding a game that's already configured.
+    pub fn configured_kinds(&self) -> std::collections::HashSet<GameKind> {
+        self.games
+            .iter()
+            .filter_map(|(id, entry)| entry.resolve_kind(id).ok())
+            .collect()
+    }
+}
+
+/// The path the manifest is read from: `FRINGE_RETRO_CONFIG`, or `./config.toml`.
+pub fn config_path() -> PathBuf {
+    std::env::var_os(CONFIG_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_FILE))
 }
 
 /// Expand a leading `~` to the user's home directory (`$HOME`); other paths are unchanged.
@@ -307,6 +370,41 @@ mod tests {
 
         let cfg = parse("[library]\npath = \"/saves/lib\"\n");
         assert!(cfg.library().is_ok());
+    }
+
+    #[test]
+    fn auto_detect_merges_only_unconfigured_games() {
+        use crate::detect::DetectedGame;
+        let mut cfg: Config = toml::from_str("[games.ultima4]\nsave_dir = \"/x\"\n").unwrap();
+        let found = vec![
+            DetectedGame {
+                kind: GameKind::Ultima4, // already configured -> not merged
+                platform: "gog",
+                install_dir: PathBuf::from("/Applications/Ultima IV™.app"),
+                save_dir: PathBuf::from("/Applications/Ultima IV™.app/Contents/Resources/game"),
+                save_present: true,
+            },
+            DetectedGame {
+                kind: GameKind::Ultima5, // new -> merged in-memory
+                platform: "gog",
+                install_dir: PathBuf::from("/Applications/Ultima V™.app"),
+                save_dir: PathBuf::from("/Applications/Ultima V™.app/Contents/Resources/game"),
+                save_present: false,
+            },
+        ];
+        cfg.merge_detected_from(&found);
+
+        let games = cfg.games().unwrap();
+        let u4 = games.iter().find(|g| g.kind == GameKind::Ultima4).unwrap();
+        assert!(!u4.detected); // config entry, untouched
+        assert_eq!(u4.save_dir.as_deref(), Some(Path::new("/x")));
+        let u5 = games.iter().find(|g| g.kind == GameKind::Ultima5).unwrap();
+        assert!(u5.detected); // came from detection
+        assert!(u5
+            .save_dir
+            .as_ref()
+            .unwrap()
+            .ends_with("Contents/Resources/game"));
     }
 
     #[test]

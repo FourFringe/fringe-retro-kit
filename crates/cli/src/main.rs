@@ -3,6 +3,7 @@
 //! Phase 1 exposes a small, permanent headless CLI over `fringe-retro-core`.
 
 mod config;
+mod detect;
 mod edit;
 mod inspect;
 mod library;
@@ -102,6 +103,12 @@ enum Command {
     },
     /// List the games configured in your library manifest.
     Games,
+    /// Scan for installed games (GOG on macOS) and optionally add them to your config.
+    Detect {
+        /// Append any newly-found games to your config (backing it up first).
+        #[arg(long)]
+        write: bool,
+    },
     /// List character templates and whether each one is valid for its game.
     Templates,
     /// List curated web resources for a game, or open one in your browser.
@@ -449,6 +456,9 @@ fn main() -> Result<()> {
         Command::Games => {
             print_games(&config)?;
         }
+        Command::Detect { write } => {
+            run_detect(&config, write)?;
+        }
         Command::Templates => {
             let set = TemplateSet::load()?;
             print_templates(&set);
@@ -702,6 +712,53 @@ fn run_resources(game: Option<&str>, open: Option<usize>) -> Result<()> {
     Ok(())
 }
 
+/// Scan for installed games and report them; with `write`, add new ones to the config.
+fn run_detect(config: &Config, write: bool) -> Result<()> {
+    let found = detect::detect_games();
+    if found.is_empty() {
+        println!("No installed games detected (looked for GOG apps in /Applications).");
+        return Ok(());
+    }
+
+    for g in &found {
+        let save = if g.save_present {
+            format!("{} found", g.kind.default_save_file())
+        } else {
+            "no save yet".to_string()
+        };
+        println!(
+            "{:<10} {:<12} [{}]",
+            g.kind.id(),
+            g.kind.title(),
+            g.platform
+        );
+        println!("    app:   {}", g.install_dir.display());
+        println!("    saves: {}  ({save})", g.save_dir.display());
+    }
+
+    if write {
+        let outcome = detect::write_missing(config, &found, &detect::manifest_path())?;
+        println!();
+        if outcome.added.is_empty() {
+            println!("All detected games are already in your config; nothing added.");
+        } else {
+            let ids: Vec<&str> = outcome.added.iter().map(|k| k.id()).collect();
+            println!(
+                "Added to {}: {}",
+                detect::manifest_path().display(),
+                ids.join(", ")
+            );
+            if let Some(backup) = &outcome.backup {
+                println!("Previous config backed up to {}", backup.display());
+            }
+        }
+    } else {
+        println!();
+        println!("Run `fringe-retro detect --write` to add new games to your config.");
+    }
+    Ok(())
+}
+
 /// Print the games configured in the library manifest and whether their saves are present.
 fn print_games(config: &Config) -> Result<()> {
     let games = config.games()?;
@@ -724,7 +781,16 @@ fn print_games(config: &Config) -> Result<()> {
         } else {
             "  (inspect not yet supported)"
         };
-        println!("{:<14} {}{}  [{status}]", game.id, game.kind.title(), note);
+        let source = if game.detected {
+            "  (auto-detected)"
+        } else {
+            ""
+        };
+        println!(
+            "{:<14} {}{note}{source}  [{status}]",
+            game.id,
+            game.kind.title()
+        );
         if let Some(path) = &default_save {
             println!("    save:     {}", path.display());
         }

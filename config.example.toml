@@ -65,3 +65,10 @@ path = "~/Documents/Fringe Retro Kit"
 keep = 20          # keep at most this many recent backups per save
 max_age_days = 90  # also delete backups older than this
 
+# Auto-detection. When `auto = true`, every run scans for installed games (GOG on macOS) and
+# makes any not already listed above usable in-memory — nothing is written to disk, and your
+# explicit entries always win. Off by default; run `fringe-retro detect` to preview, or
+# `detect --write` to add found games to this file permanently.
+[detect]
+auto = false
+

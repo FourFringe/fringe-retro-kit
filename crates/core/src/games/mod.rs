@@ -13,7 +13,7 @@ pub mod wasteland;
 
 /// A game with built-in save support. Used to map a library-manifest identifier to a
 /// parser and its default save file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GameKind {
     Ultima1,
     Ultima2,
