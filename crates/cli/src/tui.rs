@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use fringe_retro_core::backup;
+use fringe_retro_core::games::GameKind;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -19,6 +20,7 @@ use ratatui::{DefaultTerminal, Frame};
 
 use crate::config::Config;
 use crate::edit::{Entity, FieldRow, Session};
+use crate::library::Library;
 use crate::resources::{self, Resources};
 use crate::templates::TemplateSet;
 
@@ -33,7 +35,10 @@ struct SaveFile {
 struct GameRow {
     id: String,
     title: String,
+    kind: GameKind,
     inspectable: bool,
+    /// The game's save directory (from the manifest), if configured.
+    save_dir: Option<PathBuf>,
     /// The game's candidate save files (default first).
     files: Vec<SaveFile>,
 }
@@ -62,6 +67,8 @@ enum Screen {
     Templates(TemplateList),
     /// A list of curated web links for a game (opened in the OS browser).
     Resources(ResourceList),
+    /// A browser/manager for a game's Save Library snapshots.
+    Library(LibraryList),
     /// A read-only message (unsupported games, errors).
     Inspect(Inspector),
     /// An unsaved-changes prompt.
@@ -102,6 +109,52 @@ struct ResourceItem {
     title: String,
     url: String,
     category: String,
+}
+
+/// A browser/manager for a game's Save Library snapshots (list + decoded preview).
+struct LibraryList {
+    title: String,
+    kind: GameKind,
+    /// The game's active save directory (needed to add/restore); `None` if unconfigured.
+    save_dir: Option<PathBuf>,
+    entries: Vec<SnapshotItem>,
+    list: ListState,
+    preview: Inspector,
+    status: Option<String>,
+    /// `Some` while typing a name (add / rename / duplicate).
+    input: Option<LibraryInput>,
+}
+
+/// One snapshot shown in the [`LibraryList`].
+struct SnapshotItem {
+    name: String,
+    slug: String,
+    notes: Option<String>,
+    updated: Option<String>,
+    label: String,
+    dir: PathBuf,
+    files: Vec<String>,
+}
+
+/// An in-progress name entry in the library browser.
+struct LibraryInput {
+    action: LibraryInputAction,
+    buffer: String,
+}
+
+/// Which name-taking library operation is being entered.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LibraryInputAction {
+    Add,
+    Rename,
+    Duplicate,
+}
+
+impl LibraryList {
+    /// The currently selected snapshot, if any.
+    fn selected(&self) -> Option<&SnapshotItem> {
+        self.list.selected().and_then(|i| self.entries.get(i))
+    }
 }
 
 /// One timestamped backup file of the current save.
@@ -278,6 +331,14 @@ enum Pending {
         backup: PathBuf,
         entity: usize,
     },
+    /// Restore the named library snapshot into the active save directory.
+    LibraryRestore {
+        slug: String,
+    },
+    /// Delete the named library snapshot.
+    LibraryDelete {
+        slug: String,
+    },
 }
 
 /// A modal prompt (unsaved-changes guard, or a restore confirmation).
@@ -355,6 +416,8 @@ struct App {
     template_error: Option<String>,
     /// Curated web links per game (bundled defaults plus any user overrides).
     resources: Resources,
+    /// The Save Library, if `[library] path` is configured.
+    library: Option<Library>,
     session: Option<Session>,
     stack: Vec<Screen>,
     running: bool,
@@ -378,6 +441,11 @@ enum Action {
     SaveTemplate(String),
     OpenResources(Option<usize>),
     OpenResourceLink(Option<usize>),
+    OpenLibrary(Option<usize>),
+    LibraryRestoreRequest,
+    LibraryDeleteRequest,
+    LibraryBeginInput(LibraryInputAction),
+    LibraryCommitInput(String),
     ConfirmSave,
     ConfirmDiscard,
     ConfirmAccept,
@@ -395,6 +463,7 @@ impl App {
             templates: TemplateSet::default(),
             template_error: None,
             resources: Resources::bundled(),
+            library: None,
             session: None,
             stack: vec![Screen::Games(list)],
             running: true,
@@ -483,6 +552,8 @@ impl App {
                 self.session = None;
             }
             Some(Pending::Restore { backup, entity }) => self.do_restore(backup, entity),
+            Some(Pending::LibraryRestore { slug }) => self.do_library_restore(slug),
+            Some(Pending::LibraryDelete { slug }) => self.do_library_delete(slug),
             None => {}
         }
     }
@@ -795,6 +866,233 @@ impl App {
         }
     }
 
+    /// Open the Save Library browser for the selected game.
+    fn open_library(&mut self, index: usize) {
+        let Some(row) = self.games.get(index) else {
+            return;
+        };
+        let (kind, title, save_dir) = (row.kind, row.title.clone(), row.save_dir.clone());
+        let Some(library) = self.library.as_ref() else {
+            self.stack.push(Screen::Inspect(Inspector::new(
+                format!("{title} — Library"),
+                vec![
+                    String::new(),
+                    "  No Save Library is configured.".to_string(),
+                    "  Set `[library] path` in your config (see COMMANDS.md).".to_string(),
+                ],
+            )));
+            return;
+        };
+        let entries = build_snapshot_items(library, kind);
+        let mut list = ListState::default();
+        if !entries.is_empty() {
+            list.select(Some(0));
+        }
+        let preview = Inspector::new("Preview".to_string(), snapshot_preview(entries.first()));
+        self.stack.push(Screen::Library(LibraryList {
+            title: format!("Library — {title}"),
+            kind,
+            save_dir,
+            entries,
+            list,
+            preview,
+            status: None,
+            input: None,
+        }));
+    }
+
+    /// Ask to confirm restoring the selected snapshot into the active save directory.
+    fn request_library_restore(&mut self) {
+        let (slug, has_dir) = match self.stack.last() {
+            Some(Screen::Library(ll)) => {
+                (ll.selected().map(|s| s.slug.clone()), ll.save_dir.is_some())
+            }
+            _ => (None, false),
+        };
+        let Some(slug) = slug else { return };
+        if !has_dir {
+            if let Some(Screen::Library(ll)) = self.stack.last_mut() {
+                ll.status = Some("No save directory configured for this game.".to_string());
+            }
+            return;
+        }
+        self.stack.push(Screen::Confirm(Confirm {
+            pending: Pending::LibraryRestore { slug },
+            message: Some("Restore this snapshot over the active save?".to_string()),
+        }));
+    }
+
+    /// Ask to confirm deleting the selected snapshot.
+    fn request_library_delete(&mut self) {
+        let target = match self.stack.last() {
+            Some(Screen::Library(ll)) => ll.selected().map(|s| (s.slug.clone(), s.name.clone())),
+            _ => None,
+        };
+        let Some((slug, name)) = target else { return };
+        self.stack.push(Screen::Confirm(Confirm {
+            pending: Pending::LibraryDelete { slug },
+            message: Some(format!("Delete snapshot '{name}'? This cannot be undone.")),
+        }));
+    }
+
+    /// Restore the named snapshot into the game's active save directory.
+    fn do_library_restore(&mut self, slug: String) {
+        let (kind, save_dir) = match self.stack.last() {
+            Some(Screen::Library(ll)) => (ll.kind, ll.save_dir.clone()),
+            _ => return,
+        };
+        let Some(save_dir) = save_dir else { return };
+        let status = match self.library.as_ref() {
+            Some(library) => match library
+                .get(kind, &slug)
+                .and_then(|snap| library.restore(&snap, &save_dir))
+            {
+                Ok(outcome) if outcome.restored.is_empty() => {
+                    "Already matches the active save; nothing restored.".to_string()
+                }
+                Ok(outcome) => format!(
+                    "Restored ({} file(s); {} safety backup(s) made).",
+                    outcome.restored.len(),
+                    outcome.backups.len()
+                ),
+                Err(e) => format!("Restore failed: {e}"),
+            },
+            None => "No Save Library configured.".to_string(),
+        };
+        // If the restored game is the one being edited, reload the session.
+        if let Some(session) = self.session.as_ref() {
+            if session.kind() == kind {
+                if let Ok(Some(reloaded)) = Session::load(session.path()) {
+                    self.session = Some(reloaded);
+                }
+            }
+        }
+        if let Some(Screen::Library(ll)) = self.stack.last_mut() {
+            ll.status = Some(status);
+        }
+    }
+
+    /// Delete the named snapshot and refresh the list.
+    fn do_library_delete(&mut self, slug: String) {
+        let kind = match self.stack.last() {
+            Some(Screen::Library(ll)) => ll.kind,
+            _ => return,
+        };
+        let status = match self.library.as_ref() {
+            Some(library) => match library.delete(kind, &slug) {
+                Ok(_) => format!("Deleted snapshot '{slug}'."),
+                Err(e) => format!("Delete failed: {e}"),
+            },
+            None => "No Save Library configured.".to_string(),
+        };
+        let new_entries = self
+            .library
+            .as_ref()
+            .map(|lib| build_snapshot_items(lib, kind))
+            .unwrap_or_default();
+        if let Some(Screen::Library(ll)) = self.stack.last_mut() {
+            ll.entries = new_entries;
+            ll.list.select((!ll.entries.is_empty()).then_some(0));
+            refresh_library_preview(ll);
+            ll.status = Some(status);
+        }
+    }
+
+    /// Begin entering a name for an add / rename / duplicate operation.
+    fn begin_library_input(&mut self, action: LibraryInputAction) {
+        if let Some(Screen::Library(ll)) = self.stack.last_mut() {
+            // Rename and duplicate need a selected snapshot.
+            if action != LibraryInputAction::Add && ll.selected().is_none() {
+                ll.status = Some("No snapshot selected.".to_string());
+                return;
+            }
+            let buffer = match action {
+                LibraryInputAction::Add => String::new(),
+                LibraryInputAction::Rename => {
+                    ll.selected().map(|s| s.name.clone()).unwrap_or_default()
+                }
+                LibraryInputAction::Duplicate => ll
+                    .selected()
+                    .map(|s| format!("{} copy", s.name))
+                    .unwrap_or_default(),
+            };
+            ll.input = Some(LibraryInput { action, buffer });
+            ll.status = None;
+        }
+    }
+
+    /// Commit the name entry: add the active save, or rename / duplicate the selection.
+    fn commit_library_input(&mut self, buffer: String) {
+        let buffer = buffer.trim().to_string();
+        let ctx = match self.stack.last() {
+            Some(Screen::Library(ll)) => ll.input.as_ref().map(|inp| {
+                (
+                    inp.action,
+                    ll.kind,
+                    ll.save_dir.clone(),
+                    ll.selected().map(|s| s.slug.clone()),
+                )
+            }),
+            _ => None,
+        };
+        let Some((action, kind, save_dir, sel_slug)) = ctx else {
+            return;
+        };
+        if buffer.is_empty() {
+            if let Some(Screen::Library(ll)) = self.stack.last_mut() {
+                ll.status = Some("Name cannot be empty.".to_string());
+            }
+            return;
+        }
+
+        let (status, focus_slug): (String, Option<String>) = match self.library.as_ref() {
+            Some(lib) => match action {
+                LibraryInputAction::Add => match &save_dir {
+                    Some(dir) => match lib.add(kind, dir, &buffer, None) {
+                        Ok(s) => (format!("Saved snapshot '{}'.", s.name), Some(s.slug)),
+                        Err(e) => (format!("Save failed: {e}"), None),
+                    },
+                    None => (
+                        "No save directory configured for this game.".to_string(),
+                        None,
+                    ),
+                },
+                LibraryInputAction::Rename => match &sel_slug {
+                    Some(slug) => match lib.rename(kind, slug, &buffer) {
+                        Ok(s) => (format!("Renamed to '{}'.", s.name), Some(s.slug)),
+                        Err(e) => (format!("Rename failed: {e}"), None),
+                    },
+                    None => ("Nothing selected.".to_string(), None),
+                },
+                LibraryInputAction::Duplicate => match &sel_slug {
+                    Some(slug) => match lib.duplicate(kind, slug, Some(&buffer)) {
+                        Ok(s) => (format!("Duplicated as '{}'.", s.name), Some(s.slug)),
+                        Err(e) => (format!("Duplicate failed: {e}"), None),
+                    },
+                    None => ("Nothing selected.".to_string(), None),
+                },
+            },
+            None => ("No Save Library configured.".to_string(), None),
+        };
+
+        let new_entries = self
+            .library
+            .as_ref()
+            .map(|lib| build_snapshot_items(lib, kind))
+            .unwrap_or_default();
+        if let Some(Screen::Library(ll)) = self.stack.last_mut() {
+            ll.input = None;
+            let idx = focus_slug
+                .as_ref()
+                .and_then(|slug| new_entries.iter().position(|e| &e.slug == slug))
+                .unwrap_or(0);
+            ll.entries = new_entries;
+            ll.list.select((!ll.entries.is_empty()).then_some(idx));
+            refresh_library_preview(ll);
+            ll.status = Some(status);
+        }
+    }
+
     /// Open the selected game: load an editing session and show its character(s).
     /// Open the selected game: choose among its save files, or open its only one directly.
     fn open_game(&mut self, index: usize) {
@@ -999,6 +1297,7 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => select_wrap(list, games_len, 1),
                 KeyCode::Up | KeyCode::Char('k') => select_wrap(list, games_len, -1),
                 KeyCode::Char('r') => action = Action::OpenResources(list.selected()),
+                KeyCode::Char('L') => action = Action::OpenLibrary(list.selected()),
                 KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                     action = Action::OpenGame(list.selected());
                 }
@@ -1177,8 +1476,60 @@ impl App {
                     _ => {}
                 }
             }
+            Screen::Library(ll) => {
+                if let Some(inp) = &mut ll.input {
+                    match code {
+                        KeyCode::Enter => action = Action::LibraryCommitInput(inp.buffer.clone()),
+                        KeyCode::Esc => {
+                            ll.input = None;
+                            ll.status = None;
+                        }
+                        KeyCode::Backspace => {
+                            inp.buffer.pop();
+                        }
+                        KeyCode::Char(c) => inp.buffer.push(c),
+                        _ => {}
+                    }
+                } else {
+                    let len = ll.entries.len();
+                    match code {
+                        KeyCode::Char('q') => action = Action::Quit,
+                        KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => {
+                            action = Action::Back;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            select_wrap(&mut ll.list, len, 1);
+                            ll.status = None;
+                            refresh_library_preview(ll);
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            select_wrap(&mut ll.list, len, -1);
+                            ll.status = None;
+                            refresh_library_preview(ll);
+                        }
+                        KeyCode::PageDown | KeyCode::Char(' ') => ll.preview.page_down(),
+                        KeyCode::PageUp => ll.preview.page_up(),
+                        KeyCode::Enter | KeyCode::Char('r') => {
+                            action = Action::LibraryRestoreRequest;
+                        }
+                        KeyCode::Char('d') => action = Action::LibraryDeleteRequest,
+                        KeyCode::Char('a') => {
+                            action = Action::LibraryBeginInput(LibraryInputAction::Add);
+                        }
+                        KeyCode::Char('R') => {
+                            action = Action::LibraryBeginInput(LibraryInputAction::Rename);
+                        }
+                        KeyCode::Char('D') => {
+                            action = Action::LibraryBeginInput(LibraryInputAction::Duplicate);
+                        }
+                        _ => {}
+                    }
+                }
+            }
             Screen::Confirm(c) => match &c.pending {
-                Pending::Restore { .. } => match code {
+                Pending::Restore { .. }
+                | Pending::LibraryRestore { .. }
+                | Pending::LibraryDelete { .. } => match code {
                     KeyCode::Char('y') | KeyCode::Enter => action = Action::ConfirmAccept,
                     KeyCode::Esc | KeyCode::Char('n') => action = Action::ConfirmCancel,
                     _ => {}
@@ -1208,12 +1559,18 @@ impl App {
             Action::SaveTemplate(name) => self.save_template(name),
             Action::OpenResources(Some(i)) => self.open_resources(i),
             Action::OpenResourceLink(Some(i)) => self.open_resource_link(i),
+            Action::OpenLibrary(Some(i)) => self.open_library(i),
+            Action::LibraryRestoreRequest => self.request_library_restore(),
+            Action::LibraryDeleteRequest => self.request_library_delete(),
+            Action::LibraryBeginInput(a) => self.begin_library_input(a),
+            Action::LibraryCommitInput(name) => self.commit_library_input(name),
             Action::ConfirmSave => self.confirm_save(),
             Action::ConfirmDiscard => self.confirm_discard(),
             Action::ConfirmAccept => self.complete_pending(),
             Action::ConfirmCancel => self.confirm_cancel(),
             Action::OpenGame(None) | Action::OpenSaveFile(None) | Action::OpenEntry(None) => {}
             Action::OpenResources(None) | Action::OpenResourceLink(None) => {}
+            Action::OpenLibrary(None) => {}
         }
     }
 
@@ -1234,6 +1591,7 @@ impl App {
             Screen::Backups(bl) => draw_backups(frame, chunks[0], bl),
             Screen::Templates(tl) => draw_templates(frame, chunks[0], tl),
             Screen::Resources(rl) => draw_resources(frame, chunks[0], rl),
+            Screen::Library(ll) => draw_library(frame, chunks[0], ll),
             Screen::Inspect(insp) => {
                 insp.viewport = chunks[0].height.saturating_sub(2);
                 draw_inspector(frame, chunks[0], insp);
@@ -1450,6 +1808,87 @@ fn draw_resources(frame: &mut Frame, area: Rect, rl: &mut ResourceList) {
     frame.render_stateful_widget(widget, area, &mut rl.list);
 }
 
+/// Build the snapshot rows for a game's Save Library.
+fn build_snapshot_items(library: &Library, kind: GameKind) -> Vec<SnapshotItem> {
+    library
+        .list(Some(kind))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| {
+            let updated = s.last_updated.map(|t| {
+                chrono::DateTime::<chrono::Local>::from(t)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string()
+            });
+            let label = match &updated {
+                Some(u) => format!("{}  ({u})", s.name),
+                None => s.name.clone(),
+            };
+            SnapshotItem {
+                name: s.name,
+                slug: s.slug,
+                notes: s.notes,
+                updated,
+                label,
+                dir: s.dir,
+                files: s.files,
+            }
+        })
+        .collect()
+}
+
+/// A decoded preview of a snapshot: its metadata plus each save file's inspection.
+fn snapshot_preview(item: Option<&SnapshotItem>) -> Vec<String> {
+    let Some(item) = item else {
+        return vec!["(no snapshots yet — press 'a' to add one)".to_string()];
+    };
+    let mut lines = vec![format!("{}  [{}]", item.name, item.slug)];
+    if let Some(updated) = &item.updated {
+        lines.push(format!("updated: {updated}"));
+    }
+    if let Some(notes) = &item.notes {
+        lines.push(format!("notes: {notes}"));
+    }
+    for file in &item.files {
+        lines.push(String::new());
+        lines.push(format!("{file}:"));
+        match std::fs::read(item.dir.join(file)) {
+            Ok(bytes) => match crate::inspect::inspect_lines(&bytes) {
+                Ok(inspected) => lines.extend(inspected.into_iter().map(|l| format!("  {l}"))),
+                Err(e) => lines.push(format!("  (cannot preview: {e})")),
+            },
+            Err(e) => lines.push(format!("  (cannot read: {e})")),
+        }
+    }
+    lines
+}
+
+/// Rebuild the preview pane for whichever snapshot is currently selected.
+fn refresh_library_preview(ll: &mut LibraryList) {
+    ll.preview = Inspector::new("Preview".to_string(), snapshot_preview(ll.selected()));
+}
+
+fn draw_library(frame: &mut Frame, area: Rect, ll: &mut LibraryList) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(46), Constraint::Min(1)])
+        .split(area);
+
+    let items: Vec<ListItem> = if ll.entries.is_empty() {
+        vec![ListItem::new("(no snapshots yet — press 'a' to add)")]
+    } else {
+        ll.entries
+            .iter()
+            .map(|e| ListItem::new(Line::from(e.label.clone())))
+            .collect()
+    };
+    let list = selectable_list(items, format!(" {} ", ll.title));
+    frame.render_stateful_widget(list, cols[0], &mut ll.list);
+
+    ll.preview.viewport = cols[1].height.saturating_sub(2);
+    draw_inspector(frame, cols[1], &ll.preview);
+}
+
 fn draw_editor(frame: &mut Frame, area: Rect, ed: &mut Editor, dirty: bool) {
     let capture = ed.capture.as_ref().map(|c| &c.selected);
     let picker = ed.picker.as_ref();
@@ -1660,7 +2099,7 @@ fn draw_templates(frame: &mut Frame, area: Rect, tl: &mut TemplateList) {
 /// The context-dependent bottom line: key hints, the field input prompt, or a status.
 fn bottom_line(screen: &Screen) -> String {
     match screen {
-        Screen::Games(_) => " ↑/↓ select · Enter open · r resources · q quit ".to_string(),
+        Screen::Games(_) => " ↑/↓ select · Enter open · r resources · L library · q quit ".to_string(),
         Screen::SaveFiles(_) => {
             " ↑/↓ select · Enter open · Esc back · q quit ".to_string()
         }
@@ -1712,6 +2151,21 @@ fn bottom_line(screen: &Screen) -> String {
             Some(s) => format!("  {s}"),
             None => " ↑/↓ select · Enter open in browser · Esc back · q quit ".to_string(),
         },
+        Screen::Library(ll) => {
+            if let Some(inp) = &ll.input {
+                let label = match inp.action {
+                    LibraryInputAction::Add => "New snapshot name",
+                    LibraryInputAction::Rename => "Rename to",
+                    LibraryInputAction::Duplicate => "Duplicate as",
+                };
+                format!("  {label}: {}_   (Enter save · Esc cancel)", inp.buffer)
+            } else if let Some(s) = &ll.status {
+                format!("  {s}")
+            } else {
+                " ↑/↓ select · Enter/r restore · a add · R rename · D duplicate · d delete · Esc back · q quit "
+                    .to_string()
+            }
+        }
         Screen::Confirm(c) => match &c.pending {
             Pending::Restore { .. } => " y restore · Esc cancel ".to_string(),
             _ => " s save · d discard · Esc cancel ".to_string(),
@@ -1755,7 +2209,9 @@ pub fn run(config: Config) -> Result<()> {
         games.push(GameRow {
             id: g.id,
             title: g.kind.title().to_string(),
+            kind: g.kind,
             inspectable: g.kind.is_inspectable(),
+            save_dir: g.save_dir.clone(),
             files,
         });
     }
@@ -1767,6 +2223,7 @@ pub fn run(config: Config) -> Result<()> {
     }
     // Merge any user resource overrides; on a bad user file, keep the bundled defaults.
     app.resources = Resources::load().unwrap_or_else(|_| Resources::bundled());
+    app.library = config.library().ok();
     let mut terminal = ratatui::init();
     let result = run_loop(&mut terminal, app);
     ratatui::restore();
@@ -1794,7 +2251,9 @@ mod tests {
             .map(|i| GameRow {
                 id: format!("g{i}"),
                 title: format!("Game {i}"),
+                kind: GameKind::Ultima1,
                 inspectable: true,
+                save_dir: None,
                 files: Vec::new(),
             })
             .collect();
@@ -1856,7 +2315,9 @@ mod tests {
         let app = App::new(vec![GameRow {
             id: "u1".to_string(),
             title: "Ultima I".to_string(),
+            kind: GameKind::Ultima1,
             inspectable: true,
+            save_dir: Some(dir.path().to_path_buf()),
             files: vec![SaveFile {
                 name: "PLAYER1.U1".to_string(),
                 path,
@@ -1878,7 +2339,9 @@ mod tests {
         let app = App::new(vec![GameRow {
             id: "u3".to_string(),
             title: "Ultima III".to_string(),
+            kind: GameKind::Ultima3,
             inspectable: true,
+            save_dir: Some(dir.path().to_path_buf()),
             files: vec![SaveFile {
                 name: "PARTY.ULT".to_string(),
                 path,
@@ -1915,7 +2378,9 @@ mod tests {
         let app = App::new(vec![GameRow {
             id: "u3".to_string(),
             title: "Ultima III".to_string(),
+            kind: GameKind::Ultima3,
             inspectable: true,
+            save_dir: Some(dir.path().to_path_buf()),
             files,
         }]);
         (dir, app)
@@ -1953,7 +2418,9 @@ mod tests {
         let games = vec![GameRow {
             id: "ultima4".to_string(),
             title: "Ultima IV".to_string(),
+            kind: GameKind::Ultima4,
             inspectable: true,
+            save_dir: None,
             files: Vec::new(),
         }];
         let mut app = App::new(games);
@@ -1974,12 +2441,77 @@ mod tests {
         let games = vec![GameRow {
             id: "nonesuch".to_string(),
             title: "Nonesuch".to_string(),
+            kind: GameKind::Ultima1,
             inspectable: true,
+            save_dir: None,
             files: Vec::new(),
         }];
         let mut app = App::new(games);
         app.handle_key(KeyCode::Char('r'));
         assert!(matches!(app.stack.last(), Some(Screen::Inspect(_))));
+    }
+
+    #[test]
+    fn library_key_without_config_shows_message() {
+        let mut app = app_with(1); // no [library] configured
+        app.handle_key(KeyCode::Char('L'));
+        assert!(matches!(app.stack.last(), Some(Screen::Inspect(_))));
+    }
+
+    #[test]
+    fn library_add_then_delete_flow() {
+        use fringe_retro_core::games::ultima1;
+        let save_dir = tempfile::tempdir().unwrap();
+        let lib_dir = tempfile::tempdir().unwrap();
+        let path = save_dir.path().join("PLAYER1.U1");
+        let mut bytes = vec![0u8; ultima1::SAVE_LEN];
+        bytes[0..4].copy_from_slice(b"Enki");
+        std::fs::write(&path, &bytes).unwrap();
+
+        let mut app = App::new(vec![GameRow {
+            id: "ultima1".to_string(),
+            title: "Ultima I".to_string(),
+            kind: GameKind::Ultima1,
+            inspectable: true,
+            save_dir: Some(save_dir.path().to_path_buf()),
+            files: vec![SaveFile {
+                name: "PLAYER1.U1".to_string(),
+                path,
+                found: true,
+            }],
+        }]);
+        app.library = Some(Library::new(lib_dir.path()));
+
+        // Open the (empty) library browser.
+        app.handle_key(KeyCode::Char('L'));
+        match app.stack.last() {
+            Some(Screen::Library(ll)) => assert!(ll.entries.is_empty()),
+            _ => panic!("expected the library screen"),
+        }
+
+        // Add a snapshot: 'a', type a name, Enter.
+        app.handle_key(KeyCode::Char('a'));
+        for c in "My Save".chars() {
+            app.handle_key(KeyCode::Char(c));
+        }
+        app.handle_key(KeyCode::Enter);
+        match app.stack.last() {
+            Some(Screen::Library(ll)) => {
+                assert_eq!(ll.entries.len(), 1);
+                assert_eq!(ll.entries[0].name, "My Save");
+                assert_eq!(ll.entries[0].slug, "my-save");
+            }
+            _ => panic!("expected the library screen after add"),
+        }
+
+        // Delete it: 'd' opens a confirm, 'y' carries it out.
+        app.handle_key(KeyCode::Char('d'));
+        assert!(matches!(app.stack.last(), Some(Screen::Confirm(_))));
+        app.handle_key(KeyCode::Char('y'));
+        match app.stack.last() {
+            Some(Screen::Library(ll)) => assert!(ll.entries.is_empty()),
+            _ => panic!("expected the library screen after delete"),
+        }
     }
 
     #[test]

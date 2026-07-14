@@ -112,11 +112,28 @@ to open it in your operating system's default browser; the TUI keeps running und
 `Esc` returns to the games list. See [`resources`](#-resources-game) below for how to add or
 override links.
 
+### Library
+
+Press `L` on the **games list** to open that game's **Save Library** — your curated
+snapshots (see [`library`](#-library-add--list--view--restore--rename--duplicate--delete)
+below). A list of snapshots sits beside a decoded preview of the selected one. From here you
+can manage the whole collection:
+
+- `a` — **add** a snapshot of the game's current save (type a name, `Enter`).
+- `Enter` / `r` — **restore** the selected snapshot into the active game (confirm with `y`; a
+  safety backup is made first).
+- `R` — **rename**, `D` — **duplicate** (type a name, `Enter`).
+- `d` — **delete** the selected snapshot (confirm with `y`).
+- `PgUp` / `PgDn` scroll the preview; `Esc` returns to the games list.
+
+(If no `[library] path` is configured, `L` shows a short message explaining how to set one.)
+
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` (or `k` / `j`) | Move selection · scroll one line |
 | `Enter` (or `→`) | Open the selected game / character |
 | `r` | Open the selected game's web resources (games list) |
+| `L` | Open the selected game's Save Library (games list) |
 | `Enter` / `e` | Edit the selected field |
 | `s` | Save the session (backup + write) |
 | `b` | Open the backup browser (from the editor) |
@@ -126,16 +143,14 @@ override links.
 | `n` | Snapshot the current save (backup browser) |
 | `Enter` / `a` | Apply the selected template (template picker) |
 | `Enter` / `o` | Open the selected link in your browser (resources) |
-| `PgUp` / `PgDn` (or `Space`) | Scroll a page (messages / backup preview) |
+| `a` / `Enter`·`r` / `R` / `D` / `d` | Library: add / restore / rename / duplicate / delete |
+| `PgUp` / `PgDn` (or `Space`) | Scroll a page (messages / previews) |
 | `Home` / `End` | Jump to top / bottom (messages / backup preview) |
 | `Esc` (or `←` / `Backspace`) | Cancel edit · back one screen |
 | `q` | Quit |
 
 When a save/discard prompt is open: `s` saves and continues, `d` discards, `Esc` cancels.
-When a restore prompt is open: `y` restores, `Esc` cancels.
-
-The [Save Library](#-library-add--list--restore) is available from the CLI; a TUI screen for
-it is planned (see [ROADMAP.md](ROADMAP.md)).
+When a restore or delete prompt is open: `y` confirms, `Esc` cancels.
 
 ---
 
@@ -555,8 +570,8 @@ Ultima III (ultima3):
   pass `-y`/`--yes`.
 
 Snapshots are portable: each folder carries an `entry.toml` describing it, so you can move
-one to another machine or cloud folder and it stays valid. An in-app Library screen is
-planned.
+one to another machine or cloud folder and it stays valid. The same operations are available
+interactively — press `L` on a game in the [interactive UI](#library).
 
 ### ✅ `templates`
 

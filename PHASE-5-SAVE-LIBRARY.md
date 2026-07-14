@@ -180,9 +180,10 @@ addressed by two arguments — its game and slug (e.g. `... ultima3 my-thief-par
 
 The CLI command namespace is `library` (alias `lib`).
 
-**TUI (planned):** a Library screen (browse by game → snapshots), plus a "Save to Library"
-action from the editor / backup screens. Restore and delete go through the existing
-confirmation-modal pattern.
+**TUI (done):** press `L` on a game in the interactive UI to open its Library screen — a
+snapshot list beside a decoded preview. Add (`a`), restore (`Enter`/`r`), rename (`R`),
+duplicate (`D`), and delete (`d`); restore and delete go through the confirmation-modal
+pattern.
 
 ### 8.1 Restore & overwrite protection
 
@@ -258,7 +259,7 @@ max_age_days = 90
 3. ✅ **`library list` / `view`**.
 4. ✅ **`library restore`** (with safety backup + overwrite protection).
 5. ✅ **`library rename` / `duplicate` / `delete`**.
-6. **TUI Library screen** + "Save to Library" action.
+6. ✅ **TUI Library screen** (browse by game; add / restore / rename / duplicate / delete).
 7. **Auto-backup retention** (can be done at any point; independent).
 
 Multiple libraries and a per-OS default path are **out of scope** for this phase.
