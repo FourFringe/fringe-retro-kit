@@ -207,8 +207,9 @@ Library location examples:
 
 - [ ] Proper per-OS path handling (`directories` crate)
 - [ ] GOG detection · DOSBox detection · Steam detection (if feasible) · manual path override
-- [ ] Windows & Linux support
-- [ ] GitHub Actions CI: build/test matrix across macOS / Windows / Linux
+- [ ] Windows & Linux support (deferred — no machines to test on; CI builds/tests them, but
+      only macOS is published for now)
+- [x] GitHub Actions CI: fmt + clippy + test matrix across macOS / Ubuntu / Windows
 - [ ] Release automation (`dist`) with GitHub Releases + a Homebrew tap
 
 ---
