@@ -21,11 +21,14 @@ pub fn create(path: impl AsRef<Path>) -> Result<PathBuf> {
     let file_name = file_name(path)?;
     let stamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S%.3f");
 
-    // Guard against two backups within the same millisecond colliding.
+    // Guard against two backups within the same millisecond colliding. The collision suffix
+    // uses `~NN`, which sorts *after* the plain `.bak` base (`~` > `.`) and in numeric order,
+    // so a lexical sort of backup names stays chronological (see `list`).
     let mut backup_path = path.with_file_name(format!("{file_name}.{stamp}{BACKUP_SUFFIX}"));
     let mut counter = 1;
     while backup_path.exists() {
-        backup_path = path.with_file_name(format!("{file_name}.{stamp}.{counter}{BACKUP_SUFFIX}"));
+        backup_path =
+            path.with_file_name(format!("{file_name}.{stamp}~{counter:02}{BACKUP_SUFFIX}"));
         counter += 1;
     }
 
@@ -203,6 +206,45 @@ mod tests {
         std::fs::write(&path, b"second").unwrap();
         assert!(snapshot(&path).unwrap().is_some());
         assert_eq!(list(&path).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn same_millisecond_backups_sort_after_the_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("SAVE");
+        std::fs::write(&path, b"current").unwrap();
+        // Mimic `create`'s naming for a base plus two same-millisecond collisions.
+        let stamp = "2026-01-01T00-00-00.000";
+        std::fs::write(dir.path().join(format!("SAVE.{stamp}.bak")), b"first").unwrap();
+        std::fs::write(dir.path().join(format!("SAVE.{stamp}~01.bak")), b"second").unwrap();
+        std::fs::write(dir.path().join(format!("SAVE.{stamp}~02.bak")), b"third").unwrap();
+
+        // `list` is oldest-first, so the base must come before its collisions.
+        let contents: Vec<String> = list(&path)
+            .unwrap()
+            .iter()
+            .map(|b| String::from_utf8(std::fs::read(b).unwrap()).unwrap())
+            .collect();
+        assert_eq!(contents, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn rapid_backups_stay_in_creation_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("SAVE");
+        let mut created = Vec::new();
+        // Back-to-back backups may share a millisecond; the list must still read back in order.
+        for i in 0..6 {
+            std::fs::write(&path, format!("v{i}")).unwrap();
+            create(&path).unwrap();
+            created.push(format!("v{i}"));
+        }
+        let contents: Vec<String> = list(&path)
+            .unwrap()
+            .iter()
+            .map(|b| String::from_utf8(std::fs::read(b).unwrap()).unwrap())
+            .collect();
+        assert_eq!(contents, created);
     }
 
     /// Create `n` backups with deterministic, chronologically-ordered names.
