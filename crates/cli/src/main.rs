@@ -81,6 +81,9 @@ enum Command {
     Backups {
         /// Path to the save file.
         path: PathBuf,
+        /// First delete old backups per your `[backups]` retention policy.
+        #[arg(long)]
+        prune: bool,
     },
     /// Restore a chosen backup over the active save.
     Restore {
@@ -395,14 +398,20 @@ fn main() -> Result<()> {
                 println!("{field}: {old} -> {new}");
                 println!("backup: {}", backup_path.display());
             }
+            prune_backups(&path, &config);
         }
         Command::Backup { path } => {
             let path = config.resolve_save_path(&path)?;
             let backup_path = backup::create(&path)?;
             println!("{}", backup_path.display());
+            prune_backups(&path, &config);
         }
-        Command::Backups { path } => {
+        Command::Backups { path, prune } => {
             let path = config.resolve_save_path(&path)?;
+            if prune {
+                let deleted = backup::prune(&path, &config.retention())?;
+                println!("pruned {} old backup(s)", deleted.len());
+            }
             let backups = backup::list(&path)?;
             if backups.is_empty() {
                 println!("(no backups)");
@@ -431,6 +440,7 @@ fn main() -> Result<()> {
                     );
                 }
             }
+            prune_backups(&path, &config);
         }
         Command::Watch { path, interval } => {
             let path = config.resolve_save_path(&path)?;
@@ -537,6 +547,9 @@ fn run_library(config: &Config, action: LibraryAction) -> Result<()> {
                 for path in &outcome.backups {
                     println!("  backup {}", path.display());
                 }
+                for path in &outcome.restored {
+                    prune_backups(path, config);
+                }
             }
         }
         LibraryAction::View { game, slug } => {
@@ -580,6 +593,15 @@ fn run_library(config: &Config, action: LibraryAction) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Prune old backups of `path` per the configured retention policy, noting how many went.
+fn prune_backups(path: &Path, config: &Config) {
+    if let Ok(deleted) = backup::prune(path, &config.retention()) {
+        if !deleted.is_empty() {
+            println!("pruned {} old backup(s)", deleted.len());
+        }
+    }
 }
 
 /// Prompt on stdin for a yes/no confirmation (defaulting to no).

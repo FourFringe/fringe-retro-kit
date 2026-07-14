@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use fringe_retro_core::backup;
+use fringe_retro_core::backup::RetentionPolicy;
 use fringe_retro_core::games::GameKind;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -418,6 +419,8 @@ struct App {
     resources: Resources,
     /// The Save Library, if `[library] path` is configured.
     library: Option<Library>,
+    /// Automatic-backup retention policy.
+    retention: RetentionPolicy,
     session: Option<Session>,
     stack: Vec<Screen>,
     running: bool,
@@ -464,6 +467,7 @@ impl App {
             template_error: None,
             resources: Resources::bundled(),
             library: None,
+            retention: RetentionPolicy::default(),
             session: None,
             stack: vec![Screen::Games(list)],
             running: true,
@@ -616,6 +620,7 @@ impl App {
             return;
         };
         let outcome = backup::restore(&backup, &path);
+        self.prune_backups(&path);
         // Return to the editor beneath the backup browser.
         if matches!(self.stack.last(), Some(Screen::Backups(_))) {
             self.stack.pop();
@@ -654,6 +659,9 @@ impl App {
             ),
             Err(e) => (format!("Snapshot failed: {e}"), false),
         };
+        if changed {
+            self.prune_backups(&path);
+        }
         if let Some(Screen::Backups(bl)) = self.stack.last_mut() {
             if changed {
                 bl.entries = build_backup_entries(&path);
@@ -942,23 +950,30 @@ impl App {
             _ => return,
         };
         let Some(save_dir) = save_dir else { return };
-        let status = match self.library.as_ref() {
+        let (status, restored) = match self.library.as_ref() {
             Some(library) => match library
                 .get(kind, &slug)
                 .and_then(|snap| library.restore(&snap, &save_dir))
             {
-                Ok(outcome) if outcome.restored.is_empty() => {
-                    "Already matches the active save; nothing restored.".to_string()
-                }
-                Ok(outcome) => format!(
-                    "Restored ({} file(s); {} safety backup(s) made).",
-                    outcome.restored.len(),
-                    outcome.backups.len()
+                Ok(outcome) if outcome.restored.is_empty() => (
+                    "Already matches the active save; nothing restored.".to_string(),
+                    Vec::new(),
                 ),
-                Err(e) => format!("Restore failed: {e}"),
+                Ok(outcome) => (
+                    format!(
+                        "Restored ({} file(s); {} safety backup(s) made).",
+                        outcome.restored.len(),
+                        outcome.backups.len()
+                    ),
+                    outcome.restored,
+                ),
+                Err(e) => (format!("Restore failed: {e}"), Vec::new()),
             },
-            None => "No Save Library configured.".to_string(),
+            None => ("No Save Library configured.".to_string(), Vec::new()),
         };
+        for path in &restored {
+            self.prune_backups(path);
+        }
         // If the restored game is the one being edited, reload the session.
         if let Some(session) = self.session.as_ref() {
             if session.kind() == kind {
@@ -1278,6 +1293,11 @@ impl App {
     /// Save the current session (one backup + one write) from the editor.
     fn save_from_editor(&mut self) {
         let result = self.session.as_mut().map(|s| s.save());
+        if result.as_ref().is_some_and(|r| r.is_ok()) {
+            if let Some(path) = self.session.as_ref().map(|s| s.path().to_path_buf()) {
+                self.prune_backups(&path);
+            }
+        }
         if let Some(Screen::Edit(ed)) = self.stack.last_mut() {
             ed.status = Some(match result {
                 Some(Ok(backup)) => format!("Saved. Backup: {}", backup.display()),
@@ -1285,6 +1305,11 @@ impl App {
                 None => "Nothing to save.".to_string(),
             });
         }
+    }
+
+    /// Prune old automatic backups of `path` per the configured retention policy.
+    fn prune_backups(&self, path: &Path) {
+        let _ = backup::prune(path, &self.retention);
     }
 
     fn handle_key(&mut self, code: KeyCode) {
@@ -2224,6 +2249,7 @@ pub fn run(config: Config) -> Result<()> {
     // Merge any user resource overrides; on a bad user file, keep the bundled defaults.
     app.resources = Resources::load().unwrap_or_else(|_| Resources::bundled());
     app.library = config.library().ok();
+    app.retention = config.retention();
     let mut terminal = ratatui::init();
     let result = run_loop(&mut terminal, app);
     ratatui::restore();

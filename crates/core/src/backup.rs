@@ -8,6 +8,7 @@
 //! timestamp format sorts chronologically), so they are easy to find and browse.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use crate::{Error, Result};
 
@@ -86,6 +87,55 @@ pub fn snapshot(path: impl AsRef<Path>) -> Result<Option<PathBuf>> {
     Ok(Some(create(path)?))
 }
 
+/// A policy for pruning old automatic backups.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RetentionPolicy {
+    /// Keep at most this many of the most-recent backups (`None` = unlimited).
+    pub keep: Option<usize>,
+    /// Delete backups older than this many days (`None` = no age limit).
+    pub max_age_days: Option<u64>,
+}
+
+impl RetentionPolicy {
+    /// Whether this policy would never delete anything.
+    pub fn is_unlimited(&self) -> bool {
+        self.keep.is_none() && self.max_age_days.is_none()
+    }
+}
+
+/// Delete old backups of `path` according to `policy`. A backup is removed if it falls
+/// outside the `keep` most-recent window, or is older than `max_age_days`. Manually-kept
+/// files (e.g. Save Library snapshots) live elsewhere and are never touched. Returns the
+/// paths that were deleted.
+pub fn prune(path: impl AsRef<Path>, policy: &RetentionPolicy) -> Result<Vec<PathBuf>> {
+    if policy.is_unlimited() {
+        return Ok(Vec::new());
+    }
+    let path = path.as_ref();
+    let backups = list(path)?; // oldest first
+    let total = backups.len();
+    // The instant before which a backup is considered too old.
+    let age_cutoff = policy.max_age_days.and_then(|days| {
+        SystemTime::now().checked_sub(Duration::from_secs(days.saturating_mul(86_400)))
+    });
+
+    let mut deleted = Vec::new();
+    for (i, backup) in backups.iter().enumerate() {
+        // Beyond the count limit: the oldest `total - keep` entries.
+        let over_count = policy.keep.is_some_and(|k| i + k < total);
+        // Older than the age limit.
+        let too_old = age_cutoff.is_some_and(|cutoff| {
+            std::fs::metadata(backup)
+                .and_then(|m| m.modified())
+                .is_ok_and(|mtime| mtime < cutoff)
+        });
+        if (over_count || too_old) && std::fs::remove_file(backup).is_ok() {
+            deleted.push(backup.clone());
+        }
+    }
+    Ok(deleted)
+}
+
 fn file_name(path: &Path) -> Result<String> {
     Ok(path
         .file_name()
@@ -153,5 +203,72 @@ mod tests {
         std::fs::write(&path, b"second").unwrap();
         assert!(snapshot(&path).unwrap().is_some());
         assert_eq!(list(&path).unwrap().len(), 2);
+    }
+
+    /// Create `n` backups with deterministic, chronologically-ordered names.
+    fn seed_backups(dir: &Path, n: usize) -> PathBuf {
+        let path = dir.join("SAVE");
+        std::fs::write(&path, b"current").unwrap();
+        for i in 1..=n {
+            let name = format!("SAVE.2026-01-{i:02}T00-00-00.000.bak");
+            std::fs::write(dir.join(name), format!("v{i}")).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn prune_unlimited_deletes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_backups(dir.path(), 4);
+        let deleted = prune(&path, &RetentionPolicy::default()).unwrap();
+        assert!(deleted.is_empty());
+        assert_eq!(list(&path).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn prune_by_count_keeps_the_newest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = seed_backups(dir.path(), 5);
+        let policy = RetentionPolicy {
+            keep: Some(2),
+            max_age_days: None,
+        };
+        let deleted = prune(&path, &policy).unwrap();
+        assert_eq!(deleted.len(), 3);
+        let remaining = list(&path).unwrap();
+        assert_eq!(remaining.len(), 2);
+        // The two newest (…-04 and …-05) survive.
+        assert!(remaining.iter().all(|p| {
+            let n = p.file_name().unwrap().to_string_lossy().into_owned();
+            n.contains("2026-01-04") || n.contains("2026-01-05")
+        }));
+    }
+
+    #[test]
+    fn prune_by_age_removes_old_backups() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("SAVE");
+        std::fs::write(&path, b"current").unwrap();
+        let old = dir.path().join("SAVE.2020-01-01T00-00-00.000.bak");
+        std::fs::write(&old, b"old").unwrap();
+        let fresh = dir.path().join("SAVE.2026-06-01T00-00-00.000.bak");
+        std::fs::write(&fresh, b"fresh").unwrap();
+        // Backdate the "old" backup's modification time well past the limit.
+        let past = SystemTime::now() - Duration::from_secs(100 * 86_400);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(past)
+            .unwrap();
+
+        let policy = RetentionPolicy {
+            keep: None,
+            max_age_days: Some(90),
+        };
+        let deleted = prune(&path, &policy).unwrap();
+        assert_eq!(deleted.len(), 1);
+        assert!(!old.exists());
+        assert!(fresh.exists()); // freshly written, within 90 days
     }
 }

@@ -56,3 +56,12 @@ save_dir = "/Users/you/Library/Application Support/Wasteland/ENKI"
 # `library` (alias `lib`) command; see COMMANDS.md.
 [library]
 path = "~/Documents/Fringe Retro Kit"
+
+# Automatic-backup retention. Before every edit the tool writes a timestamped `.bak` beside
+# the save; these settings prune old ones after each save. A value of 0 (or an omitted key)
+# means "no limit". Library snapshots are never pruned. Run `fringe-retro backups <save>
+# --prune` to apply a new policy to an existing pile.
+[backups]
+keep = 20          # keep at most this many recent backups per save
+max_age_days = 90  # also delete backups older than this
+

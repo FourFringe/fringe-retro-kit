@@ -275,6 +275,27 @@ List existing backups for a save file, oldest first.
 fringe-retro backups "/…/PLAYER1.U1"
 ```
 
+Pass `--prune` to first delete old backups per your retention policy:
+
+```bash
+fringe-retro backups "/…/PLAYER1.U1" --prune
+```
+
+**Retention.** Backups pile up over time, so you can cap them with a `[backups]` table in
+your config:
+
+```toml
+[backups]
+keep = 20          # keep at most this many recent backups per save (0 = no limit)
+max_age_days = 90  # also delete backups older than this (0 = no limit)
+```
+
+With a policy set, old backups are pruned automatically after each `set`, `backup`, and
+`restore` (and after saving or snapshotting in the interactive UI). A backup is removed if it
+falls outside the newest `keep`, or is older than `max_age_days`. **Save Library snapshots
+are never pruned** — they're your curated collection. Use `backups --prune` to apply a new
+policy to an existing pile immediately.
+
 ### ✅ `restore <path> <backup>`
 
 Restore a chosen backup over the active save. As a safety net, the **current** save is
@@ -626,21 +647,21 @@ Backups are written **next to the save file**, in the same directory, named:
   so that a plain alphabetical sort is also chronological.
 - Backups are created automatically before every `set` and `restore`, and manually via
   `backup`. They are meant purely for recovery.
-- **Not yet implemented:** automatic pruning / retention limits, or a configurable backup
-  directory — backups currently accumulate beside the save until you delete them.
+- **Retention:** with a `[backups]` policy set (see [`backups`](#-backups-path)), old
+  backups are pruned automatically after each save; otherwise they accumulate beside the
+  save until you delete them. A configurable backup directory is not yet implemented.
 
-### 🔷 Save Library (planned)
+### ✅ Save Library
 
-Separate from automatic backups, the **Save Library** will be your *curated, named*
-collection of game moments ("Before Time Machine", "Endgame", …), intended for long-term
-preservation. Planned behavior:
+Separate from automatic backups, the **Save Library** is your *curated, named* collection of
+game moments ("Before Time Machine", "Endgame", …), intended for long-term preservation. See
+the [`library`](#-library-add--list--view--restore--rename--duplicate--delete) command and
+the interactive [Library](#library) screen. In brief:
 
-- A **configurable location**, defaulting to an OS-appropriate folder (e.g. a
-  `Fringe Retro Kit` folder under your Documents).
-- Explicitly **cloud-friendly** — you can point it at a synced folder (Dropbox, Google
-  Drive, OneDrive, iCloud Drive) and the tool treats it as ordinary storage.
-- Named snapshots with notes/metadata, browsable per game and character, and restorable
-  into the active save directory.
+- A **configurable location** (`[library] path`) — point it at a synced folder (Dropbox,
+  Google Drive, OneDrive, iCloud Drive) and the tool treats it as ordinary storage.
+- Named snapshots with notes/metadata, browsable per game, and restorable into the active
+  save directory. Each snapshot captures a game's whole save set as one portable folder.
 
 See [ROADMAP.md](ROADMAP.md) for the full plan.
 

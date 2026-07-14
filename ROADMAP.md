@@ -167,7 +167,7 @@ Detailed plan: **[PHASE-5-SAVE-LIBRARY.md](PHASE-5-SAVE-LIBRARY.md)**.
 
 - [x] Browse backups (TUI backup browser)
 - [x] Restore backups (CLI + TUI)
-- [ ] Configurable retention
+- [x] Configurable retention (`[backups] keep` / `max_age_days`; `backups --prune`)
 
 ### Save Library
 

@@ -209,7 +209,7 @@ cheap to add later:
 
 ---
 
-## 10. Automatic backup retention (separate, smaller piece)
+## 10. Automatic backup retention (separate, smaller piece) — ✅ done
 
 Independent of the Library. Auto-backups stay where they are (next to the active save) and
 gain a **configurable retention policy**:
@@ -220,9 +220,10 @@ keep         = 20     # keep at most N most-recent .bak files per save (0 = unli
 max_age_days = 90     # also delete .bak files older than this (0 = no age limit)
 ```
 
-Pruning runs after each `backup::create`. **Library snapshots are never auto-pruned** — they
-are curated by hand. This item is small and self-contained and is a good warm-up before (or
-alongside) the Library.
+Pruning runs automatically after each save/backup/restore (CLI and TUI); `backups --prune`
+applies a new policy on demand. A backup is removed if it falls outside the newest `keep` or
+is older than `max_age_days`. **Library snapshots are never auto-pruned** — they are curated
+by hand.
 
 ---
 
@@ -260,6 +261,6 @@ max_age_days = 90
 4. ✅ **`library restore`** (with safety backup + overwrite protection).
 5. ✅ **`library rename` / `duplicate` / `delete`**.
 6. ✅ **TUI Library screen** (browse by game; add / restore / rename / duplicate / delete).
-7. **Auto-backup retention** (can be done at any point; independent).
+7. ✅ **Auto-backup retention** (`[backups] keep` / `max_age_days`; auto-prune + `backups --prune`).
 
 Multiple libraries and a per-OS default path are **out of scope** for this phase.

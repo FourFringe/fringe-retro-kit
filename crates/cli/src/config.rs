@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use fringe_retro_core::backup::RetentionPolicy;
 use fringe_retro_core::games::GameKind;
 use serde::Deserialize;
 
@@ -30,6 +31,9 @@ pub struct Config {
     /// The Save Library location (Phase 5).
     #[serde(default)]
     library: LibrarySettings,
+    /// Automatic-backup retention policy (Phase 5).
+    #[serde(default)]
+    backups: BackupSettings,
 }
 
 /// The `[library]` table.
@@ -37,6 +41,15 @@ pub struct Config {
 struct LibrarySettings {
     /// Where snapshots are stored. `~` is expanded to the home directory.
     path: Option<PathBuf>,
+}
+
+/// The `[backups]` table. A value of `0` (or an absent key) means "no limit".
+#[derive(Debug, Default, Deserialize)]
+struct BackupSettings {
+    /// Keep at most this many of the most-recent backups per save.
+    keep: Option<usize>,
+    /// Delete backups older than this many days.
+    max_age_days: Option<u64>,
 }
 
 /// One game in the library manifest.
@@ -185,6 +198,14 @@ impl Config {
         })?;
         Ok(Library::new(expand_tilde(path)))
     }
+
+    /// The automatic-backup retention policy (a `0` limit means unlimited).
+    pub fn retention(&self) -> RetentionPolicy {
+        RetentionPolicy {
+            keep: self.backups.keep.filter(|&k| k > 0),
+            max_age_days: self.backups.max_age_days.filter(|&d| d > 0),
+        }
+    }
 }
 
 /// Expand a leading `~` to the user's home directory (`$HOME`); other paths are unchanged.
@@ -309,6 +330,21 @@ mod tests {
             expand_tilde(Path::new("/abs/path")),
             PathBuf::from("/abs/path")
         );
+    }
+
+    #[test]
+    fn retention_reads_backups_table_and_treats_zero_as_unlimited() {
+        let cfg = parse("[backups]\nkeep = 5\nmax_age_days = 30\n");
+        let r = cfg.retention();
+        assert_eq!(r.keep, Some(5));
+        assert_eq!(r.max_age_days, Some(30));
+
+        // A zero limit means "no limit".
+        let cfg = parse("[backups]\nkeep = 0\n");
+        assert!(cfg.retention().keep.is_none());
+
+        // No table at all: unlimited.
+        assert!(parse("").retention().is_unlimited());
     }
 
     #[test]
