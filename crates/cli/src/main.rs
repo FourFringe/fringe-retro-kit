@@ -5,6 +5,7 @@
 mod config;
 mod edit;
 mod inspect;
+mod library;
 mod resources;
 mod templates;
 mod tui;
@@ -107,6 +108,39 @@ enum Command {
         /// Open link number N (as shown in the list) in your default browser.
         #[arg(long, value_name = "N")]
         open: Option<usize>,
+    },
+    /// Manage the Save Library: curated, named snapshots of your saves.
+    #[command(visible_alias = "lib")]
+    Library {
+        #[command(subcommand)]
+        action: LibraryAction,
+    },
+}
+
+/// Subcommands of `library`.
+#[derive(Debug, Subcommand)]
+enum LibraryAction {
+    /// Archive a game's current save set into a new named snapshot.
+    Add {
+        /// Game id (from your manifest).
+        game: String,
+        /// A name for the snapshot (e.g. "Before the Abyss").
+        name: String,
+        /// Optional notes to store with the snapshot.
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// List snapshots, optionally for a single game.
+    List {
+        /// Game id to filter by (omit to list every game's snapshots).
+        game: Option<String>,
+    },
+    /// Restore a snapshot back into the game's active save directory.
+    Restore {
+        /// Game id (from your manifest).
+        game: String,
+        /// The snapshot slug (as shown by `library list`).
+        slug: String,
     },
 }
 
@@ -376,6 +410,9 @@ fn main() -> Result<()> {
         Command::Resources { game, open } => {
             run_resources(game.as_deref(), open)?;
         }
+        Command::Library { action } => {
+            run_library(&config, action)?;
+        }
     }
     Ok(())
 }
@@ -415,6 +452,95 @@ fn validate_template(t: &Template) -> std::result::Result<(), String> {
 fn roster_index(slot: usize) -> Result<usize> {
     anyhow::ensure!(slot >= 1, "slot must be >= 1");
     Ok(slot - 1)
+}
+
+/// Manage the Save Library: archive, list, and restore snapshots.
+fn run_library(config: &Config, action: LibraryAction) -> Result<()> {
+    let library = config.library()?;
+    match action {
+        LibraryAction::Add { game, name, notes } => {
+            let resolved = config.resolve_game(&game)?;
+            let save_dir = resolved
+                .save_dir
+                .ok_or_else(|| anyhow::anyhow!("game '{game}' has no `save_dir` set"))?;
+            let snap = library.add(resolved.kind, &save_dir, &name, notes.as_deref())?;
+            println!("Saved snapshot '{}' → {}", snap.name, snap.dir.display());
+            if snap.slug != library::slugify(&name) {
+                println!(
+                    "note: a snapshot with that name already existed; used slug '{}'",
+                    snap.slug
+                );
+            }
+            println!("  files: {}", snap.files.join(", "));
+        }
+        LibraryAction::List { game } => {
+            let filter = match &game {
+                Some(g) => Some(config.game_kind(g)?),
+                None => None,
+            };
+            let snaps = library.list(filter)?;
+            print_snapshots(&snaps);
+        }
+        LibraryAction::Restore { game, slug } => {
+            let resolved = config.resolve_game(&game)?;
+            let save_dir = resolved
+                .save_dir
+                .ok_or_else(|| anyhow::anyhow!("game '{game}' has no `save_dir` set"))?;
+            let snap = library.get(resolved.kind, &slug)?;
+            let outcome = library.restore(&snap, &save_dir)?;
+            if outcome.restored.is_empty() {
+                println!(
+                    "'{}' already matches the active save — nothing to restore.",
+                    snap.name
+                );
+            } else {
+                println!("Restored '{}' into {}", snap.name, save_dir.display());
+                for path in &outcome.restored {
+                    println!("  wrote {}", file_label(path));
+                }
+                for path in &outcome.backups {
+                    println!("  backup {}", path.display());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Print snapshots grouped by game, with their slug, last-updated time, and notes.
+fn print_snapshots(snaps: &[library::Snapshot]) {
+    if snaps.is_empty() {
+        println!("(no snapshots)");
+        return;
+    }
+    let mut current: Option<&str> = None;
+    for s in snaps {
+        if current != Some(s.kind.id()) {
+            if current.is_some() {
+                println!();
+            }
+            println!("{} ({}):", s.kind.title(), s.kind.id());
+            current = Some(s.kind.id());
+        }
+        println!("  {:<24} [{}]", s.name, s.slug);
+        if !s.created.is_empty() {
+            println!("      created: {}", s.created.replace('T', " "));
+        }
+        if let Some(updated) = s.last_updated {
+            let when = chrono::DateTime::<chrono::Local>::from(updated).format("%Y-%m-%d %H:%M");
+            println!("      updated: {when}");
+        }
+        if let Some(notes) = &s.notes {
+            println!("      {notes}");
+        }
+    }
+}
+
+/// The file name of a path for terse output, falling back to the full path.
+fn file_label(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 /// List curated web resources, or open a chosen one in the browser.

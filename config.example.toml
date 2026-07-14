@@ -49,3 +49,10 @@ save_dir = "/Applications/Ultima V™.app/Contents/Resources/game"
 platform = "steam"
 enabled = false
 save_dir = "/Users/you/Library/Application Support/Wasteland/ENKI"
+
+# The Save Library: your curated collection of named save snapshots (kept separate from the
+# automatic .bak backups). Set a folder to store them in — local or cloud-synced (Dropbox,
+# iCloud Drive, etc.). `~` expands to your home directory. Manage snapshots with the
+# `library` (alias `lib`) command; see COMMANDS.md.
+[library]
+path = "~/Documents/Fringe Retro Kit"

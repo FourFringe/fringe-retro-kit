@@ -11,9 +11,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use fringe_retro_core::games::GameKind;
 use serde::Deserialize;
+
+use crate::library::Library;
 
 const CONFIG_ENV: &str = "FRINGE_RETRO_CONFIG";
 const DEFAULT_CONFIG_FILE: &str = "config.toml";
@@ -25,6 +27,16 @@ pub struct Config {
     /// Games keyed by user-chosen identifier (the `[games.<id>]` table name).
     #[serde(default)]
     games: BTreeMap<String, GameEntry>,
+    /// The Save Library location (Phase 5).
+    #[serde(default)]
+    library: LibrarySettings,
+}
+
+/// The `[library]` table.
+#[derive(Debug, Default, Deserialize)]
+struct LibrarySettings {
+    /// Where snapshots are stored. `~` is expanded to the home directory.
+    path: Option<PathBuf>,
 }
 
 /// One game in the library manifest.
@@ -141,6 +153,48 @@ impl Config {
         }
         Ok(games)
     }
+
+    /// Resolve a manifest identifier to a single enabled game (kind + save location).
+    pub fn resolve_game(&self, id: &str) -> Result<ResolvedGame> {
+        let (key, entry) = self
+            .enabled_entry(id)
+            .ok_or_else(|| anyhow!("no enabled game '{id}' in {DEFAULT_CONFIG_FILE}"))?;
+        let kind = entry.resolve_kind(key)?;
+        Ok(ResolvedGame {
+            id: key.clone(),
+            kind,
+            save_dir: entry.save_dir.clone(),
+            platform: entry.platform.clone(),
+            install_dir: entry.install_dir.clone(),
+        })
+    }
+
+    /// Resolve a token to a built-in game kind: a manifest identifier, or a built-in game id
+    /// (e.g. `ultima3`) directly. Used where only the game family matters (e.g. filtering).
+    pub fn game_kind(&self, token: &str) -> Result<GameKind> {
+        if let Some((key, entry)) = self.enabled_entry(token) {
+            return entry.resolve_kind(key);
+        }
+        GameKind::from_id(token).ok_or_else(|| anyhow!("unknown game '{token}'"))
+    }
+
+    /// The configured Save Library, or an error if `[library] path` is unset.
+    pub fn library(&self) -> Result<Library> {
+        let path = self.library.path.as_ref().ok_or_else(|| {
+            anyhow!("no Save Library configured; set `[library] path` in {DEFAULT_CONFIG_FILE}")
+        })?;
+        Ok(Library::new(expand_tilde(path)))
+    }
+}
+
+/// Expand a leading `~` to the user's home directory (`$HOME`); other paths are unchanged.
+fn expand_tilde(path: &Path) -> PathBuf {
+    if let Ok(rest) = path.strip_prefix("~") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    path.to_path_buf()
 }
 
 #[cfg(test)]
@@ -223,6 +277,38 @@ mod tests {
         let cfg = parse("[games.custom]\ngame = \"nope\"\nsave_dir = \"/x\"\n");
         assert!(cfg.resolve_save_path(Path::new("custom")).is_err());
         assert!(cfg.games().is_err());
+    }
+
+    #[test]
+    fn library_requires_a_configured_path() {
+        let cfg = parse("[games.ultima1]\nsave_dir = \"/a\"\n");
+        assert!(cfg.library().is_err()); // no [library] path set
+
+        let cfg = parse("[library]\npath = \"/saves/lib\"\n");
+        assert!(cfg.library().is_ok());
+    }
+
+    #[test]
+    fn game_kind_resolves_manifest_id_or_builtin_id() {
+        // A custom manifest id maps through its `game` field...
+        let cfg = parse("[games.u3-gog]\ngame = \"ultima3\"\nsave_dir = \"/g\"\n");
+        assert_eq!(cfg.game_kind("u3-gog").unwrap(), GameKind::Ultima3);
+        // ...and a built-in id resolves even without a manifest entry.
+        assert_eq!(cfg.game_kind("ultima4").unwrap(), GameKind::Ultima4);
+        assert!(cfg.game_kind("nope").is_err());
+    }
+
+    #[test]
+    fn expand_tilde_uses_home() {
+        std::env::set_var("HOME", "/home/tester");
+        assert_eq!(
+            expand_tilde(Path::new("~/Retro Saves")),
+            PathBuf::from("/home/tester/Retro Saves")
+        );
+        assert_eq!(
+            expand_tilde(Path::new("/abs/path")),
+            PathBuf::from("/abs/path")
+        );
     }
 
     #[test]

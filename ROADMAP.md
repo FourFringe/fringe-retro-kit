@@ -165,8 +165,8 @@ Detailed plan: **[PHASE-5-SAVE-LIBRARY.md](PHASE-5-SAVE-LIBRARY.md)**.
 
 ### Automatic backups
 
-- [ ] Browse backups
-- [ ] Restore backups
+- [x] Browse backups (TUI backup browser)
+- [x] Restore backups (CLI + TUI)
 - [ ] Configurable retention
 
 ### Save Library
@@ -176,11 +176,11 @@ to become the central hub for managing a player's game history. The application 
 copying files between the library and the active save directory automatically; users
 should never manipulate save files in a file manager.
 
-- [ ] Configurable location — local **or** cloud-synced (Dropbox, Google Drive, OneDrive,
+- [x] Configurable location — local **or** cloud-synced (Dropbox, Google Drive, OneDrive,
       iCloud Drive); treated as ordinary storage, no assumptions about sync software
-- [ ] Named snapshots with notes and metadata (created date, last played)
-- [ ] Browse archived saves by game and character
-- [ ] Restore into the active game, with overwrite protection
+- [x] Named snapshots with notes and metadata (created date, "last updated" from file times)
+- [x] Browse archived saves by game (CLI `library list`)
+- [x] Restore into the active game, with overwrite protection (CLI `library restore`)
 - [ ] Duplicate / rename / delete
 
 Example workflow and configurable locations:

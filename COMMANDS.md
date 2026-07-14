@@ -134,7 +134,8 @@ override links.
 When a save/discard prompt is open: `s` saves and continues, `d` discards, `Esc` cancels.
 When a restore prompt is open: `y` restores, `Esc` cancels.
 
-The Save Library is planned (see [ROADMAP.md](ROADMAP.md)).
+The [Save Library](#-library-add--list--restore) is available from the CLI; a TUI screen for
+it is planned (see [ROADMAP.md](ROADMAP.md)).
 
 ---
 
@@ -507,6 +508,43 @@ A curated default set ships with the tool (`resources.toml`). To add or override
 directory — your entries are merged in (links whose URL is already present are skipped). Each
 entry has a `title`, `url`, and free-form `category` (e.g. `wiki`, `walkthrough`, `map`,
 `format`, `play`). In the interactive UI, press `r` on a game to browse and open these links.
+
+### ✅ `library` (`add` · `list` · `restore`)
+
+The **Save Library** is your curated, permanent collection of named **snapshots** — kept
+separate from the automatic `.bak` backups. Each snapshot captures a game's **whole** save
+set (e.g. Ultima III's `ROSTER.ULT` **and** `PARTY.ULT` together) as one atomic unit, stored
+in a self-describing folder under your library path. Set the location with `[library] path`
+in your config (see [Configuration](#configuration)); `~` expands to your home directory. Use
+`library` or its alias `lib`.
+
+```bash
+fringe-retro library add ultima3 "Before the Dungeon" --notes "roster + party"
+fringe-retro lib list                    # every game's snapshots
+fringe-retro lib list ultima3            # one game's snapshots
+fringe-retro lib restore ultima3 before-the-dungeon
+```
+
+```
+Ultima III (ultima3):
+  Before the Dungeon       [before-the-dungeon]
+      created: 2026-07-14 09:39:11
+      updated: 2026-07-14 09:39
+      roster + party
+```
+
+- **`add <game> <name> [--notes <text>]`** copies the game's current save set into a new
+  snapshot. The folder is named with a slug of the name; if that slug already exists, a
+  numeric suffix is added (you're told the final slug).
+- **`list [<game>]`** shows snapshots grouped by game, each with its slug, when it was last
+  updated (from the save files' timestamps), and any notes.
+- **`restore <game> <slug>`** copies a snapshot's files back into the game's active save
+  directory. Any pre-existing active file is safety-backed-up first; files already identical
+  are skipped (a full match is a no-op).
+
+Snapshots are portable: each folder carries an `entry.toml` describing it, so you can move
+one to another machine or cloud folder and it stays valid. Rename / duplicate / delete and an
+in-app Library screen are planned.
 
 ### ✅ `templates`
 

@@ -165,21 +165,24 @@ folder's name) so a snapshot remains self-describing if moved.
 ## 8. Operations (CLI + TUI)
 
 CLI namespace: **`library`** (alias **`lib`**). An entry is referenced as `<game>/<slug>`
-(matching its on-disk path), e.g. `ultima3/my-thief-party`.
+(matching its on-disk path), e.g. `ultima3/my-thief-party`. On the command line a snapshot is
+addressed by two arguments — its game and slug (e.g. `... ultima3 my-thief-party`).
 
-| Command | Behavior |
-| --- | --- |
-| `library add <game> [--name <name>] [--notes <notes>]` | Copy the active save set of `<game>` into a new snapshot folder. Preserves mtimes. Warns + suffixes on slug collision. |
-| `library list [<game>]` | Scan the library; list snapshots grouped by game with name, "Last Updated", and notes. |
-| `library view <game>/<slug>` | `inspect` the snapshot's files **without** restoring. |
-| `library restore <game>/<slug>` | Copy the snapshot's files back into the game's `save_dir`, with overwrite protection (see §8.1). Confirm in the TUI. |
-| `library rename <game>/<slug> <new-name>` | Update `entry.toml` name and rename the folder to the new slug. |
-| `library duplicate <game>/<slug> [--name <name>]` | Copy a snapshot to a new one. |
-| `library delete <game>/<slug>` | Delete the snapshot folder (confirm first). |
+| Command | Status | Behavior |
+| --- | --- | --- |
+| `library add <game> <name> [--notes <notes>]` | ✅ done | Copy the active save set of `<game>` into a new snapshot folder. Preserves mtimes. Warns + suffixes on slug collision. |
+| `library list [<game>]` | ✅ done | Scan the library; list snapshots grouped by game with name, "Last Updated", and notes. |
+| `library restore <game> <slug>` | ✅ done | Copy the snapshot's files back into the game's `save_dir`, with overwrite protection (see §8.1). |
+| `library view <game> <slug>` | planned | `inspect` the snapshot's files **without** restoring. |
+| `library rename <game> <slug> <new-name>` | planned | Update `entry.toml` name and rename the folder to the new slug. |
+| `library duplicate <game> <slug> [--name <name>]` | planned | Copy a snapshot to a new one. |
+| `library delete <game> <slug>` | planned | Delete the snapshot folder (confirm first). |
 
-**TUI:** a Library screen (browse by game → snapshots), plus a "Save to Library" action from
-the editor / backup screens. Restore and delete go through the existing confirmation-modal
-pattern.
+The CLI command namespace is `library` (alias `lib`).
+
+**TUI (planned):** a Library screen (browse by game → snapshots), plus a "Save to Library"
+action from the editor / backup screens. Restore and delete go through the existing
+confirmation-modal pattern.
 
 ### 8.1 Restore & overwrite protection
 
@@ -250,10 +253,10 @@ max_age_days = 90
 
 ## 13. Implementation order (proposed)
 
-1. **`[library] path` config + library scan** (list snapshots by reading folders/`entry.toml`).
-2. **`library add`** (archive the active set; slug + collision handling; preserve mtimes).
-3. **`library list` / `view`**.
-4. **`library restore`** (with safety backup + overwrite protection).
+1. ✅ **`[library] path` config + library scan** (list snapshots by reading folders/`entry.toml`).
+2. ✅ **`library add`** (archive the active set; slug + collision handling; preserve mtimes).
+3. **`library list`** ✅ / **`view`** (list done; view planned).
+4. ✅ **`library restore`** (with safety backup + overwrite protection).
 5. **`library rename` / `duplicate` / `delete`**.
 6. **TUI Library screen** + "Save to Library" action.
 7. **Auto-backup retention** (can be done at any point; independent).
