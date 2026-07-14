@@ -161,6 +161,8 @@ Backups                           Transport    < Aircar >
 
 ## Phase 5 — Save Management
 
+Detailed plan: **[PHASE-5-SAVE-LIBRARY.md](PHASE-5-SAVE-LIBRARY.md)**.
+
 ### Automatic backups
 
 - [ ] Browse backups
