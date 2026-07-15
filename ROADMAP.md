@@ -1,39 +1,44 @@
 # Fringe Retro Kit — Roadmap
 
 > What we haven't built or decided yet. Committed decisions live in
-> [ARCHITECTURE.md](ARCHITECTURE.md); the current concrete target is
-> [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md).
+> [ARCHITECTURE.md](ARCHITECTURE.md); what the tool can do today is in
+> [COMMANDS.md](COMMANDS.md).
 
 Conservative by design: solve one problem well before expanding.
-
-> **Sequencing:** the first milestone **hardcodes** Ultima I in a CLI tool. The generic
-> engine, the TUI, and CI are deliberately deferred; early development is CLI-only and
-> local-only (macOS).
 
 ---
 
 ## Current status & near-term plan
 
-Phases 1–4 are effectively complete: all four Ultimas (I–IV) plus Ultima V are fully
-readable and editable via both the CLI and the interactive TUI — a section-grouped editor
-with an enum picker, automatic backups + on-demand snapshots, character templates (with
-in-app capture), and a per-game save-file chooser.
+Phases 1–6 are effectively complete. **Seven games** — Ultima I–VI and Wasteland — are
+readable and editable through both the CLI and the interactive TUI: a section-grouped
+editor with an enum picker, automatic backups + on-demand snapshots, a curated Save
+Library, character templates (with in-app capture), and a per-game save-file chooser.
+Games are auto-detected (GOG + Steam on macOS), CI runs on macOS/Ubuntu/Windows, and
+tagged releases publish macOS binaries.
 
-Agreed next steps, in order:
+Most recently: Ultima VI (party stats in the uncompressed `OBJLIST`), Wasteland character
+sheets + skills (byte-faithful MSQ writes), GOG/Steam detection with `detect --all`, and
+per-game save-directory resolution from a natural top-level `save_dir`.
 
-1. **Ultima I multi-slot** (quick win) ✅ — surface `PLAYER1.U1`…`PLAYER4.U1` through the
-   existing file chooser by extending `GameKind::save_files`.
-2. **Ultima IV** (Phase 7) ✅ — same family as I–III and documented by the `xu4`
-   reimplementation; `PARTY.SAV` (players + party/virtue state) is readable and editable,
-   validated against a real 8-companion save.
-3. **Ultima V** (Phase 7) ✅ — `SAVED.GAM` (4192-byte RAM snapshot): sixteen 32-byte
-   character records plus party/game state (provisions, inventory, reagents, date, karma,
-   location). Plain little-endian binary; readable and editable, verified against a real
-   save.
-4. Then pick among **Phase 5** (Save Library), **Wasteland** records + the codec/Transform
-   pipeline, or **Phase 6** (platform detection + CI). **Ultima VI** turned out to be
-   tractable after all — its character stats are plain arrays in the uncompressed `OBJLIST`
-   file (the LZW/object-graph complexity is only for map objects, which we don't edit).
+**Next up: save diff / comparison** (see below). After that, candidates are deepening
+existing games (Wasteland items, Ultima VI inventory/spells) or distribution polish
+(`cargo-dist` installers, a Homebrew tap).
+
+---
+
+## Save diff / comparison (next)
+
+Compare two saves — or a save against one of its automatic backups or a Save Library
+snapshot — and show what changed in **game terms** (fields, not raw bytes), e.g.
+`Avatar strength 15 → 30`, `Party gold 100 → 9999`.
+
+- Reuse the existing field-schema `inspect` model: format both saves into
+  `(section, label, value)` rows per character/entity and diff by key. Any supported game
+  gets this for free.
+- CLI first: `fringe-retro diff <a> <b>`, plus a convenience form to diff a game against one
+  of its backups/snapshots. Fall back to a byte-level range diff for files we can't parse.
+- Later: surface it in the TUI (e.g. a preview when restoring a backup or Library snapshot).
 
 ---
 
@@ -58,16 +63,16 @@ Detailed plan: **[PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md)**.
 
 ## Phase 2 — Game Library Manifest & Identifiers
 
-The next concrete work item, and independent of parsing. Lets users describe **which games
-they own, on which platform, and where** — then refer to games by short identifiers instead
-of raw file paths. Also simplifies our own testing.
+**Status: complete.** Users describe **which games they own, on which platform, and where**,
+then refer to games by short identifiers instead of raw file paths.
 
-- [ ] App-level config (TOML) listing enabled games, each with: identifier (e.g. `ultima1`),
+- [x] App-level config (TOML) listing enabled games, each with: identifier (e.g. `ultima1`),
       platform (GOG / Steam / DOSBox / manual), install path, and save location
-- [ ] Resolve `fringe-retro inspect ultima1` (identifier → game + save path) instead of a path
-- [ ] Enable/disable owned games (don't surface Wasteland options if you don't own it)
-- [ ] Optional Save Library location (local or cloud-synced) — see Phase 5
-- [ ] Generalizes today's single-game `config.toml` (`save_dir`) into a multi-game manifest
+- [x] Resolve `fringe-retro inspect ultima1` (identifier → game + save path) instead of a path
+- [x] Enable/disable owned games (don't surface Wasteland options if you don't own it)
+- [x] Optional Save Library location (local or cloud-synced) — see Phase 5
+- [x] Generalizes a single-game `config.toml` (`save_dir`) into a multi-game manifest, with
+      per-game save-directory resolution (e.g. Ultima VI's `SAVEGAME`, Wasteland's slot)
 
 This is deliberately **game-agnostic**: it manages a player's library and never touches
 save-file parsing. Automatic platform *detection* (auto-filling these paths) is deferred to
@@ -267,7 +272,7 @@ Grouped by codec complexity (which parsing engine each needs):
 
 - Search, tags, favorites
 - Screenshots, play history
-- Save diff / comparison, duplicate detection
+- Duplicate detection
 - JSON import / export
 - Checksum verification
 - Steam Cloud awareness

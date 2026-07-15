@@ -2,7 +2,7 @@
 
 > The decisions we've committed to and the shape of the system as we've settled it.
 > Anything still open or unbuilt lives in [ROADMAP.md](ROADMAP.md).
-> The current concrete work item is [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md).
+> What the tool can do today is in [COMMANDS.md](COMMANDS.md).
 
 ---
 
@@ -52,14 +52,15 @@ Two crates (a *crate* is Rust's unit of compilation — a library or binary pack
 Rationale: precise unit testing of the risky logic, a permanent headless CLI, and future
 reuse of the same core by a TUI (or GUI).
 
-### Interface — CLI first, TUI later
+### Interface — CLI first, then TUI
 
-- The **headless CLI** (`inspect` / `get` / `dump` / `set` / `backup` / `restore`) is a
-  **permanent** feature, not a throwaway.
-- The **TUI** (Ratatui + Crossterm) will become the primary interface once the core is
-  solid, built using **The Elm Architecture** (Model / Message / `update` / `view`).
-- This revises the original intent of launching straight into a TUI; we start CLI-only to
-  keep the core testable and the first milestone small.
+- The **headless CLI** (`inspect` / `get` / `dump` / `set` / `backup` / `restore`, and more)
+  is a **permanent** feature, not a throwaway.
+- The **TUI** (Ratatui + Crossterm) is now built — a section-grouped field editor with an
+  enum picker, a backup browser, and a Save Library screen — and shares the exact same
+  `core` as the CLI.
+- We started CLI-only to keep the core testable and the first milestone small; the TUI
+  followed once the core was solid.
 
 ### Dependencies — MIT-compatible only
 
@@ -67,16 +68,21 @@ Every dependency is MIT or dual **MIT OR Apache-2.0** (usable under MIT):
 
 | Crate | Purpose |
 | --- | --- |
-| `binrw` | Declarative binary read + write (offsets, little-endian ints, arrays) |
+| `ratatui` (bundles `crossterm`) | Terminal UI |
 | `clap` | Command-line argument parsing |
+| `serde` + `toml` | Reading the `config.toml` game manifest |
 | `thiserror` | Typed error enums in `core` |
 | `anyhow` | Error propagation/reporting in the `cli` binary |
-| `tracing` (+ `tracing-subscriber`) | Structured logging — to a **file**, never stdout |
 | `tempfile` | Safe temp files for atomic writes |
 | `chrono` | Timestamps for backup filenames |
+| `open` | Opening web resources in the OS default browser |
 
-Deferred (noted so we don't reinvent them): `ratatui` + `crossterm` (TUI),
-`directories` (per-OS paths), `serde` + a maintained YAML crate (user schemas).
+Binary parsing was originally slated for `binrw`, but the fixed-offset formats turned out to
+need so little that we hand-wrote a small field-schema engine (`crates/core/src/schema.rs`)
+instead — no extra dependency.
+
+Deferred (noted so we don't reinvent them): `directories` (per-OS paths) and a maintained
+TOML/YAML crate for user-authored schema files.
 
 ### Save-editing safety model
 
@@ -127,10 +133,9 @@ abstraction across the Ultimas first, then decide.
 ### Game library manifest — a separate concern
 
 Managing *which* games a user owns (identifiers, platform, install path, save location,
-enable/disable) is game-agnostic and independent of parsing. It generalizes today's
-single-game `config.toml` and lets users run `fringe-retro inspect ultima1` instead of
-passing raw paths. It is the next concrete work item and does not depend on the schema
-engine (see [ROADMAP.md](ROADMAP.md)).
+enable/disable) is game-agnostic and independent of parsing. It is implemented as the
+multi-game `config.toml` manifest, letting users run `fringe-retro inspect ultima1` instead
+of passing raw paths.
 
 ### License — MIT
 
@@ -174,10 +179,12 @@ The field-schema engine understands generic concepts — integers, enums, string
 bitfields, structures — and avoids game-specific knowledge; the codec pipeline handles the
 container/crypto concerns that data can't express.
 
-**Current state:** four games are hardcoded in `crates/core` (Ultima I/II/III fully, plus
-Wasteland's MSQ decryption), which is what revealed the codec-vs-schema seam above. The
-layered engine is the destination, not where we are yet — the abstraction will be extracted
-once the library manifest lands and the Ultimas are migrated onto a shared field-schema.
+**Current state:** seven games are supported in `crates/core` — Ultima I–VI and Wasteland —
+all editable via both the CLI and the TUI. The field-schema engine
+(`crates/core/src/schema.rs`) has been extracted and the Ultimas run on it; Wasteland adds
+an MSQ codec (decrypt + re-encrypt with the game's own checksum), and Ultima VI reads party
+stats from the uncompressed `OBJLIST`. The full `Transform`-pipeline codec layer and
+user-authored schema files remain the destination, not yet where we are.
 
 ---
 
@@ -185,8 +192,10 @@ once the library manifest lands and the Ultimas are migrated onto a shared field
 
 Recorded so we don't re-litigate settled choices.
 
-**Binary parsing — chose `binrw`.** It does symmetric declarative read *and* write
-(offsets, endianness, arrays), which fits an editor that must round-trip files. Also
+**Binary parsing — originally chose `binrw`, ultimately hand-rolled.** `binrw` does symmetric
+declarative read *and* write (offsets, endianness, arrays), which fits an editor that must
+round-trip files — but the fixed-offset formats needed so little that we wrote a small
+field-schema engine (`crates/core/src/schema.rs`) instead, with no extra dependency. Also
 considered: `deku` (bit-level — keep in mind if a future game packs flags into individual
 bits), `nom` (parser combinators — more manual than we need), and **Kaitai Struct** (a
 declarative `.ksy` binary-description language with a Rust runtime and a community format

@@ -19,8 +19,11 @@ demands it (e.g. Wasteland's encryption).
 ## Features
 
 - Native Rust application; single binary
-- Command-line interface first, with a terminal UI (Ratatui) planned
-- Safe editing with automatic backups (unknown bytes preserved)
+- A command-line interface **and** an interactive terminal UI (Ratatui)
+- Automatic game discovery (GOG + Steam on macOS) plus a simple game library manifest
+- Inspect and edit character sheets field-by-field; the TUI adds a section-grouped editor
+- Safe editing with automatic backups (unknown bytes preserved; writes are byte-faithful)
+- A curated Save Library alongside automatic backup retention
 - Cross-platform aim: macOS first, Windows and Linux later
 - Data-driven game definitions planned (reusable parsers + per-game schema data; simple formats become user-authorable)
 - Community-friendly, MIT-licensed architecture
@@ -36,19 +39,19 @@ Implemented:
 - Ultima III
 - Ultima IV
 - Ultima V
+- Ultima VI
+- Wasteland
 
 In progress:
 
-- Wasteland (save decryption done; character records being mapped)
 
 Next up:
 
-- Ultima VI
+- Magic Carpet / Magic Carpet 2
+- Bard's Tale Trilogy (remaster)
 
 Candidates (owned or of interest; may or may not be reached):
 
-- Magic Carpet / Magic Carpet 2
-- Bard's Tale Trilogy (remaster)
 - SSI Gold Box games
 - Might & Magic 3–5 (World of Xeen)
 - Dungeon Master
