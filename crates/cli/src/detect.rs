@@ -290,13 +290,9 @@ struct UnsupportedSig {
 }
 
 /// Games we recognize but can't edit yet — surfaced by `detect --all` so you can see what's
-/// installed and request support. (Feel free to grow this list.)
+/// installed and request support. (Feel free to grow this list. Don't add games that already
+/// have a `GameKind`; those are reported in the supported section.)
 const UNSUPPORTED: &[UnsupportedSig] = &[
-    UnsupportedSig {
-        title: "Ultima VI",
-        gog_names: &["Ultima VI"],
-        steam_app_id: None,
-    },
     UnsupportedSig {
         title: "The Bard's Tale Trilogy",
         gog_names: &["The Bard's Tale Trilogy", "Bard's Tale Trilogy"],
