@@ -30,6 +30,37 @@ demands it (e.g. Wasteland's encryption).
 
 ---
 
+## Installation
+
+macOS binaries (Apple Silicon and Intel) are published for every release.
+
+**Homebrew:**
+
+```sh
+brew install FourFringe/tap/fringe-retro
+```
+
+**Install script** (downloads the latest release binary, verifies its checksum, and installs
+to `~/.local/bin`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FourFringe/fringe-retro-kit/main/packaging/install.sh | sh
+```
+
+Options can be passed after `-s --`, e.g. a specific version or install directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FourFringe/fringe-retro-kit/main/packaging/install.sh | sh -s -- --version v0.2.0 --bin-dir ~/bin
+```
+
+**From source** (any platform with a Rust toolchain):
+
+```sh
+cargo install --path crates/cli
+```
+
+---
+
 ## Planned Game Support
 
 Implemented:

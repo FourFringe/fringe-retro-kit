@@ -22,8 +22,8 @@ sheets + skills (byte-faithful MSQ writes), GOG/Steam detection with `detect --a
 per-game save-directory resolution from a natural top-level `save_dir`.
 
 **Next up:** deepening existing games (Wasteland items, Ultima VI inventory/spells) or the
-remaining distribution polish (a `curl | sh` installer, Windows/Linux binaries). The Homebrew
-tap and save diff / comparison are done (see below).
+remaining distribution polish (Windows/Linux binaries). The Homebrew tap, `curl | sh`
+installer, and save diff / comparison are done (see below).
 
 ---
 
@@ -230,7 +230,8 @@ Library location examples:
       release binary (`brew install FourFringe/tap/fringe-retro`); the release workflow
       renders `packaging/homebrew/fringe-retro.rb` with the new version + checksums and pushes
       it to the tap (needs a `HOMEBREW_TAP_TOKEN` secret).
-- [ ] `curl | sh` install script for non-Homebrew users
+- [x] **`curl | sh` install script** ([packaging/install.sh](packaging/install.sh)): downloads
+      the latest macOS release binary, verifies its SHA-256, and installs to `~/.local/bin`.
 - [ ] Publish Windows/Linux binaries (CI already builds/tests them)
 
 ---
