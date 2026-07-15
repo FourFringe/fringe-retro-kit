@@ -10,6 +10,7 @@ Usage:
     update_formula.py VERSION ARM_SHA256 INTEL_SHA256 SRC DST
 """
 
+import os
 import re
 import sys
 
@@ -40,6 +41,9 @@ def main() -> None:
     text = replace_sha_after("aarch64-apple-darwin", arm_sha, text)
     text = replace_sha_after("x86_64-apple-darwin", intel_sha, text)
 
+    dst_dir = os.path.dirname(dst)
+    if dst_dir:
+        os.makedirs(dst_dir, exist_ok=True)
     with open(dst, "w", encoding="utf-8") as f:
         f.write(text)
 

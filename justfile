@@ -27,8 +27,8 @@ run *ARGS:
 build:
     cargo build --release
 
-# Cut a release: bump the workspace version, run the gate, commit, and tag.
-# Usage: `just release 0.2.0`. Pushing (which triggers the release workflow) is left to you.
+# Cut a release: bump the workspace version, run the gate, commit, tag, and push.
+# Usage: `just release 0.2.0`. The push triggers the GitHub release workflow.
 release VERSION:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -42,4 +42,6 @@ release VERSION:
     git add Cargo.toml Cargo.lock
     git commit -m "Release v{{ VERSION }}"
     git tag -a "v{{ VERSION }}" -m "v{{ VERSION }}"
-    printf '\nTagged v%s. Push to trigger the release workflow:\n  git push origin main && git push origin v%s\n' "{{ VERSION }}" "{{ VERSION }}"
+    git push origin main
+    git push origin "v{{ VERSION }}"
+    printf '\nReleased v%s — pushed main and the tag; the release workflow is now running.\n' "{{ VERSION }}"
