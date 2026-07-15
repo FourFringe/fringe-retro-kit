@@ -24,7 +24,7 @@ demands it (e.g. Wasteland's encryption).
 - Inspect and edit character sheets field-by-field; the TUI adds a section-grouped editor
 - Safe editing with automatic backups (unknown bytes preserved; writes are byte-faithful)
 - A curated Save Library alongside automatic backup retention
-- Cross-platform aim: macOS first, Windows and Linux later
+- Cross-platform: fully tested on macOS; Linux and Windows binaries published as built-but-untested
 - Data-driven game definitions planned (reusable parsers + per-game schema data; simple formats become user-authorable)
 - Community-friendly, MIT-licensed architecture
 
@@ -32,16 +32,22 @@ demands it (e.g. Wasteland's encryption).
 
 ## Installation
 
-macOS binaries (Apple Silicon and Intel) are published for every release.
+Every release publishes binaries for **macOS** (Apple Silicon + Intel), **Linux** (x86_64), and
+**Windows** (x86_64).
 
-**Homebrew:**
+> ⚠️ **Platform support caveat:** macOS is the only platform actively tested against real save
+> files. Linux and Windows binaries are built from the same source and pass CI, but are otherwise
+> **untested** — use them at your own risk, and please report any problems on the
+> [issue tracker](https://github.com/FourFringe/fringe-retro-kit/issues). No guarantees.
+
+**Homebrew (macOS):**
 
 ```sh
 brew install FourFringe/tap/fringe-retro
 ```
 
-**Install script** (downloads the latest release binary, verifies its checksum, and installs
-to `~/.local/bin`):
+**Install script (macOS + Linux)** — downloads the latest release binary, verifies its
+checksum, and installs to `~/.local/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/FourFringe/fringe-retro-kit/main/packaging/install.sh | sh
@@ -52,6 +58,10 @@ Options can be passed after `-s --`, e.g. a specific version or install director
 ```sh
 curl -fsSL https://raw.githubusercontent.com/FourFringe/fringe-retro-kit/main/packaging/install.sh | sh -s -- --version v0.2.0 --bin-dir ~/bin
 ```
+
+**Windows:** download the `.zip` for `x86_64-pc-windows-msvc` from the
+[latest release](https://github.com/FourFringe/fringe-retro-kit/releases/latest), extract it,
+and put `fringe-retro.exe` somewhere on your `PATH`.
 
 **From source** (any platform with a Rust toolchain):
 

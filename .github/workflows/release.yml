@@ -1,8 +1,9 @@
 name: Release
 
-# Publish macOS binaries when a version tag is pushed (e.g. v0.1.0).
-# Windows/Linux are built and tested on every push by CI (ci.yml) as a quality gate, but
-# only macOS is published for now — see ROADMAP.md.
+# Publish binaries when a version tag is pushed (e.g. v0.1.0): macOS (Apple Silicon + Intel)
+# and Linux/Windows (x86_64). macOS is the only fully tested platform; Linux and Windows are
+# built from the same source and pass CI, but are not exercised against real save files —
+# see the caveat in README.md.
 on:
   push:
     tags: ["v*"]
@@ -14,13 +15,19 @@ env:
 jobs:
   build:
     name: Build (${{ matrix.target }})
-    runs-on: macos-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - aarch64-apple-darwin # Apple Silicon
-          - x86_64-apple-darwin # Intel
+        include:
+          - target: aarch64-apple-darwin # macOS Apple Silicon
+            os: macos-latest
+          - target: x86_64-apple-darwin # macOS Intel
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu # Linux
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc # Windows
+            os: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -32,9 +39,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release binary
-        run: cargo build --release --locked --bin "$BIN_NAME" --target ${{ matrix.target }}
+        run: cargo build --release --locked --bin ${{ env.BIN_NAME }} --target ${{ matrix.target }}
 
-      - name: Package tarball + checksum
+      - name: Package tarball + checksum (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           set -euo pipefail
           stage="${BIN_NAME}-${GITHUB_REF_NAME}-${{ matrix.target }}"
@@ -42,15 +51,36 @@ jobs:
           cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$stage/"
           cp README.md LICENSE COMMANDS.md "$stage/"
           tar -czf "${stage}.tar.gz" "$stage"
-          shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+          else
+            sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+          fi
+
+      - name: Package zip + checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = "$env:BIN_NAME-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" "$stage/"
+          Copy-Item README.md, LICENSE, COMMANDS.md "$stage/"
+          $zip = "$stage.zip"
+          Compress-Archive -Path $stage -DestinationPath $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
+          if-no-files-found: ignore
           path: |
             *.tar.gz
             *.tar.gz.sha256
+            *.zip
+            *.zip.sha256
 
   release:
     name: Publish GitHub Release
@@ -70,6 +100,8 @@ jobs:
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.tar.gz.sha256
+            artifacts/**/*.zip
+            artifacts/**/*.zip.sha256
           generate_release_notes: true
           # Mark pre-1.0 / rc / beta tags (those containing a hyphen) as pre-releases.
           prerelease: ${{ contains(github.ref_name, '-') }}

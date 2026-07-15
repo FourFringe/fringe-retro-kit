@@ -11,8 +11,11 @@
 #
 # Environment overrides: FRINGE_RETRO_VERSION, FRINGE_RETRO_BIN_DIR.
 #
-# Only macOS binaries are published right now. On other systems, build from source:
-#   https://github.com/FourFringe/fringe-retro-kit
+# macOS (Apple Silicon + Intel) and Linux (x86_64) binaries are published. Linux is built from
+# the same source but is not tested against real save files — please report issues at
+#   https://github.com/FourFringe/fringe-retro-kit/issues
+# Windows uses the .zip asset from the release page (this script does not install it).
+# On other systems, build from source: https://github.com/FourFringe/fringe-retro-kit
 
 set -eu
 
@@ -60,15 +63,21 @@ os="$(uname -s)"
 arch="$(uname -m)"
 
 case "$os" in
-  Darwin) ;;
-  *) err "unsupported OS '$os' — only macOS binaries are published right now.
+  Darwin)
+    case "$arch" in
+      arm64|aarch64) target="aarch64-apple-darwin" ;;
+      x86_64|amd64)  target="x86_64-apple-darwin" ;;
+      *) err "unsupported macOS architecture '$arch'." ;;
+    esac ;;
+  Linux)
+    case "$arch" in
+      x86_64|amd64) target="x86_64-unknown-linux-gnu" ;;
+      *) err "unsupported Linux architecture '$arch' — only x86_64 binaries are published.
 Build from source instead: https://github.com/$REPO" ;;
-esac
-
-case "$arch" in
-  arm64|aarch64) target="aarch64-apple-darwin" ;;
-  x86_64|amd64)  target="x86_64-apple-darwin" ;;
-  *) err "unsupported architecture '$arch'." ;;
+    esac ;;
+  *) err "unsupported OS '$os' — macOS and Linux (x86_64) binaries are published.
+On Windows, download the .zip from the releases page; otherwise build from source:
+https://github.com/$REPO" ;;
 esac
 
 # --- Pick a downloader ------------------------------------------------------

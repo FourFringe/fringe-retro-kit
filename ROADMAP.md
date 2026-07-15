@@ -21,9 +21,9 @@ Most recently: Ultima VI (party stats in the uncompressed `OBJLIST`), Wasteland 
 sheets + skills (byte-faithful MSQ writes), GOG/Steam detection with `detect --all`, and
 per-game save-directory resolution from a natural top-level `save_dir`.
 
-**Next up:** deepening existing games (Wasteland items, Ultima VI inventory/spells) or the
-remaining distribution polish (Windows/Linux binaries). The Homebrew tap, `curl | sh`
-installer, and save diff / comparison are done (see below).
+**Next up:** deepening existing games (Wasteland items, Ultima VI inventory/spells). The core
+distribution work — the Homebrew tap, the `curl | sh` installer, cross-platform release
+binaries (macOS/Linux/Windows), and save diff / comparison — is done (see below).
 
 ---
 
@@ -221,18 +221,20 @@ Library location examples:
 - [x] `detect --all` also lists recognized-but-unsupported games (Ultima VI, Bard's Tale
       Trilogy, Magic Carpet 1/2) in a separate section, pointing at the issue tracker for
       feature requests · display-only (never written to config / auto-detected)
-- [ ] Windows & Linux support (deferred — no machines to test on; CI builds/tests them, but
-      only macOS is published for now)
+- [x] Windows & Linux support (builds published as built-but-untested binaries; still no
+      machines to exercise them against real saves — please report issues)
 - [x] GitHub Actions CI: fmt + clippy + test matrix across macOS / Ubuntu / Windows
-- [x] Release automation: tag-triggered **macOS** builds (Apple Silicon + Intel) → GitHub
-      Releases with tarballs + SHA-256 checksums.
+- [x] Release automation: tag-triggered builds for **macOS** (Apple Silicon + Intel),
+      **Linux** (x86_64), and **Windows** (x86_64) → GitHub Releases with tarballs/zips +
+      SHA-256 checksums. Only macOS is tested against real save files; Linux/Windows are
+      built-but-untested (see the README caveat).
 - [x] **Homebrew tap** (`FourFringe/homebrew-tap`): a binary formula installs the pre-built
       release binary (`brew install FourFringe/tap/fringe-retro`); the release workflow
       renders `packaging/homebrew/fringe-retro.rb` with the new version + checksums and pushes
       it to the tap (needs a `HOMEBREW_TAP_TOKEN` secret).
 - [x] **`curl | sh` install script** ([packaging/install.sh](packaging/install.sh)): downloads
-      the latest macOS release binary, verifies its SHA-256, and installs to `~/.local/bin`.
-- [ ] Publish Windows/Linux binaries (CI already builds/tests them)
+      the latest macOS/Linux release binary, verifies its SHA-256, and installs to `~/.local/bin`.
+- [x] Publish Windows/Linux binaries (built-but-untested; caveat in the README)
 
 ---
 
