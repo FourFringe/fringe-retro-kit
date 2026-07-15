@@ -493,6 +493,34 @@ See [docs/formats/ultima5.md](docs/formats/ultima5.md) for the byte-level layout
 
 ---
 
+### Wasteland character fields
+
+Wasteland's save is an encrypted directory; point commands at its `GAME1` file (or a
+configured `wasteland` id). The seven Ranger slots use `--slot 1`…`7`, and writes are
+**byte-faithful** — a re-save with no changes reproduces the original file exactly.
+
+**Per character (`--slot`):** `name` (≤ 13 chars), `gender` (Male, Female), `nationality`
+(US, Russian, Mexican, Indian, Chinese), `rank`, `strength` / `iq` / `luck` / `speed` /
+`agility` / `dexterity` / `charisma`, `con` / `max_con` (hit points), `level`, `experience`,
+`skill_points`, `money`, `ac`, `afflictions`, `npc`.
+
+**Skills** use a `skill:<name-or-id>` selector (names are case- and space-insensitive).
+Setting a skill the Ranger doesn't have yet learns it (into a free slot); the level must be
+`≥ 1`:
+
+```bash
+fringe-retro inspect  "/…/GAME1"                     # lists each Ranger's skills
+fringe-retro get  "/…/GAME1" skill:medic --slot 2    # Angela's Medic level
+fringe-retro set  "/…/GAME1" skill:medic 5 --slot 2  # raise it
+fringe-retro set  "/…/GAME1" "skill:Clip Pistol" 3 --slot 2
+fringe-retro set  "/…/GAME1" skill:25 4 --slot 2     # by skill id (25 = Medic)
+```
+
+See [docs/formats/wasteland.md](docs/formats/wasteland.md) for the byte-level layout and the
+full skill-id table.
+
+---
+
 ## Library
 
 ### ✅ `games`

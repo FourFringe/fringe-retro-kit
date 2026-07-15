@@ -36,6 +36,13 @@ pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
                 }
                 out.push(format!("    {label:<16} {value}"));
             }
+            let skills = save.skills(i);
+            if !skills.is_empty() {
+                out.push("  Skills:".to_string());
+                for skill in skills {
+                    out.push(format!("    {:<16} {}", skill.name, skill.level));
+                }
+            }
         }
     } else if bytes.len() == ultima3::PARTY_LEN {
         let party = Ultima3Party::from_bytes(bytes.to_vec())?;

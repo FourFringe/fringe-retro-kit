@@ -23,7 +23,7 @@ use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 use fringe_retro_core::games::ultima4::{self, Ultima4Save};
 use fringe_retro_core::games::ultima5::{self, Ultima5Save};
-use fringe_retro_core::games::wasteland::WastelandSave;
+use fringe_retro_core::games::wasteland::{self, WastelandSave};
 use fringe_retro_core::games::GameKind;
 
 use crate::config::Config;
@@ -215,14 +215,27 @@ fn main() -> Result<()> {
             if bytes.starts_with(b"msq0") {
                 let save = WastelandSave::from_bytes(bytes)?;
                 let member = roster_index(slot)?;
-                match save.character_get(member, &field) {
-                    Some(value) => println!("{value}"),
-                    None => {
-                        let keys: Vec<_> = WastelandSave::character_field_keys().collect();
-                        anyhow::bail!(
-                            "unknown field '{field}' (character fields use --slot): {}",
-                            keys.join(", ")
-                        );
+                if let Some(selector) = field.strip_prefix("skill:") {
+                    match save.skill_get(member, selector) {
+                        Some(level) => println!("{level}"),
+                        None => {
+                            let names: Vec<_> = wasteland::skill_names().collect();
+                            anyhow::bail!(
+                                "unknown skill '{selector}'. Known skills: {}",
+                                names.join(", ")
+                            );
+                        }
+                    }
+                } else {
+                    match save.character_get(member, &field) {
+                        Some(value) => println!("{value}"),
+                        None => {
+                            let keys: Vec<_> = WastelandSave::character_field_keys().collect();
+                            anyhow::bail!(
+                                "unknown field '{field}' (character fields use --slot; skills use skill:<name>): {}",
+                                keys.join(", ")
+                            );
+                        }
                     }
                 }
             } else if bytes.len() == ultima3::PARTY_LEN {
@@ -323,17 +336,29 @@ fn main() -> Result<()> {
             if bytes.starts_with(b"msq0") {
                 let mut save = WastelandSave::from_bytes(bytes)?;
                 let member = roster_index(slot)?;
-                let old = save
-                    .character_get(member, &field)
-                    .unwrap_or_else(|| "?".to_string());
-                save.character_set(member, &field, &value)?;
-                let new = save
-                    .character_get(member, &field)
-                    .unwrap_or_else(|| "?".to_string());
-                let backup_path = backup::create(&path)?;
-                save.write(&path)?;
-                println!("slot {slot} {field}: {old} -> {new}");
-                println!("backup: {}", backup_path.display());
+                if let Some(selector) = field.strip_prefix("skill:") {
+                    let level: u8 = value
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("skill level must be a number 1..=255"))?;
+                    let old = save.skill_get(member, selector).unwrap_or(0);
+                    save.skill_set(member, selector, level)?;
+                    let backup_path = backup::create(&path)?;
+                    save.write(&path)?;
+                    println!("slot {slot} {field}: {old} -> {level}");
+                    println!("backup: {}", backup_path.display());
+                } else {
+                    let old = save
+                        .character_get(member, &field)
+                        .unwrap_or_else(|| "?".to_string());
+                    save.character_set(member, &field, &value)?;
+                    let new = save
+                        .character_get(member, &field)
+                        .unwrap_or_else(|| "?".to_string());
+                    let backup_path = backup::create(&path)?;
+                    save.write(&path)?;
+                    println!("slot {slot} {field}: {old} -> {new}");
+                    println!("backup: {}", backup_path.display());
+                }
             } else if bytes.len() == ultima3::PARTY_LEN {
                 let mut party = Ultima3Party::from_bytes(bytes)?;
                 let member = roster_index(slot)?;

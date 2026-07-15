@@ -102,8 +102,33 @@ map-string encoding).
 | `0x28` | 1 | Afflictions (bitmap) |
 | `0x29` | 1 | NPC flag |
 | `0x32` | 25 | Rank (null-terminated ASCII) |
-| `0x80` | 60 | Skills (30 × id/level) — *not yet exposed* |
+| `0x80` | 60 | Skills (30 × id/level) |
 | `0xBD` | var | Item list — *not yet exposed* |
+
+### Skills (`0x80`)
+
+Thirty `(id, level)` slots, packed contiguously from the start; an id of `0` marks an empty
+slot. The id indexes the game's skill list:
+
+| id | Skill | id | Skill | id | Skill |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Brawling | 13 | Acrobat | 25 | Medic |
+| 2 | Climb | 14 | Gamble | 26 | Safecrack |
+| 3 | Clip Pistol | 15 | Picklock | 27 | Cryptology |
+| 4 | Knife Fight | 16 | Silent Move | 28 | Metallurgy |
+| 5 | Pugilism | 17 | Combat Shooting | 29 | Helicopter Piloting |
+| 6 | Rifle | 18 | Confidence | 30 | Electronics |
+| 7 | Swim | 19 | Sleight of Hand | 31 | Toaster Repair |
+| 8 | Knife Throw | 20 | Demolitions | 32 | Doctor |
+| 9 | Perception | 21 | Forgery | 33 | Clone Tech |
+| 10 | Assault Rifle | 22 | Alarm Disarm | 34 | Energy Weapon |
+| 11 | AT Weapon | 23 | Bureaucracy | 35 | Cyborg Tech |
+| 12 | SMG | 24 | Bomb Disarm | | |
+
+Validated against a real save: all four starting Rangers share ids 3/7/9 (Clip Pistol / Swim
+/ Perception), and Angela Deth carries Demolitions, Alarm Disarm, Picklock, Safecrack, and
+Medic — matching her documented loadout.
+
 
 ## Strings
 
@@ -114,8 +139,8 @@ map/story content, which this tool does not edit.
 
 ## Still to map
 
-- Per-character **skills** (`0x80`) and **item list** (`0xBD`) — layouts are known from
-  `wlandsuite` but not yet surfaced as editable fields.
+- The per-character **item list** (`0xBD`) — layout is known from `wlandsuite` but not yet
+  surfaced (variable-length records + an item-type table).
 - The `0x038`–`0x100` party/state region (only partially labelled).
 - The 5-bit string decoder (only needed for map/story text).
 

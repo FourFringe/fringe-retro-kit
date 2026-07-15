@@ -118,6 +118,75 @@ const CHARACTER_FIELDS: &[Field] = &[
     Field::new("afflictions",  "Afflictions",  0x28, FieldKind::Byte).in_section(S_VITALS),
 ];
 
+// --- Skills ---
+
+/// Offset of the skill list within a character record.
+const SKILL_BASE: usize = 0x80;
+/// Number of skill slots (each `id, level`).
+const SKILL_SLOTS: usize = 30;
+
+/// The game's skill list, indexed by the id stored in each skill slot (`wlandsuite` /
+/// Wasteland manual). A character carries a subset, packed from the start of the list.
+#[rustfmt::skip]
+const SKILLS: &[(u8, &str)] = &[
+    (1, "Brawling"),        (2, "Climb"),          (3, "Clip Pistol"),    (4, "Knife Fight"),
+    (5, "Pugilism"),        (6, "Rifle"),          (7, "Swim"),           (8, "Knife Throw"),
+    (9, "Perception"),      (10, "Assault Rifle"), (11, "AT Weapon"),     (12, "SMG"),
+    (13, "Acrobat"),        (14, "Gamble"),        (15, "Picklock"),      (16, "Silent Move"),
+    (17, "Combat Shooting"),(18, "Confidence"),    (19, "Sleight of Hand"),(20, "Demolitions"),
+    (21, "Forgery"),        (22, "Alarm Disarm"),  (23, "Bureaucracy"),   (24, "Bomb Disarm"),
+    (25, "Medic"),          (26, "Safecrack"),     (27, "Cryptology"),    (28, "Metallurgy"),
+    (29, "Helicopter Piloting"), (30, "Electronics"), (31, "Toaster Repair"), (32, "Doctor"),
+    (33, "Clone Tech"),     (34, "Energy Weapon"), (35, "Cyborg Tech"),
+];
+
+/// One of a character's learned skills.
+pub struct CharacterSkill {
+    /// The skill's numeric id.
+    pub id: u8,
+    /// The skill's display name.
+    pub name: &'static str,
+    /// The skill's level.
+    pub level: u8,
+}
+
+/// The display name for a skill id, if known.
+fn skill_name(id: u8) -> Option<&'static str> {
+    SKILLS.iter().find(|(i, _)| *i == id).map(|(_, n)| *n)
+}
+
+/// Resolve a skill selector — a numeric id or a name (case- and punctuation-insensitive,
+/// e.g. `medic`, `Alarm Disarm`, `alarmdisarm`, `22`) — to a skill id.
+fn skill_id(selector: &str) -> Option<u8> {
+    let norm = |s: &str| -> String {
+        s.chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    };
+    if let Ok(n) = selector.parse::<u8>() {
+        if skill_name(n).is_some() {
+            return Some(n);
+        }
+    }
+    let target = norm(selector);
+    SKILLS
+        .iter()
+        .find(|(_, n)| norm(n) == target)
+        .map(|(i, _)| *i)
+}
+
+/// Every known skill name (for help text).
+pub fn skill_names() -> impl Iterator<Item = &'static str> {
+    SKILLS.iter().map(|(_, n)| *n)
+}
+
+/// Whether `selector` names a known skill (by name or numeric id). Useful for routing an
+/// editor key to [`WastelandSave::skill_set`] vs. a plain character field.
+pub fn is_skill(selector: &str) -> bool {
+    skill_id(selector).is_some()
+}
+
 /// Decrypt a single MSQ block.
 ///
 /// `block` must start with the 4-byte `msqN` header, then the two seed bytes, then the
@@ -396,6 +465,70 @@ impl WastelandSave {
     pub fn character_field_keys() -> impl Iterator<Item = &'static str> {
         CHARACTER_FIELDS.iter().map(|f| f.key)
     }
+
+    /// A character's learned skills, in stored order.
+    pub fn skills(&self, index: usize) -> Vec<CharacterSkill> {
+        if index >= CHARACTER_COUNT {
+            return Vec::new();
+        }
+        let base = character_base(index) + SKILL_BASE;
+        (0..SKILL_SLOTS)
+            .filter_map(|s| {
+                let id = self.body[base + s * 2];
+                (id != 0).then(|| CharacterSkill {
+                    id,
+                    name: skill_name(id).unwrap_or("Unknown"),
+                    level: self.body[base + s * 2 + 1],
+                })
+            })
+            .collect()
+    }
+
+    /// The level of a character's skill by selector (name or id), or `None` for an unknown
+    /// selector. Returns `Some(0)` for a known skill the character hasn't learned.
+    pub fn skill_get(&self, index: usize, selector: &str) -> Option<u8> {
+        if index >= CHARACTER_COUNT {
+            return None;
+        }
+        let id = skill_id(selector)?;
+        let base = character_base(index) + SKILL_BASE;
+        let level = (0..SKILL_SLOTS)
+            .find(|&s| self.body[base + s * 2] == id)
+            .map_or(0, |s| self.body[base + s * 2 + 1]);
+        Some(level)
+    }
+
+    /// Set the level of a character's skill by selector (name or id). Updates the skill if
+    /// the character already has it, otherwise adds it to a free slot. `level` must be
+    /// `1..=255`; removing skills is not supported (it would disturb the on-disk order).
+    pub fn skill_set(&mut self, index: usize, selector: &str, level: u8) -> Result<()> {
+        if index >= CHARACTER_COUNT {
+            return Err(Error::Format(format!(
+                "character slot must be 1..={CHARACTER_COUNT} (got {})",
+                index + 1
+            )));
+        }
+        if level == 0 {
+            return Err(Error::Format("skill level must be at least 1".into()));
+        }
+        let id = skill_id(selector)
+            .ok_or_else(|| Error::Format(format!("unknown skill '{selector}'")))?;
+        let base = character_base(index) + SKILL_BASE;
+        // Update the skill in place if the character already has it.
+        if let Some(s) = (0..SKILL_SLOTS).find(|&s| self.body[base + s * 2] == id) {
+            self.body[base + s * 2 + 1] = level;
+            return Ok(());
+        }
+        // Otherwise append it to the first free slot.
+        if let Some(s) = (0..SKILL_SLOTS).find(|&s| self.body[base + s * 2] == 0) {
+            self.body[base + s * 2] = id;
+            self.body[base + s * 2 + 1] = level;
+            return Ok(());
+        }
+        Err(Error::Format(format!(
+            "character already has the maximum {SKILL_SLOTS} skills"
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -461,6 +594,11 @@ mod tests {
         body[base + 0x21] = 0xE8;
         body[base + 0x22] = 0x03;
         body[base + 0x32..base + 0x32 + 7].copy_from_slice(b"Captain"); // rank
+                                                                        // Skills (id, level) packed from 0x80: Perception 2, Medic 1.
+        body[base + 0x80] = 9;
+        body[base + 0x81] = 2;
+        body[base + 0x82] = 25;
+        body[base + 0x83] = 1;
 
         // Wrap the body in a savegame block, then append a second (untouched) block that a
         // real GAME1 would carry, to prove we preserve it.
@@ -490,6 +628,32 @@ mod tests {
         save.character_set(0, "name", "Angela").unwrap();
         assert_eq!(save.character_get(0, "strength").as_deref(), Some("30"));
         assert_eq!(save.character_get(0, "name").as_deref(), Some("Angela"));
+    }
+
+    #[test]
+    fn reads_and_edits_skills() {
+        let mut save = WastelandSave::from_bytes(synthetic()).unwrap();
+
+        let skills = save.skills(0);
+        let listed: Vec<(&str, u8)> = skills.iter().map(|s| (s.name, s.level)).collect();
+        assert_eq!(listed, vec![("Perception", 2), ("Medic", 1)]);
+
+        // Read by name (case/space-insensitive) and by id; unlearned skill reads 0.
+        assert_eq!(save.skill_get(0, "perception"), Some(2));
+        assert_eq!(save.skill_get(0, "25"), Some(1)); // Medic by id
+        assert_eq!(save.skill_get(0, "Clip Pistol"), Some(0));
+        assert_eq!(save.skill_get(0, "not a skill"), None);
+
+        // Update an existing skill, and add a new one to a free slot.
+        save.skill_set(0, "medic", 4).unwrap();
+        save.skill_set(0, "Clip Pistol", 3).unwrap();
+        assert_eq!(save.skill_get(0, "medic"), Some(4));
+        assert_eq!(save.skill_get(0, "clippistol"), Some(3));
+        assert_eq!(save.skills(0).len(), 3);
+
+        // Level 0 and unknown skills are rejected.
+        assert!(save.skill_set(0, "medic", 0).is_err());
+        assert!(save.skill_set(0, "nope", 1).is_err());
     }
 
     #[test]

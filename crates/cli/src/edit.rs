@@ -253,6 +253,12 @@ impl Session {
     }
 
     fn value(&self, entity: usize, key: &str) -> Option<String> {
+        // Wasteland skills are a dynamic list, addressed by name/id rather than a field key.
+        if let Loaded::Wasteland(s) = &self.save {
+            if wasteland::is_skill(key) {
+                return s.skill_get(entity, key).map(|level| level.to_string());
+            }
+        }
         match &self.save {
             Loaded::Ultima1(s) => s.get_field(key),
             Loaded::Ultima2(s) => s.get_field(key),
@@ -284,7 +290,8 @@ impl Session {
 
     /// The editable fields (with current in-memory values) of the given entity.
     pub fn rows(&self, entity: usize) -> Vec<FieldRow> {
-        self.fields(entity)
+        let mut rows: Vec<FieldRow> = self
+            .fields(entity)
             .iter()
             .map(|f| FieldRow {
                 key: f.key,
@@ -293,12 +300,37 @@ impl Session {
                 kind: f.kind,
                 section: f.section,
             })
-            .collect()
+            .collect();
+        // Append the character's learned skills as editable level rows (Wasteland only).
+        if let Loaded::Wasteland(s) = &self.save {
+            for skill in s.skills(entity) {
+                rows.push(FieldRow {
+                    key: skill.name,
+                    label: skill.name,
+                    value: skill.level.to_string(),
+                    kind: FieldKind::Byte,
+                    section: Some("Skills"),
+                });
+            }
+        }
+        rows
     }
 
     /// Apply a validated edit to the in-memory buffer. Marks the session dirty on success;
     /// returns the validation error (unchanged buffer) on failure.
     pub fn set(&mut self, entity: usize, key: &str, value: &str) -> Result<()> {
+        // Wasteland skills are a dynamic list edited by level.
+        if let Loaded::Wasteland(s) = &mut self.save {
+            if wasteland::is_skill(key) {
+                let level: u8 = value
+                    .parse()
+                    .map_err(|_| anyhow!("skill level must be a number 1..=255"))?;
+                s.skill_set(entity, key, level)
+                    .map_err(|e| anyhow!("{e}"))?;
+                self.dirty = true;
+                return Ok(());
+            }
+        }
         match &mut self.save {
             Loaded::Ultima1(s) => s.set_field(key, value),
             Loaded::Ultima2(s) => s.set_field(key, value),
@@ -421,5 +453,45 @@ mod tests {
     fn unsupported_size_is_none() {
         let (_dir, path) = write_temp(&[0u8; 123]);
         assert!(Session::load(&path).unwrap().is_none());
+    }
+
+    /// A minimal valid Wasteland `GAME1`: a single savegame block with one character who
+    /// has one skill (Perception, level 2), plus a trailing block to bound the scan.
+    fn wasteland_game1() -> Vec<u8> {
+        let mut body = vec![0u8; 0x1200]; // decrypted savegame body
+        let base = 0x100; // first character record
+        body[base..base + 3].copy_from_slice(b"Ace");
+        body[base + 0x80] = 9; // skill id 9 = Perception
+        body[base + 0x81] = 2; // level
+        let mut raw = wasteland::encrypt(&body, 0);
+        raw.extend_from_slice(b"msq0");
+        raw.extend(std::iter::repeat_n(0u8, 32));
+        raw
+    }
+
+    #[test]
+    fn wasteland_rows_include_editable_skills() {
+        let (_dir, path) = write_temp(&wasteland_game1());
+        let mut session = Session::load(&path).unwrap().unwrap();
+
+        // Entity 0 is the first character; its rows include a Skills section.
+        let rows = session.rows(0);
+        let skill = rows
+            .iter()
+            .find(|r| r.key == "Perception")
+            .expect("skill row present");
+        assert_eq!(skill.value, "2");
+        assert_eq!(skill.section, Some("Skills"));
+        assert!(skill.pick_options().is_none()); // numeric: free text
+
+        // Editing the skill routes to skill_set and shows the new level.
+        session.set(0, "Perception", "5").unwrap();
+        let rows = session.rows(0);
+        let skill = rows.iter().find(|r| r.key == "Perception").unwrap();
+        assert_eq!(skill.value, "5");
+
+        // A character field on the same entity still works alongside skills.
+        session.set(0, "strength", "20").unwrap();
+        assert_eq!(session.value(0, "strength").as_deref(), Some("20"));
     }
 }
