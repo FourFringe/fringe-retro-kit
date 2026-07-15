@@ -36,7 +36,13 @@ compares a save against its most recent automatic backup.
 - Built on the editor's field model (`Session` entities + rows), so every supported game gets
   it for free; dynamic fields (Wasteland skills) diff correctly, including newly-learned ones.
 - Falls back to a byte-range diff when the two files aren't the same known game.
-- Later: surface it in the TUI (e.g. a preview when restoring a backup or Library snapshot).
+- In the TUI: the backup browser's preview leads with a "changes since this backup" diff above
+  the backup's full contents, and the restore confirmation previews "restoring will change …"
+  before you commit.
+- [ ] **Save Library snapshot diffs** (later) — compare a Library snapshot against the current
+  save (or another snapshot). More involved than a backup diff because a snapshot is a whole
+  save-*set* (a directory, possibly several files for Wasteland / Ultima VI), so it needs to
+  pick each game's primary file to diff, and probably its own TUI view.
 
 ---
 

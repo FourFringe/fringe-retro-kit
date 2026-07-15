@@ -79,11 +79,14 @@ order.
 
 Every save writes a timestamped `.bak` file beside the original. Press `b` in the editor to
 open the **backup browser**: a list of that save's backups (newest first, with the one
-matching the current file marked `← current`) alongside a decoded preview of the selected
-backup. Press `Enter` or `r` to restore the selected backup — you're asked to confirm, a
-fresh safety backup of the current file is made first, and the editor reloads to show the
-restored values. Restoring a backup that already matches the current file is a no-op (no
-write, no extra backup).
+matching the current file marked `← current`) alongside a preview of the selected backup.
+The preview shows, at the top, a **field-level diff** of what changed since that backup (e.g.
+`Gold 100 -> 500`), followed by the backup's full decoded contents so you can still read its
+show its absolute values. Press `Enter` or `r` to restore the selected backup — the
+confirmation **previews what restoring would change** (`Gold 200 -> 100`), a fresh safety
+backup of the current file is made first, and the editor reloads to show the restored values.
+Restoring a backup that already matches the current file is a no-op (no write, no extra
+backup).
 
 Press `n` to take a **snapshot**: a manual backup of the current save file on disk (a
 "bookmark" of the state you just saved in-game), even when you haven't edited anything. If

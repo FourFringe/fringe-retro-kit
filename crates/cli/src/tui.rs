@@ -171,6 +171,8 @@ struct BackupList {
     title: String,
     /// The editor entity to refresh after a restore reloads the session.
     entity: usize,
+    /// The active save these are backups of (for the "changes since this backup" diff).
+    save_path: PathBuf,
     entries: Vec<BackupEntry>,
     list: ListState,
     preview: Inspector,
@@ -576,13 +578,14 @@ impl App {
             list.select(Some(0));
         }
         let content = match entries.first() {
-            Some(e) => backup_preview(&e.path),
+            Some(e) => backup_preview(&e.path, &path),
             None => vec!["(no backups yet)".to_string()],
         };
         let preview = Inspector::new("Preview".to_string(), content);
         self.stack.push(Screen::Backups(BackupList {
             title: format!("Backups — {editor_title}"),
             entity,
+            save_path: path,
             entries,
             list,
             preview,
@@ -603,14 +606,37 @@ impl App {
         let Some((backup, entity)) = target else {
             return;
         };
-        let message = if self.session_dirty() {
-            Some("Restore this backup? Unsaved edits will be lost.".to_string())
+        let prompt = if self.session_dirty() {
+            "Restore this backup? Unsaved edits will be lost."
         } else {
-            Some("Restore this backup over the current save?".to_string())
+            "Restore this backup over the current save?"
         };
+        let mut lines = vec![prompt.to_string(), String::new()];
+        // Preview what restoring would change (current on-disk save -> backup).
+        match self
+            .session
+            .as_ref()
+            .map(|s| crate::compare::compare(s.path(), &backup))
+        {
+            Some(Ok(crate::compare::Comparison::Identical)) => {
+                lines.push("This backup matches the current save.".to_string());
+            }
+            Some(Ok(comparison)) => {
+                lines.push("Restoring will change:".to_string());
+                let diff_lines = crate::compare::report(&comparison);
+                const MAX: usize = 16;
+                if diff_lines.len() > MAX {
+                    lines.extend(diff_lines.into_iter().take(MAX));
+                    lines.push("  …".to_string());
+                } else {
+                    lines.extend(diff_lines);
+                }
+            }
+            _ => {}
+        }
         self.stack.push(Screen::Confirm(Confirm {
             pending: Pending::Restore { backup, entity },
-            message,
+            message: Some(lines.join("\n")),
         }));
     }
 
@@ -1985,12 +2011,25 @@ fn draw_confirm(frame: &mut Frame, area: Rect, c: &Confirm) {
 }
 
 /// A decoded, human-readable preview of a backup file (or a friendly error line).
-fn backup_preview(path: &Path) -> Vec<String> {
-    match std::fs::read(path) {
-        Ok(bytes) => crate::inspect::inspect_lines(&bytes)
-            .unwrap_or_else(|e| vec![format!("(cannot preview: {e})")]),
-        Err(e) => vec![format!("(cannot read: {e})")],
+/// Preview a backup: a field-level diff against the current save ("what changed since this
+/// backup"), followed by the backup's full contents so absolute values are always visible.
+fn backup_preview(backup: &Path, save: &Path) -> Vec<String> {
+    let mut out = vec!["Changes since this backup:".to_string()];
+    match crate::compare::compare(backup, save) {
+        Ok(comparison) => out.extend(crate::compare::report(&comparison)),
+        Err(e) => out.push(format!("(cannot diff: {e})")),
     }
+    out.push(String::new());
+    out.push("── Backup contents ──".to_string());
+    out.push(String::new());
+    match std::fs::read(backup) {
+        Ok(bytes) => out.extend(
+            crate::inspect::inspect_lines(&bytes)
+                .unwrap_or_else(|e| vec![format!("(cannot preview: {e})")]),
+        ),
+        Err(e) => out.push(format!("(cannot read: {e})")),
+    }
+    out
 }
 
 /// The timestamp portion of a backup file name (strips the `<save>.` prefix and `.bak`).
@@ -2033,7 +2072,7 @@ fn build_backup_entries(path: &Path) -> Vec<BackupEntry> {
 /// Rebuild the preview pane for whichever backup is currently selected.
 fn refresh_backup_preview(bl: &mut BackupList) {
     let content = match bl.list.selected().and_then(|i| bl.entries.get(i)) {
-        Some(e) => backup_preview(&e.path),
+        Some(e) => backup_preview(&e.path, &bl.save_path),
         None => vec!["(no backups yet)".to_string()],
     };
     bl.preview = Inspector::new("Preview".to_string(), content);
@@ -2770,6 +2809,27 @@ mod tests {
         assert!(!app.session_dirty());
     }
 
+    #[test]
+    fn restore_confirm_previews_the_diff() {
+        let (_dir, mut app) = app_with_ultima1();
+        app.handle_key(KeyCode::Enter);
+        set_field_via_ui(&mut app, "gold", "100");
+        app.handle_key(KeyCode::Char('s')); // disk gold 100, backup gold 0
+        set_field_via_ui(&mut app, "gold", "200");
+        app.handle_key(KeyCode::Char('s')); // disk gold 200, newest backup gold 100
+
+        app.handle_key(KeyCode::Char('b')); // backups (newest = gold 100)
+        app.handle_key(KeyCode::Enter); // request restore -> confirm with a diff preview
+        match app.stack.last() {
+            Some(Screen::Confirm(c)) => {
+                let msg = c.message.as_deref().unwrap_or_default();
+                assert!(msg.contains("Restoring will change:"));
+                assert!(msg.contains("200 -> 100")); // current 200 -> backup 100
+            }
+            _ => panic!("expected the confirm screen"),
+        }
+    }
+
     fn backups_len(app: &App) -> usize {
         match app.stack.last() {
             Some(Screen::Backups(bl)) => bl.entries.len(),
@@ -2964,5 +3024,30 @@ mod tests {
         assert_eq!(insp.scroll, 81);
         insp.home();
         assert_eq!(insp.scroll, 0);
+    }
+
+    #[test]
+    fn backup_preview_shows_diff_then_full_contents() {
+        use fringe_retro_core::games::ultima1;
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path().join("PLAYER1.U1.bak");
+        let save = dir.path().join("PLAYER1.U1");
+
+        let mut old = vec![0u8; ultima1::SAVE_LEN];
+        old[0..4].copy_from_slice(b"Enki");
+        old[0x24..0x26].copy_from_slice(&100u16.to_le_bytes()); // gold 100 (backup)
+        std::fs::write(&backup, &old).unwrap();
+        let mut new = old.clone();
+        new[0x24..0x26].copy_from_slice(&500u16.to_le_bytes()); // gold 500 (current)
+        std::fs::write(&save, &new).unwrap();
+
+        let lines = backup_preview(&backup, &save);
+        let text = lines.join("\n");
+        // Diff section first: what changed from the backup to the current save.
+        assert!(text.contains("Changes since this backup:"));
+        assert!(lines.iter().any(|l| l.contains("100 -> 500")));
+        // Then the backup's full contents (absolute values, incl. the name).
+        assert!(text.contains("Backup contents"));
+        assert!(text.contains("Enki"));
     }
 }
