@@ -2,6 +2,7 @@
 //!
 //! Phase 1 exposes a small, permanent headless CLI over `fringe-retro-core`.
 
+mod compare;
 mod config;
 mod detect;
 mod edit;
@@ -102,6 +103,16 @@ enum Command {
         /// Poll interval in milliseconds.
         #[arg(long, default_value_t = 500)]
         interval: u64,
+    },
+    /// Show what changed between two saves, field by field.
+    ///
+    /// With one save, compares it against its most recent automatic backup.
+    Diff {
+        /// The save to compare (game id or path).
+        save: PathBuf,
+        /// A second save to compare against (game id or path). Defaults to `save`'s latest
+        /// backup.
+        other: Option<PathBuf>,
     },
     /// List the games configured in your library manifest.
     Games,
@@ -556,6 +567,9 @@ fn main() -> Result<()> {
             let path = config.resolve_save_path(&path)?;
             watch_file(&path, interval)?;
         }
+        Command::Diff { save, other } => {
+            run_diff(&config, &save, other.as_deref())?;
+        }
         Command::Games => {
             print_games(&config)?;
         }
@@ -811,6 +825,41 @@ fn run_resources(game: Option<&str>, open: Option<usize>) -> Result<()> {
     }
     if !printed {
         println!("No resources configured.");
+    }
+    Ok(())
+}
+
+/// Compare a save against a second save, or (when `other` is `None`) against its most recent
+/// automatic backup, and print a field-level diff.
+fn run_diff(config: &Config, save: &Path, other: Option<&Path>) -> Result<()> {
+    let (old_path, new_path, header) = match other {
+        Some(other) => {
+            let old = config.resolve_save_path(save)?;
+            let new = config.resolve_save_path(other)?;
+            let header = format!("{} -> {}", old.display(), new.display());
+            (old, new, header)
+        }
+        None => {
+            let new = config.resolve_save_path(save)?;
+            let latest = backup::list(&new)?.into_iter().next_back().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no backups of {} to compare against; pass a second save to diff",
+                    new.display()
+                )
+            })?;
+            let header = format!(
+                "changes to {} since its latest backup ({})",
+                new.display(),
+                latest.file_name().unwrap_or_default().to_string_lossy()
+            );
+            (latest, new, header)
+        }
+    };
+
+    println!("{header}");
+    let comparison = compare::compare(&old_path, &new_path)?;
+    for line in compare::report(&comparison) {
+        println!("{line}");
     }
     Ok(())
 }

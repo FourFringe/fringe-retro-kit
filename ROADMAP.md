@@ -21,23 +21,21 @@ Most recently: Ultima VI (party stats in the uncompressed `OBJLIST`), Wasteland 
 sheets + skills (byte-faithful MSQ writes), GOG/Steam detection with `detect --all`, and
 per-game save-directory resolution from a natural top-level `save_dir`.
 
-**Next up: save diff / comparison** (see below). After that, candidates are deepening
-existing games (Wasteland items, Ultima VI inventory/spells) or distribution polish
-(`cargo-dist` installers, a Homebrew tap).
+**Next up:** deepening existing games (Wasteland items, Ultima VI inventory/spells) or
+distribution polish (`cargo-dist` installers, a Homebrew tap). Save diff / comparison is
+done (see below).
 
 ---
 
-## Save diff / comparison (next)
+## Save diff / comparison ✅
 
-Compare two saves — or a save against one of its automatic backups or a Save Library
-snapshot — and show what changed in **game terms** (fields, not raw bytes), e.g.
-`Avatar strength 15 → 30`, `Party gold 100 → 9999`.
+`fringe-retro diff <a> [<b>]` shows what changed between two saves in **game terms** (fields,
+not raw bytes), e.g. `Avatar strength 15 → 30`, `Party karma 75 → 99`. With one argument it
+compares a save against its most recent automatic backup.
 
-- Reuse the existing field-schema `inspect` model: format both saves into
-  `(section, label, value)` rows per character/entity and diff by key. Any supported game
-  gets this for free.
-- CLI first: `fringe-retro diff <a> <b>`, plus a convenience form to diff a game against one
-  of its backups/snapshots. Fall back to a byte-level range diff for files we can't parse.
+- Built on the editor's field model (`Session` entities + rows), so every supported game gets
+  it for free; dynamic fields (Wasteland skills) diff correctly, including newly-learned ones.
+- Falls back to a byte-range diff when the two files aren't the same known game.
 - Later: surface it in the TUI (e.g. a preview when restoring a backup or Library snapshot).
 
 ---

@@ -311,6 +311,34 @@ previous save backed up to /…/PLAYER1.U1.2026-07-08T12-14-59.004.bak
 
 ---
 
+### ✅ `diff <save> [<other>]`
+
+Show what changed between two saves — **field by field** for supported games, so you see
+`Strength 15 -> 30` rather than raw bytes. Each argument is a game id or a path. With a
+single argument, `diff` compares the save against its **most recent automatic backup** — a
+quick "what did I just change?".
+
+```bash
+fringe-retro diff ultima6                       # vs its latest backup
+fringe-retro diff "/…/OBJLIST.orig" ultima6     # two explicit saves (old -> new)
+```
+```
+Ultima VI: 3 changes
+
+Party
+  Karma            75 -> 99
+
+1. Avatar
+  Name             Avatar -> Lord British
+  Strength         15 -> 30
+```
+
+Changes are grouped by character/party. Dynamic fields are handled too — a Wasteland skill
+learned since the old save shows as `Doctor  (none) -> 2`. If the two files can't be parsed
+as the same game, `diff` falls back to a **byte-range** comparison.
+
+---
+
 ## Fields
 
 Field names used by `get` and `set` (Ultima I). All numeric values are stored as
