@@ -22,11 +22,12 @@ Most recently: Ultima VI (party stats in the uncompressed `OBJLIST`), Wasteland 
 sheets + skills (byte-faithful MSQ writes), GOG/Steam detection with `detect --all`, and
 per-game save-directory resolution from a natural top-level `save_dir`.
 
-**Next up:** forward work now lives in two optional, non-blocking tracks — **Phase 7
-(Additional Games)** and **Phase 8 (Engine Enhancements)**. The nearest wins are deepening
-games we already own saves for (Wasteland items, Ultima VI inventory/spells); the parsing
-engine, distribution (Homebrew tap, `curl | sh` installer, cross-platform binaries), and save
-diff / comparison are all done (see below).
+**Next up:** the **map browser (Phase 8)** is the active track — zoomable, real-graphics world
+maps baked from your own game install, **starting with Ultima I** and following the games in
+play order. Behind it sit optional, non-blocking tracks: **Phase 7 (Additional Games)**,
+**Phase 9 (Kit Tools)** — CLI reverse-engineering helpers — and **Phase 10 (Engine
+Enhancements)**. The parsing engine, distribution (Homebrew tap, `curl | sh` installer,
+cross-platform binaries), and save diff / comparison are all done (see below).
 
 ---
 
@@ -94,7 +95,7 @@ architecture follows that seam (see [ARCHITECTURE.md](ARCHITECTURE.md)):
 - **Codec / container layer (Rust code).** Encryption, checksums, block scanning,
   save-as-directory, exotic string encodings — small, per-*family* code (e.g. Wasteland's MSQ
   cipher). Today this is inlined in each game module; factoring it into a reusable pipeline is
-  a future refinement (see Phase 8).
+  a future refinement (see Phase 10).
 - **Field-schema layer (data).** Fixed-offset fields over a plaintext buffer: integers
   (LE/BE), scaled ints, BCD, enums (numeric or ASCII-letter), bitfields, booleans, names, and
   record arrays. The Ultimas are essentially 100% this layer.
@@ -114,7 +115,7 @@ Delivered:
 - [x] String handling as schema field kinds (null-terminated ASCII names, BCD digits)
 
 Remaining engine work — data-driven/user-authorable schemas, a reusable codec pipeline, and
-the schema-file-format decision — has moved to **Phase 8 (Engine Enhancements)**. Known byte
+the schema-file-format decision — has moved to **Phase 10 (Engine Enhancements)**. Known byte
 layouts for implemented games live in [docs/formats/](docs/formats/README.md).
 
 ---
@@ -261,7 +262,107 @@ Grouped by codec complexity (which parsing engine each needs):
 
 ---
 
-## Phase 8 — Engine Enhancements
+## Phase 8 — Map Browser
+
+**Goal:** generate zoomable, real-graphics world maps from your **own** game install, so you
+can see the big picture during a playthrough instead of hand-drawing graph-paper maps.
+Delivered as standalone kit binaries (an offline **map exporter** + a small **local server**)
+that share `crates/core`. **Starting with Ultima I**, then following the games in play order.
+
+**Tile strategy — composite into a pyramid, not individual tile files.** Game tiles are tiny
+(Ultima I's are 16×16 px). We do *not* place one PNG per game tile into an HTML/CSS grid (that
+would be thousands of DOM nodes with no real zoom), and we don't hand-pick N×N clusters.
+Instead the exporter paints the **whole world into one large composite image** at true tile
+positions, then slices that into a standard **256×256 web-tile pyramid** with downsampled zoom
+levels. That's exactly what browser map libraries (Leaflet / OpenSeadragon) consume, gives
+smooth zoom/pan, and keeps the viewer dumb. (The "5×5 snapshot" instinct is right in spirit —
+batch tiles for efficiency — but the batch size is driven by the 256 px pyramid tile, not
+chosen by hand.)
+
+**Architecture — bake-then-serve** (all proprietary-format complexity in the offline pass,
+none in the viewer):
+
+- **Offline bake (per game).** The exporter reads the game's art via `crates/core`, decodes the
+  EGA/CGA tileset → RGBA, composites each world, slices a `z/x/y` PNG tile pyramid, and writes a
+  `manifest.json` (world name, dimensions, tile size, zoom levels, optional legend / labels /
+  points of interest). Output is inert PNG + JSON.
+- **Shared export location.** A configured export root (`[map] export_dir` in `config.toml`)
+  collects every game's bundles under `<export_dir>/<game>/<world>/…`. Export whichever games
+  you want; they all land here.
+- **Local web server (primary delivery).** A small `axum` server points at the export root,
+  knows its layout, and **dynamically generates a table of contents across all exported games
+  and every world within each** — no hand-maintained index. Serving over `http://localhost`
+  also sidesteps the `file://` `fetch()` restriction and leaves room for later interactivity
+  (live re-export, overlays, cross-map links). The front-end stays game-agnostic: it renders any
+  bundle from its manifest with Leaflet / OpenSeadragon. No Electron; cross-platform for free.
+- **Multi-world games** export each world (overworld, towns, dungeons) as its own bundle, listed
+  under its game in the generated TOC.
+- Baked art is derived from your **own installed game** (the exporter runs locally); we never
+  ship game graphics.
+
+**Checklist:**
+
+- [ ] Map exporter binary (new kit crate) reading a game via `crates/core`
+- [ ] EGA/CGA tileset decoder → RGBA (Ultima I first)
+- [ ] Ultima I overworld: locate + decode the tile grid; composite the full world to one image
+- [ ] Tile-pyramid generator (256×256 `z/x/y` + downsampled zoom levels) + per-world `manifest.json`
+- [ ] `[map] export_dir` config; bundles written to `<export_dir>/<game>/<world>/…`
+- [ ] `axum` server: serve tiles + a dynamically generated cross-game / cross-world TOC
+- [ ] Leaflet (or OpenSeadragon) viewer: zoom / pan, driven by the manifest
+- [ ] Ultima I towns / dungeons as additional worlds (as applicable)
+- [ ] Extend to the next games in play order (Ultima II → …)
+
+The early Ultimas have **uncompressed** map data, so this phase needs no decompression codec.
+When a compressed-map game arrives (Ultima VI's LZW map; later Daggerfall's RLE), that decoder
+is where the **Phase 9 codec workbench** first gets pulled in.
+
+---
+
+## Phase 9 — Kit Tools (CLI dev tools)
+
+The rest of the "kit": focused **researcher/dev-facing** binaries that share `crates/core`
+(`fringe-retro-core`) but carry complexity we deliberately keep out of the polished
+`fringe-retro` app. These are our own reverse-engineering accelerators for **save formats** (the
+map browser is Phase 8) — the kind of binary spelunking done when mapping a new game.
+
+**Design rule:** build them **CLI-first with plain-text / `--json` output** so they're
+scriptable, diffable, and usable in automated / AI-assisted sessions. A TUI, if any, is a thin
+shell over that text-capable core — never the only interface.
+
+- **Schema explorer / spelunker** — packages the manual RE workflow into repeatable commands,
+  and becomes the authoring front-end for the Phase 10 data-driven schema files (it emits what
+  the main tool consumes). Core primitives:
+  - **Value finder** — locate a known value (e.g. `gold = 12450`) across encodings
+    (u16 LE/BE, u24, BCD, ASCII) → candidate offsets.
+  - **Guided diff** — "save A = before, save B = after I raised STR 15→30" → highlight the
+    changed bytes and infer the encoding from the delta (builds on core's byte `diff`).
+  - **Hypothesis overlay** — render a tentative `Field` table over a buffer live, tuning
+    offsets until values read sensibly.
+  - **Stride/record detector** — autocorrelation to find repeating record sizes (rosters,
+    party arrays).
+  - **Schema export** — dump a confirmed layout in the eventual schema format.
+- **Codec workbench / cipher lab** — decrypt/decompress a blob, dump plaintext, re-encrypt,
+  and verify a byte-for-byte round-trip; plus a **checksum solver** that tries candidate
+  algorithms against known-good blocks (the carry-fold-vs-negated-sum detective work from
+  Wasteland, automated). Reusable for MSQ, U6 LZW, Daggerfall RLE, Fallout, etc. (First earns
+  its keep decoding Ultima VI's compressed map in Phase 8.)
+- **Live watch / logger** — a research-grade `watch`: monitor a save while playing and log
+  timestamped byte deltas, to correlate in-game actions with byte changes. Raw and
+  session-oriented, vs. the main tool's player-facing semantic `watch`/`diff`.
+- **String ripper** — extract embedded text under multiple encodings (ASCIIZ, packed 5-bit,
+  …) to find name/item/spell tables and dialogue — often the fastest way to anchor in an
+  unknown file.
+- **Archive / container extractor** — list/extract game container files (`.DAT`, GOB, Unity
+  assetbundles) for formats where the save isn't a bare file (e.g. Bard's Tale remaster).
+
+Sequencing (earn each abstraction, same discipline as Phase 3): schema explorer first (it
+multiplies every future game), then the codec workbench when an encrypted/compressed format
+forces it (including Ultima VI's map in Phase 8). The string ripper and archive extractor can
+start as explorer subcommands and graduate to their own binaries if they grow.
+
+---
+
+## Phase 10 — Engine Enhancements
 
 Infrastructure and parsing refinements that the current feature set doesn't need but that
 would pay off as the game roster and supported platforms grow. **None are blocking** — they're
@@ -306,78 +407,6 @@ fields:
 
 - [ ] Proper per-OS path handling via the `directories` crate (config / data / cache dirs)
 - [ ] File logging via `tracing` for diagnostics in bug reports (deferred since Phase 1)
-
----
-
-## Kit tools (standalone binaries)
-
-The "kit" in the name: focused companion binaries that share `crates/core`
-(`fringe-retro-core`) but carry complexity we deliberately keep out of the polished
-`fringe-retro` app. The dividing line: **player-facing** features stay in the main CLI/TUI;
-**researcher/dev-facing** tooling, heavy dependencies (graphics), and experimental codecs
-live in their own binaries. These would double as our own reverse-engineering accelerators
-when mapping a new game.
-
-**Design rule:** build them **CLI-first with plain-text / `--json` output** so they're
-scriptable, diffable, and usable in automated / AI-assisted sessions. A TUI, if any, is a
-thin shell over that text-capable core — never the only interface.
-
-- **Schema explorer / spelunker** — packages the manual RE workflow into repeatable commands,
-  and becomes the authoring front-end for the Phase 8 data-driven schema files (it emits what
-  the main tool consumes). Core primitives:
-  - **Value finder** — locate a known value (e.g. `gold = 12450`) across encodings
-    (u16 LE/BE, u24, BCD, ASCII) → candidate offsets.
-  - **Guided diff** — "save A = before, save B = after I raised STR 15→30" → highlight the
-    changed bytes and infer the encoding from the delta (builds on core's byte `diff`).
-  - **Hypothesis overlay** — render a tentative `Field` table over a buffer live, tuning
-    offsets until values read sensibly.
-  - **Stride/record detector** — autocorrelation to find repeating record sizes (rosters,
-    party arrays).
-  - **Schema export** — dump a confirmed layout in the eventual schema format.
-- **Codec workbench / cipher lab** — decrypt/decompress a blob, dump plaintext, re-encrypt,
-  and verify a byte-for-byte round-trip; plus a **checksum solver** that tries candidate
-  algorithms against known-good blocks (the carry-fold-vs-negated-sum detective work from
-  Wasteland, automated). Reusable for MSQ, U6 LZW, Daggerfall RLE, Fallout, etc.
-- **Live watch / logger** — a research-grade `watch`: monitor a save while playing and log
-  timestamped byte deltas, to correlate in-game actions with byte changes. Raw and
-  session-oriented, vs. the main tool's player-facing semantic `watch`/`diff`.
-- **String ripper** — extract embedded text under multiple encodings (ASCIIZ, packed 5-bit,
-  …) to find name/item/spell tables and dialogue — often the fastest way to anchor in an
-  unknown file.
-- **Archive / container extractor** — list/extract game container files (`.DAT`, GOB, Unity
-  assetbundles) for formats where the save isn't a bare file (e.g. Bard's Tale remaster).
-- **Map browser / viewer** — render full world maps using real game graphics. Kept standalone
-  to keep graphics deps and heavy codec work (e.g. U6's LZW-compressed, object-based map) out
-  of the editor. A TUI grid can't show real sprites, so the design is **bake-then-serve**, with
-  all proprietary-format complexity in the offline pass and none in the viewer:
-  - **Offline bake (per game).** An exporter reads the game's proprietary art via
-    `crates/core`, decodes tiles/sprites/palettes, composes each world, and writes a
-    **generic, self-describing bundle**: a PNG tile pyramid (slippy-map `z/x/y`, or a Deep
-    Zoom image) plus a `manifest.json` (world name, dimensions, tile size, zoom levels, and
-    optional tile legend / labels / points of interest). All game-specific decoding lives
-    here, in static conversion code; the output is inert PNG + JSON.
-  - **Shared export location.** A configured export root (e.g. `[map] export_dir` in
-    `config.toml`) collects every game's bundles under one predictable structure
-    (`<export_dir>/<game>/<world>/…`). You export whichever games you want; they all land here.
-  - **Local web server (primary delivery).** A small Rust server (`axum`) points at the export
-    root, understands its layout, and **dynamically generates a table of contents across all
-    exported games and every world within each** — no hand-maintained index. Serving over
-    `http://localhost` also sidesteps the `file://` `fetch()` restrictions a purely-static
-    open-from-disk page would hit (manifests/JSON load cleanly), and leaves room for later
-    interactivity (live re-export, overlays, cross-map links). The viewer front-end stays
-    game-agnostic: it renders any bundle from its manifest with a browser zoom/pan library
-    (Leaflet or OpenSeadragon). No Electron, and cross-platform for free.
-  - **Multi-world games** (Ultima II's time periods; Ultima III/IV/V overworld + towns +
-    dungeons) export each world as its own bundle; the server lists and links them under their
-    game in the generated TOC.
-  - Baked art is derived from the user's **own installed game** (the exporter runs locally); we
-    never ship game graphics.
-
-Sequencing (earn each abstraction, same discipline as Phase 3): schema explorer first (it
-multiplies every future game), then the codec workbench the next time an encrypted/compressed
-format appears, then the map browser when the visual payoff motivates it. The string ripper
-and archive extractor can start as explorer subcommands and graduate to their own binaries if
-they grow.
 
 ---
 
