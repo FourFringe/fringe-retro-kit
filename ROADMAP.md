@@ -21,9 +21,9 @@ Most recently: Ultima VI (party stats in the uncompressed `OBJLIST`), Wasteland 
 sheets + skills (byte-faithful MSQ writes), GOG/Steam detection with `detect --all`, and
 per-game save-directory resolution from a natural top-level `save_dir`.
 
-**Next up:** deepening existing games (Wasteland items, Ultima VI inventory/spells) or
-distribution polish (`cargo-dist` installers, a Homebrew tap). Save diff / comparison is
-done (see below).
+**Next up:** deepening existing games (Wasteland items, Ultima VI inventory/spells) or the
+remaining distribution polish (a `curl | sh` installer, Windows/Linux binaries). The Homebrew
+tap and save diff / comparison are done (see below).
 
 ---
 
@@ -225,8 +225,13 @@ Library location examples:
       only macOS is published for now)
 - [x] GitHub Actions CI: fmt + clippy + test matrix across macOS / Ubuntu / Windows
 - [x] Release automation: tag-triggered **macOS** builds (Apple Silicon + Intel) → GitHub
-      Releases with tarballs + SHA-256 checksums. Follow-ups: `cargo-dist` installers and a
-      Homebrew tap (needs a tap repo + token); publishing Windows/Linux binaries.
+      Releases with tarballs + SHA-256 checksums.
+- [x] **Homebrew tap** (`FourFringe/homebrew-tap`): a binary formula installs the pre-built
+      release binary (`brew install FourFringe/tap/fringe-retro`); the release workflow
+      renders `packaging/homebrew/fringe-retro.rb` with the new version + checksums and pushes
+      it to the tap (needs a `HOMEBREW_TAP_TOKEN` secret).
+- [ ] `curl | sh` install script for non-Homebrew users
+- [ ] Publish Windows/Linux binaries (CI already builds/tests them)
 
 ---
 
