@@ -14,6 +14,7 @@ use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
 use fringe_retro_core::games::ultima4::{self, Ultima4Save};
 use fringe_retro_core::games::ultima5::{self, Ultima5Save};
+use fringe_retro_core::games::ultima6::{self, Ultima6Save};
 use fringe_retro_core::games::wasteland::{self, WastelandSave};
 use fringe_retro_core::games::GameKind;
 use fringe_retro_core::schema::{Field, FieldKind};
@@ -26,6 +27,7 @@ enum Loaded {
     Ultima3Party(Ultima3Party),
     Ultima4(Ultima4Save),
     Ultima5(Ultima5Save),
+    Ultima6(Ultima6Save),
     Wasteland(WastelandSave),
 }
 
@@ -80,6 +82,8 @@ impl Session {
             Loaded::Ultima4(Ultima4Save::from_bytes(bytes)?)
         } else if bytes.len() == ultima5::SAVE_LEN {
             Loaded::Ultima5(Ultima5Save::from_bytes(bytes)?)
+        } else if bytes.len() == ultima6::OBJLIST_LEN {
+            Loaded::Ultima6(Ultima6Save::from_bytes(bytes)?)
         } else if bytes.len() == ultima2::SAVE_LEN {
             Loaded::Ultima2(Ultima2Save::from_bytes(bytes)?)
         } else if bytes.len() == ultima1::SAVE_LEN {
@@ -112,6 +116,7 @@ impl Session {
             Loaded::Ultima3Roster(_) | Loaded::Ultima3Party(_) => GameKind::Ultima3,
             Loaded::Ultima4(_) => GameKind::Ultima4,
             Loaded::Ultima5(_) => GameKind::Ultima5,
+            Loaded::Ultima6(_) => GameKind::Ultima6,
             Loaded::Wasteland(_) => GameKind::Wasteland,
         }
     }
@@ -135,6 +140,9 @@ impl Session {
             }
             GameKind::Ultima5 => {
                 Loaded::Ultima5(Ultima5Save::from_bytes(vec![0u8; ultima5::SAVE_LEN]).ok()?)
+            }
+            GameKind::Ultima6 => {
+                Loaded::Ultima6(Ultima6Save::from_bytes(vec![0u8; ultima6::OBJLIST_LEN]).ok()?)
             }
             GameKind::Wasteland => return None,
         };
@@ -211,6 +219,18 @@ impl Session {
                 }));
                 entities
             }
+            Loaded::Ultima6(s) => {
+                // Entity 0 is the party-wide state; entities 1..=n are the members.
+                let mut entities = vec![Entity {
+                    index: 0,
+                    label: "Party".to_string(),
+                }];
+                entities.extend(s.occupied_characters().into_iter().map(|i| Entity {
+                    index: i + 1,
+                    label: format!("{}. {}", i + 1, s.character_summary(i)),
+                }));
+                entities
+            }
             Loaded::Wasteland(s) => s
                 .occupied_characters()
                 .into_iter()
@@ -248,6 +268,13 @@ impl Session {
                     ultima5::character_fields()
                 }
             }
+            Loaded::Ultima6(_) => {
+                if entity == 0 {
+                    ultima6::party_fields()
+                } else {
+                    ultima6::character_fields()
+                }
+            }
             Loaded::Wasteland(_) => wasteland::character_fields(),
         }
     }
@@ -278,6 +305,13 @@ impl Session {
                 }
             }
             Loaded::Ultima5(s) => {
+                if entity == 0 {
+                    s.party_get(key)
+                } else {
+                    s.character_get(entity - 1, key)
+                }
+            }
+            Loaded::Ultima6(s) => {
                 if entity == 0 {
                     s.party_get(key)
                 } else {
@@ -356,6 +390,13 @@ impl Session {
                     s.character_set(entity - 1, key, value)
                 }
             }
+            Loaded::Ultima6(s) => {
+                if entity == 0 {
+                    s.party_set(key, value)
+                } else {
+                    s.character_set(entity - 1, key, value)
+                }
+            }
             Loaded::Wasteland(s) => s.character_set(entity, key, value),
         }
         .map_err(|e| anyhow!("{e}"))?;
@@ -374,6 +415,7 @@ impl Session {
             Loaded::Ultima3Party(p) => p.write(&self.path),
             Loaded::Ultima4(s) => s.write(&self.path),
             Loaded::Ultima5(s) => s.write(&self.path),
+            Loaded::Ultima6(s) => s.write(&self.path),
             Loaded::Wasteland(s) => s.write(&self.path),
         }?;
         self.dirty = false;

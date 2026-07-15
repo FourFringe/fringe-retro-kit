@@ -10,7 +10,7 @@
 #
 # Each [games.<id>] table defines one game; <id> is how you refer to it on the command
 # line. Fields:
-#   game        which built-in parser to use: ultima1 | ultima2 | ultima3 | ultima4 | ultima5 | wasteland.
+#   game        which built-in parser to use: ultima1 | ultima2 | ultima3 | ultima4 | ultima5 | ultima6 | wasteland.
 #               Defaults to <id>, so [games.ultima1] needs no `game` key. Use `game` when
 #               your id differs, e.g. [games.u2-gog] with game = "ultima2".
 #   save_dir    directory holding the game's save files (required to use the identifier).
@@ -43,12 +43,18 @@ save_dir = "/Applications/Ultima IV™.app/Contents/Resources/game"
 platform = "gog"
 save_dir = "/Applications/Ultima V™.app/Contents/Resources/game"
 
+# Ultima VI's character sheets live in OBJLIST inside a SAVEGAME subdirectory; point at the
+# game folder and the tool finds it.
+[games.ultima6]
+platform = "gog"
+save_dir = "/Applications/Ultima VI™.app/Contents/Resources/game"
+
 # Wasteland's save is an encrypted directory; `fringe-retro` edits the character sheets.
-# `save_dir` should point at the save-slot directory (the one containing GAME1).
+# Point `save_dir` at the Wasteland folder; the tool picks the active save slot (per LASTSAVE).
 [games.wasteland]
 platform = "steam"
 enabled = true
-save_dir = "/Users/you/Library/Application Support/Wasteland/ENKI"
+save_dir = "/Users/you/Library/Application Support/Wasteland"
 
 # The Save Library: your curated collection of named save snapshots (kept separate from the
 # automatic .bak backups). Set a folder to store them in — local or cloud-synced (Dropbox,

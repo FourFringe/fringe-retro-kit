@@ -53,7 +53,17 @@ fn gog_mac_app_names(kind: GameKind) -> &'static [&'static str] {
         GameKind::Ultima3 => &["Ultima III"],
         GameKind::Ultima4 => &["Ultima IV"],
         GameKind::Ultima5 => &["Ultima V"],
+        GameKind::Ultima6 => &["Ultima VI"],
         GameKind::Wasteland => &[],
+    }
+}
+
+/// The save directory within a GOG bundle, relative to the `.app`. Most games save into the
+/// DOSBox game directory; Ultima VI keeps its object files in a `SAVEGAME` subdirectory.
+fn gog_mac_save_subpath(kind: GameKind) -> &'static str {
+    match kind {
+        GameKind::Ultima6 => "Contents/Resources/game/SAVEGAME",
+        _ => GOG_MAC_SAVE_SUBPATH,
     }
 }
 
@@ -108,7 +118,7 @@ fn detect_in_roots(roots: &[PathBuf]) -> Vec<DetectedGame> {
         }
         if let Some(install_dir) = find_gog_bundle(roots, names) {
             // Confirm it's a DOSBox bundle by finding the save directory.
-            let save_dir = install_dir.join(GOG_MAC_SAVE_SUBPATH);
+            let save_dir = install_dir.join(gog_mac_save_subpath(kind));
             if save_dir.is_dir() {
                 let save_present = save_dir.join(kind.default_save_file()).exists();
                 found.push(DetectedGame {
@@ -166,7 +176,7 @@ fn steam_save_dir(kind: GameKind, home: &Path) -> Option<PathBuf> {
 
 /// The active Wasteland save slot under `root`: the one named by `LASTSAVE`, else the first
 /// slot directory that contains a `GAME1` save.
-fn wasteland_slot(root: &Path) -> Option<PathBuf> {
+pub(crate) fn wasteland_slot(root: &Path) -> Option<PathBuf> {
     if !root.is_dir() {
         return None;
     }

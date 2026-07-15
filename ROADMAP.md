@@ -31,8 +31,9 @@ Agreed next steps, in order:
    location). Plain little-endian binary; readable and editable, verified against a real
    save.
 4. Then pick among **Phase 5** (Save Library), **Wasteland** records + the codec/Transform
-   pipeline, or **Phase 6** (platform detection + CI). **Ultima VI** is a much larger effort
-   (object-based, LZW-compressed, party-as-objects across ~70 files) and is deferred.
+   pipeline, or **Phase 6** (platform detection + CI). **Ultima VI** turned out to be
+   tractable after all — its character stats are plain arrays in the uncompressed `OBJLIST`
+   file (the LZW/object-graph complexity is only for map objects, which we don't edit).
 
 ---
 
@@ -233,10 +234,13 @@ save format effectively a published, tested spec.
 Grouped by codec complexity (which parsing engine each needs):
 
 - **Done / in progress:** Ultima I ✅, Ultima II ✅, Ultima III ✅, Ultima IV ✅, Ultima V ✅,
-  Wasteland ✅ (MSQ cipher + block scan + character sheets, byte-faithful writes; skills &
-  items not yet exposed).
-- **Easy extensions — same family as the Ultimas:** Ultima VI (`Nuvie`) — larger effort:
-  object-based, LZW-compressed, party stored as world objects across ~70 files.
+  Ultima VI ✅ (party stats + names in `OBJLIST`, byte-faithful; map objects / inventory /
+  spells not yet exposed), Wasteland ✅ (MSQ cipher + block scan + character sheets +
+  skills, byte-faithful writes; items not yet exposed).
+- **Easy extensions — same family as the Ultimas:** Ultima VI (`Nuvie`) ✅ — character stats
+  are flat arrays in the uncompressed `OBJLIST` (done). The object-based, LZW-compressed map
+  data (party-as-objects across ~70 files) remains unhandled, but isn't needed for editing
+  character sheets.
 - **Candidates (owned & installed, to investigate after Wasteland):**
   - **Magic Carpet 1 & 2** (Bullfrog, DOS via GOG/DOSBox). Saves live inside the game
     directory — `…\SAVE` for Magic Carpet, `…\GAME\NETHERW\SAVE` for Magic Carpet 2.

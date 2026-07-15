@@ -493,10 +493,35 @@ See [docs/formats/ultima5.md](docs/formats/ultima5.md) for the byte-level layout
 
 ---
 
+### Ultima VI character fields
+
+Ultima VI's save is a directory; the party's character sheets live in an `OBJLIST` file
+inside a `SAVEGAME` subdirectory. Configure `ultima6` with `save_dir` pointing at the **game
+folder** — the tool finds `SAVEGAME/OBJLIST` for you — or pass the `OBJLIST` path directly.
+Party members use `--slot 1`…`n`; party-wide fields are addressed by name. Writes are
+**byte-faithful** (`OBJLIST` is uncompressed and unchecksummed).
+
+```bash
+fringe-retro inspect  ultima6                       # via a configured id
+fringe-retro get  ultima6 strength --slot 1         # the Avatar's strength
+fringe-retro set  ultima6 strength 30 --slot 1
+fringe-retro set  ultima6 karma 99                  # party-wide field
+```
+
+**Party-wide:** `karma` (0–99), `gender` (Male, Female).
+
+**Per character (`--slot`):** `name` (≤ 13 chars), `strength` / `dexterity` / `intelligence`
+(1–30), `experience` (0–9999), `hp` (0–255), `level` (1–8), `magic` (0–255).
+
+See [docs/formats/ultima6.md](docs/formats/ultima6.md) for the byte-level layout.
+
+---
+
 ### Wasteland character fields
 
-Wasteland's save is an encrypted directory; point commands at its `GAME1` file (or a
-configured `wasteland` id). The seven Ranger slots use `--slot 1`…`7`, and writes are
+Wasteland's save is an encrypted directory. Configure `wasteland` with `save_dir` pointing at
+the **Wasteland folder** — the tool picks the active save slot (per the `LASTSAVE` file) — or
+pass a `GAME1` path directly. The seven Ranger slots use `--slot 1`…`7`, and writes are
 **byte-faithful** — a re-save with no changes reproduces the original file exactly.
 
 **Per character (`--slot`):** `name` (≤ 13 chars), `gender` (Male, Female), `nationality`

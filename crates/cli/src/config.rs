@@ -186,7 +186,7 @@ impl Config {
                 anyhow::anyhow!("game '{key}' has no `save_dir` set in {DEFAULT_CONFIG_FILE}")
             })?;
             let name = file.unwrap_or_else(|| kind.default_save_file());
-            return Ok(dir.join(name));
+            return Ok(resolve_save_dir(kind, dir).join(name));
         }
 
         // Not a known identifier: use the argument verbatim as a filesystem path.
@@ -204,7 +204,7 @@ impl Config {
             games.push(ResolvedGame {
                 id: id.clone(),
                 kind,
-                save_dir: entry.save_dir.clone(),
+                save_dir: entry.save_dir.as_deref().map(|d| resolve_save_dir(kind, d)),
                 platform: entry.platform.clone(),
                 install_dir: entry.install_dir.clone(),
                 detected: entry.detected,
@@ -222,7 +222,7 @@ impl Config {
         Ok(ResolvedGame {
             id: key.clone(),
             kind,
-            save_dir: entry.save_dir.clone(),
+            save_dir: entry.save_dir.as_deref().map(|d| resolve_save_dir(kind, d)),
             platform: entry.platform.clone(),
             install_dir: entry.install_dir.clone(),
             detected: entry.detected,
@@ -269,6 +269,27 @@ pub fn config_path() -> PathBuf {
     std::env::var_os(CONFIG_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_FILE))
+}
+
+/// Resolve the directory that actually holds a game's save files.
+///
+/// A game's `save_dir` can name a natural top-level directory (e.g. the GOG game folder);
+/// this applies each game's internal layout on top of it:
+/// - **Ultima VI** keeps its object files in a `SAVEGAME` subdirectory.
+/// - **Wasteland** stores each saved party in its own slot directory (the active one is named
+///   by the `LASTSAVE` file).
+///
+/// If the save file already sits directly in `dir`, `dir` is returned unchanged — so pointing
+/// straight at a `SAVEGAME`/slot directory keeps working.
+fn resolve_save_dir(kind: GameKind, dir: &Path) -> PathBuf {
+    if dir.join(kind.default_save_file()).exists() {
+        return dir.to_path_buf();
+    }
+    match kind {
+        GameKind::Ultima6 => dir.join("SAVEGAME"),
+        GameKind::Wasteland => detect::wasteland_slot(dir).unwrap_or_else(|| dir.to_path_buf()),
+        _ => dir.to_path_buf(),
+    }
 }
 
 /// Expand a leading `~` to the user's home directory (`$HOME`); other paths are unchanged.
@@ -331,6 +352,48 @@ mod tests {
             cfg.resolve_save_path(Path::new("PLAYER")).unwrap(),
             PathBuf::from("PLAYER")
         );
+    }
+
+    #[test]
+    fn ultima6_save_dir_resolves_savegame_subdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let game = dir.path();
+        std::fs::create_dir_all(game.join("SAVEGAME")).unwrap();
+        std::fs::write(game.join("SAVEGAME/OBJLIST"), b"x").unwrap();
+        let cfg = parse(&format!(
+            "[games.ultima6]\nsave_dir = {:?}\n",
+            game.to_str().unwrap()
+        ));
+        let p = cfg.resolve_save_path(Path::new("ultima6")).unwrap();
+        assert_eq!(p, game.join("SAVEGAME/OBJLIST"));
+    }
+
+    #[test]
+    fn wasteland_save_dir_resolves_active_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("ENKI")).unwrap();
+        std::fs::write(root.join("ENKI/GAME1"), b"x").unwrap();
+        std::fs::write(root.join("LASTSAVE"), "Enki\r\n").unwrap();
+        let cfg = parse(&format!(
+            "[games.wasteland]\nsave_dir = {:?}\n",
+            root.to_str().unwrap()
+        ));
+        let p = cfg.resolve_save_path(Path::new("wasteland")).unwrap();
+        assert_eq!(p, root.join("ENKI/GAME1"));
+    }
+
+    #[test]
+    fn save_dir_pointing_directly_at_the_file_dir_is_unchanged() {
+        // Old-style config (save_dir already the SAVEGAME/slot dir) still resolves.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("OBJLIST"), b"x").unwrap();
+        let cfg = parse(&format!(
+            "[games.ultima6]\nsave_dir = {:?}\n",
+            dir.path().to_str().unwrap()
+        ));
+        let p = cfg.resolve_save_path(Path::new("ultima6")).unwrap();
+        assert_eq!(p, dir.path().join("OBJLIST"));
     }
 
     #[test]

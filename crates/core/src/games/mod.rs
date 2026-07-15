@@ -9,6 +9,7 @@ pub mod ultima2;
 pub mod ultima3;
 pub mod ultima4;
 pub mod ultima5;
+pub mod ultima6;
 pub mod wasteland;
 
 /// A game with built-in save support. Used to map a library-manifest identifier to a
@@ -20,17 +21,19 @@ pub enum GameKind {
     Ultima3,
     Ultima4,
     Ultima5,
+    Ultima6,
     Wasteland,
 }
 
 impl GameKind {
     /// Every supported game, in a stable order.
-    pub const ALL: [GameKind; 6] = [
+    pub const ALL: [GameKind; 7] = [
         GameKind::Ultima1,
         GameKind::Ultima2,
         GameKind::Ultima3,
         GameKind::Ultima4,
         GameKind::Ultima5,
+        GameKind::Ultima6,
         GameKind::Wasteland,
     ];
 
@@ -42,6 +45,7 @@ impl GameKind {
             GameKind::Ultima3 => "ultima3",
             GameKind::Ultima4 => "ultima4",
             GameKind::Ultima5 => "ultima5",
+            GameKind::Ultima6 => "ultima6",
             GameKind::Wasteland => "wasteland",
         }
     }
@@ -54,6 +58,7 @@ impl GameKind {
             GameKind::Ultima3 => "Ultima III",
             GameKind::Ultima4 => "Ultima IV",
             GameKind::Ultima5 => "Ultima V",
+            GameKind::Ultima6 => "Ultima VI",
             GameKind::Wasteland => "Wasteland",
         }
     }
@@ -73,6 +78,7 @@ impl GameKind {
             GameKind::Ultima3 => "ROSTER.ULT",
             GameKind::Ultima4 => "PARTY.SAV",
             GameKind::Ultima5 => "SAVED.GAM",
+            GameKind::Ultima6 => "OBJLIST",
             GameKind::Wasteland => "GAME1",
         }
     }
@@ -87,6 +93,7 @@ impl GameKind {
             GameKind::Ultima3 => &["ROSTER.ULT", "PARTY.ULT"],
             GameKind::Ultima4 => &["PARTY.SAV"],
             GameKind::Ultima5 => &["SAVED.GAM"],
+            GameKind::Ultima6 => &["OBJLIST"],
             GameKind::Wasteland => &["GAME1"],
         }
     }
