@@ -10,20 +10,23 @@ Conservative by design: solve one problem well before expanding.
 
 ## Current status & near-term plan
 
-Phases 1–6 are effectively complete. **Seven games** — Ultima I–VI and Wasteland — are
+Phases 1–6 are complete. **Seven games** — Ultima I–VI and Wasteland — are
 readable and editable through both the CLI and the interactive TUI: a section-grouped
 editor with an enum picker, automatic backups + on-demand snapshots, a curated Save
 Library, character templates (with in-app capture), and a per-game save-file chooser.
 Games are auto-detected (GOG + Steam on macOS), CI runs on macOS/Ubuntu/Windows, and
-tagged releases publish macOS binaries.
+tagged releases publish macOS, Linux, and Windows binaries (Homebrew tap + `curl | sh`
+installer).
 
 Most recently: Ultima VI (party stats in the uncompressed `OBJLIST`), Wasteland character
 sheets + skills (byte-faithful MSQ writes), GOG/Steam detection with `detect --all`, and
 per-game save-directory resolution from a natural top-level `save_dir`.
 
-**Next up:** deepening existing games (Wasteland items, Ultima VI inventory/spells). The core
-distribution work — the Homebrew tap, the `curl | sh` installer, cross-platform release
-binaries (macOS/Linux/Windows), and save diff / comparison — is done (see below).
+**Next up:** forward work now lives in two optional, non-blocking tracks — **Phase 7
+(Additional Games)** and **Phase 8 (Engine Enhancements)**. The nearest wins are deepening
+games we already own saves for (Wasteland items, Ultima VI inventory/spells); the parsing
+engine, distribution (Homebrew tap, `curl | sh` installer, cross-platform binaries), and save
+diff / comparison are all done (see below).
 
 ---
 
@@ -51,7 +54,6 @@ Detailed plan: **[PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md)**.
 
 - [x] Cargo workspace (`crates/core` library + `crates/cli` binary)
 - [x] Error handling (`thiserror` + `anyhow`)
-- [ ] Logging to file (via `tracing`) — deferred, not yet wired up
 - [x] Parse `PLAYER*.U1` (fixed offsets; hand-rolled little-endian reads — `binrw` proved unnecessary for this simple layout)
 - [x] Inspect / display fields (read-only CLI: `inspect` / `get` / `dump`)
 - [x] Edit values, validated (`set`)
@@ -85,54 +87,35 @@ Phase 6; the manifest is the manual foundation it will later populate.
 
 ## Phase 3 — Parsing Engines & Per-Game Schemas
 
-Extracted only **after** several games are hardcoded, so the abstraction is earned. The four
-hand-mapped games (Ultima I/II/III, Wasteland) showed that parsing splits into two layers,
-and the architecture follows that seam (see
-[ARCHITECTURE.md](ARCHITECTURE.md)):
+**Status: complete.** Extracted only *after* several games were hardcoded, so the abstraction
+was earned. The hand-mapped games showed that parsing splits into two layers, and the
+architecture follows that seam (see [ARCHITECTURE.md](ARCHITECTURE.md)):
 
-- **Codec / container layer (Rust code).** Encryption, compression, checksums, block
-  scanning, save-as-directory, exotic string encodings. Small and reusable per *family*
-  (e.g. the Wasteland MSQ cipher would be reused by other MSQ-based games).
+- **Codec / container layer (Rust code).** Encryption, checksums, block scanning,
+  save-as-directory, exotic string encodings — small, per-*family* code (e.g. Wasteland's MSQ
+  cipher). Today this is inlined in each game module; factoring it into a reusable pipeline is
+  a future refinement (see Phase 8).
 - **Field-schema layer (data).** Fixed-offset fields over a plaintext buffer: integers
-  (LE/BE), BCD, enums (numeric or letter), bitfields, arrays, sub-records. The Ultimas are
-  essentially 100% this layer.
+  (LE/BE), scaled ints, BCD, enums (numeric or ASCII-letter), bitfields, booleans, names, and
+  record arrays. The Ultimas are essentially 100% this layer.
 
-Planned work:
+Delivered:
 
-- [ ] Generic binary reader/writer with a field model (int LE/BE, BCD, enum, bitfield,
-      string, array, struct) + "preserve unknown bytes" + validation
-- [ ] A `Transform`/codec pipeline in front of the schema (identity for the Ultimas;
-      MSQ-decrypt for Wasteland) with a symmetric write path
-- [ ] Pluggable string codecs (ASCIIZ, BCD, Wasteland 5-bit table)
-- [ ] Migrate the hardcoded Ultimas onto the schema engine to prove it
-- [ ] **Tiered extensibility:** simple fixed-layout games become user-authorable schema
-      files; encrypted/compressed games ship as official Rust codecs
+- [x] Generic field-schema engine ([crates/core/src/schema.rs](crates/core/src/schema.rs)):
+      `Field` + `FieldKind` (Name, Int LE/BE, Scaled, Bcd, Byte, Bool, Enum, Letter, Bitfield)
+      over a `&[u8]` buffer at a base offset, preserving unknown bytes by construction and
+      validating on write
+- [x] A record model that covers a single record (Ultima I/II), an array of records (Ultima
+      III's roster), a header-plus-members file (Ultima III's party), and column-array stats
+      (Ultima VI's `OBJLIST`) with the same primitives
+- [x] **All seven games run on the engine** — Ultima I–VI and Wasteland express their save
+      layout as `Field` tables; Wasteland layers its MSQ decrypt/encrypt + block checksum in
+      front of the schema
+- [x] String handling as schema field kinds (null-terminated ASCII names, BCD digits)
 
-**Open decision — schema / config format (do NOT lock yet).** Prove the abstraction as a
-Rust type first; only then decide whether the field schema graduates to a hand-writable
-text format. Leading candidates are **YAML** (friendly for field tables) for game schemas
-and **TOML** (native to Rust) for app settings (the original `serde_yaml` is unmaintained,
-so we'd use a maintained fork). A schema might conceptually look like:
-
-```yaml
-game:
-  name: Ultima I
-
-saveFiles:
-  - player*.u1
-
-fields:
-  strength:
-    type: i16le
-    offset: 0x18
-    label: Strength
-
-  transport:
-    type: enum
-    offset: 0x30
-```
-
-Known byte layouts for implemented games live in [docs/formats/](docs/formats/README.md).
+Remaining engine work — data-driven/user-authorable schemas, a reusable codec pipeline, and
+the schema-file-format decision — has moved to **Phase 8 (Engine Enhancements)**. Known byte
+layouts for implemented games live in [docs/formats/](docs/formats/README.md).
 
 ---
 
@@ -214,7 +197,6 @@ Library location examples:
 
 ## Phase 6 — Platform Integration
 
-- [ ] Proper per-OS path handling (`directories` crate)
 - [x] GOG (macOS) + Steam (macOS) detection + `detect --write` to append found games to the
       config, or `[detect] auto` to fold them in at runtime · Windows/Linux deferred (need
       machines to test on) · manual path override still works
@@ -276,6 +258,126 @@ Grouped by codec complexity (which parsing engine each needs):
 - **Deferred — no test machine:** **Fallout 1 & 2** (owned on Steam; big-endian ints,
   save-as-directory, well RE'd by TeamX / F12se) is Windows-only from this Mac, so it's on
   hold until a Windows system is available.
+
+---
+
+## Phase 8 — Engine Enhancements
+
+Infrastructure and parsing refinements that the current feature set doesn't need but that
+would pay off as the game roster and supported platforms grow. **None are blocking** — they're
+collected here so they don't get lost inside earlier completed phases.
+
+### Parsing / schema
+
+- [ ] **Data-driven, user-authorable game schemas.** Graduate the in-code `Field` tables to a
+      hand-writable text format so simple fixed-layout games can be added without Rust.
+      Encrypted/compressed games would still ship as official Rust codecs.
+- [ ] **Reusable codec pipeline.** Factor the per-game container logic (currently inlined —
+      e.g. Wasteland's MSQ decrypt/encrypt + block checksum) into a `Transform` pipeline in
+      front of the schema, with a symmetric write path, so a second MSQ-family game reuses it.
+- [ ] **Pluggable string codecs** beyond ASCIIZ/BCD, if a future game needs one (e.g. a packed
+      5-bit table).
+
+**Open decision — schema / config format (do NOT lock yet).** The abstraction is now proven as
+a Rust type; the remaining question is whether the field schema graduates to a hand-writable
+text format. Leading candidates are **YAML** (friendly for field tables) for game schemas and
+**TOML** (native to Rust) for app settings (the original `serde_yaml` is unmaintained, so a
+maintained fork would be used). A schema might conceptually look like:
+
+```yaml
+game:
+  name: Ultima I
+
+saveFiles:
+  - player*.u1
+
+fields:
+  strength:
+    type: i16le
+    offset: 0x18
+    label: Strength
+
+  transport:
+    type: enum
+    offset: 0x30
+```
+
+### Platform / operations
+
+- [ ] Proper per-OS path handling via the `directories` crate (config / data / cache dirs)
+- [ ] File logging via `tracing` for diagnostics in bug reports (deferred since Phase 1)
+
+---
+
+## Kit tools (standalone binaries)
+
+The "kit" in the name: focused companion binaries that share `crates/core`
+(`fringe-retro-core`) but carry complexity we deliberately keep out of the polished
+`fringe-retro` app. The dividing line: **player-facing** features stay in the main CLI/TUI;
+**researcher/dev-facing** tooling, heavy dependencies (graphics), and experimental codecs
+live in their own binaries. These would double as our own reverse-engineering accelerators
+when mapping a new game.
+
+**Design rule:** build them **CLI-first with plain-text / `--json` output** so they're
+scriptable, diffable, and usable in automated / AI-assisted sessions. A TUI, if any, is a
+thin shell over that text-capable core — never the only interface.
+
+- **Schema explorer / spelunker** — packages the manual RE workflow into repeatable commands,
+  and becomes the authoring front-end for the Phase 8 data-driven schema files (it emits what
+  the main tool consumes). Core primitives:
+  - **Value finder** — locate a known value (e.g. `gold = 12450`) across encodings
+    (u16 LE/BE, u24, BCD, ASCII) → candidate offsets.
+  - **Guided diff** — "save A = before, save B = after I raised STR 15→30" → highlight the
+    changed bytes and infer the encoding from the delta (builds on core's byte `diff`).
+  - **Hypothesis overlay** — render a tentative `Field` table over a buffer live, tuning
+    offsets until values read sensibly.
+  - **Stride/record detector** — autocorrelation to find repeating record sizes (rosters,
+    party arrays).
+  - **Schema export** — dump a confirmed layout in the eventual schema format.
+- **Codec workbench / cipher lab** — decrypt/decompress a blob, dump plaintext, re-encrypt,
+  and verify a byte-for-byte round-trip; plus a **checksum solver** that tries candidate
+  algorithms against known-good blocks (the carry-fold-vs-negated-sum detective work from
+  Wasteland, automated). Reusable for MSQ, U6 LZW, Daggerfall RLE, Fallout, etc.
+- **Live watch / logger** — a research-grade `watch`: monitor a save while playing and log
+  timestamped byte deltas, to correlate in-game actions with byte changes. Raw and
+  session-oriented, vs. the main tool's player-facing semantic `watch`/`diff`.
+- **String ripper** — extract embedded text under multiple encodings (ASCIIZ, packed 5-bit,
+  …) to find name/item/spell tables and dialogue — often the fastest way to anchor in an
+  unknown file.
+- **Archive / container extractor** — list/extract game container files (`.DAT`, GOB, Unity
+  assetbundles) for formats where the save isn't a bare file (e.g. Bard's Tale remaster).
+- **Map browser / viewer** — render full world maps using real game graphics. Kept standalone
+  to keep graphics deps and heavy codec work (e.g. U6's LZW-compressed, object-based map) out
+  of the editor. A TUI grid can't show real sprites, so the design is **bake-then-serve**, with
+  all proprietary-format complexity in the offline pass and none in the viewer:
+  - **Offline bake (per game).** An exporter reads the game's proprietary art via
+    `crates/core`, decodes tiles/sprites/palettes, composes each world, and writes a
+    **generic, self-describing bundle**: a PNG tile pyramid (slippy-map `z/x/y`, or a Deep
+    Zoom image) plus a `manifest.json` (world name, dimensions, tile size, zoom levels, and
+    optional tile legend / labels / points of interest). All game-specific decoding lives
+    here, in static conversion code; the output is inert PNG + JSON.
+  - **Shared export location.** A configured export root (e.g. `[map] export_dir` in
+    `config.toml`) collects every game's bundles under one predictable structure
+    (`<export_dir>/<game>/<world>/…`). You export whichever games you want; they all land here.
+  - **Local web server (primary delivery).** A small Rust server (`axum`) points at the export
+    root, understands its layout, and **dynamically generates a table of contents across all
+    exported games and every world within each** — no hand-maintained index. Serving over
+    `http://localhost` also sidesteps the `file://` `fetch()` restrictions a purely-static
+    open-from-disk page would hit (manifests/JSON load cleanly), and leaves room for later
+    interactivity (live re-export, overlays, cross-map links). The viewer front-end stays
+    game-agnostic: it renders any bundle from its manifest with a browser zoom/pan library
+    (Leaflet or OpenSeadragon). No Electron, and cross-platform for free.
+  - **Multi-world games** (Ultima II's time periods; Ultima III/IV/V overworld + towns +
+    dungeons) export each world as its own bundle; the server lists and links them under their
+    game in the generated TOC.
+  - Baked art is derived from the user's **own installed game** (the exporter runs locally); we
+    never ship game graphics.
+
+Sequencing (earn each abstraction, same discipline as Phase 3): schema explorer first (it
+multiplies every future game), then the codec workbench the next time an encrypted/compressed
+format appears, then the map browser when the visual payoff motivates it. The string ripper
+and archive extractor can start as explorer subcommands and graduate to their own binaries if
+they grow.
 
 ---
 
