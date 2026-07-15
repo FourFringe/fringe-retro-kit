@@ -922,7 +922,10 @@ impl App {
         if !entries.is_empty() {
             list.select(Some(0));
         }
-        let preview = Inspector::new("Preview".to_string(), snapshot_preview(entries.first()));
+        let preview = Inspector::new(
+            "Preview".to_string(),
+            snapshot_preview(entries.first(), save_dir.as_deref()),
+        );
         self.stack.push(Screen::Library(LibraryList {
             title: format!("Library — {title}"),
             kind,
@@ -1889,7 +1892,9 @@ fn build_snapshot_items(library: &Library, kind: GameKind) -> Vec<SnapshotItem> 
 }
 
 /// A decoded preview of a snapshot: its metadata plus each save file's inspection.
-fn snapshot_preview(item: Option<&SnapshotItem>) -> Vec<String> {
+/// Preview a Library snapshot: a per-file diff against the current save ("what changed since
+/// this snapshot"), followed by each file's full contents so absolute values stay visible.
+fn snapshot_preview(item: Option<&SnapshotItem>, save_dir: Option<&Path>) -> Vec<String> {
     let Some(item) = item else {
         return vec!["(no snapshots yet — press 'a' to add one)".to_string()];
     };
@@ -1900,6 +1905,32 @@ fn snapshot_preview(item: Option<&SnapshotItem>) -> Vec<String> {
     if let Some(notes) = &item.notes {
         lines.push(format!("notes: {notes}"));
     }
+
+    // Diff each snapshot file against the current save (snapshot -> current).
+    if let Some(save_dir) = save_dir {
+        lines.push(String::new());
+        lines.push("Changes since this snapshot:".to_string());
+        for file in &item.files {
+            lines.push(format!("{file}:"));
+            let current = save_dir.join(file);
+            if current.exists() {
+                match crate::compare::compare(&item.dir.join(file), &current) {
+                    Ok(comparison) => lines.extend(
+                        crate::compare::report(&comparison)
+                            .into_iter()
+                            .map(|l| format!("  {l}")),
+                    ),
+                    Err(e) => lines.push(format!("  (cannot diff: {e})")),
+                }
+            } else {
+                lines.push("  (not in the current save)".to_string());
+            }
+        }
+    }
+
+    // Each file's full contents.
+    lines.push(String::new());
+    lines.push("── Snapshot contents ──".to_string());
     for file in &item.files {
         lines.push(String::new());
         lines.push(format!("{file}:"));
@@ -1916,7 +1947,10 @@ fn snapshot_preview(item: Option<&SnapshotItem>) -> Vec<String> {
 
 /// Rebuild the preview pane for whichever snapshot is currently selected.
 fn refresh_library_preview(ll: &mut LibraryList) {
-    ll.preview = Inspector::new("Preview".to_string(), snapshot_preview(ll.selected()));
+    ll.preview = Inspector::new(
+        "Preview".to_string(),
+        snapshot_preview(ll.selected(), ll.save_dir.as_deref()),
+    );
 }
 
 fn draw_library(frame: &mut Frame, area: Rect, ll: &mut LibraryList) {
@@ -3048,6 +3082,39 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("100 -> 500")));
         // Then the backup's full contents (absolute values, incl. the name).
         assert!(text.contains("Backup contents"));
+        assert!(text.contains("Enki"));
+    }
+
+    #[test]
+    fn snapshot_preview_shows_per_file_diff_then_contents() {
+        use fringe_retro_core::games::ultima1;
+        let snap_dir = tempfile::tempdir().unwrap();
+        let save_dir = tempfile::tempdir().unwrap();
+
+        let mut snap = vec![0u8; ultima1::SAVE_LEN];
+        snap[0..4].copy_from_slice(b"Enki");
+        snap[0x24..0x26].copy_from_slice(&100u16.to_le_bytes()); // gold 100 (snapshot)
+        std::fs::write(snap_dir.path().join("PLAYER1.U1"), &snap).unwrap();
+        let mut current = snap.clone();
+        current[0x24..0x26].copy_from_slice(&500u16.to_le_bytes()); // gold 500 (current save)
+        std::fs::write(save_dir.path().join("PLAYER1.U1"), &current).unwrap();
+
+        let item = SnapshotItem {
+            name: "Save".to_string(),
+            slug: "save".to_string(),
+            notes: None,
+            updated: None,
+            label: "Save".to_string(),
+            dir: snap_dir.path().to_path_buf(),
+            files: vec!["PLAYER1.U1".to_string()],
+        };
+
+        let lines = snapshot_preview(Some(&item), Some(save_dir.path()));
+        let text = lines.join("\n");
+        // Per-file diff (snapshot 100 -> current 500) then the full snapshot contents.
+        assert!(text.contains("Changes since this snapshot:"));
+        assert!(lines.iter().any(|l| l.contains("100 -> 500")));
+        assert!(text.contains("── Snapshot contents ──"));
         assert!(text.contains("Enki"));
     }
 }

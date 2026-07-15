@@ -39,10 +39,9 @@ compares a save against its most recent automatic backup.
 - In the TUI: the backup browser's preview leads with a "changes since this backup" diff above
   the backup's full contents, and the restore confirmation previews "restoring will change …"
   before you commit.
-- [ ] **Save Library snapshot diffs** (later) — compare a Library snapshot against the current
-  save (or another snapshot). More involved than a backup diff because a snapshot is a whole
-  save-*set* (a directory, possibly several files for Wasteland / Ultima VI), so it needs to
-  pick each game's primary file to diff, and probably its own TUI view.
+- Save Library snapshot previews likewise lead with a per-file diff against the current save
+  (all of a snapshot's files — e.g. Ultima III's `ROSTER.ULT` and `PARTY.ULT`) above the full
+  contents, reusing the same preview pane (no extra UI).
 
 ---
 

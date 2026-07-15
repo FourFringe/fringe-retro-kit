@@ -119,7 +119,9 @@ override links.
 
 Press `L` on the **games list** to open that game's **Save Library** — your curated
 snapshots (see [`library`](#-library-add--list--view--restore--rename--duplicate--delete)
-below). A list of snapshots sits beside a decoded preview of the selected one. From here you
+below). A list of snapshots sits beside a preview of the selected one: a **per-file diff**
+against the current save at the top (every file in the snapshot — e.g. Ultima III's
+`ROSTER.ULT` and `PARTY.ULT`), followed by each file's full decoded contents. From here you
 can manage the whole collection:
 
 - `a` — **add** a snapshot of the game's current save (type a name, `Enter`).
