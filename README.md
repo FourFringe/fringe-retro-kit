@@ -103,9 +103,9 @@ Candidates (owned or of interest; may or may not be reached):
 
 Deferred (no test machine): Fallout 1 & 2 — Windows-only from the current setup.
 
-Byte-level format notes for implemented games live in
-[docs/formats/](docs/formats/README.md). Support for additional games should grow through
-community contributions.
+Byte-level format notes for implemented games — character **saves**, world **maps**, and
+**tile graphics** — live in [docs/formats/](docs/formats/README.md). Support for additional
+games should grow through community contributions.
 
 ---
 
@@ -125,7 +125,8 @@ It exists solely to help users inspect, preserve, and edit their own save files.
 ## Documentation
 
 - [COMMANDS.md](COMMANDS.md) — the command reference (what the tool can do today)
-- [docs/formats/](docs/formats/README.md) — byte-level save-format documentation (incl. original Ultima II research)
+- [docs/formats/](docs/formats/README.md) — byte-level file-format documentation: character
+  saves, world maps, and tile graphics (incl. original Ultima II research)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — decisions we've committed to
 - [ROADMAP.md](ROADMAP.md) — what's planned but not yet built or decided
 - [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md) — the first milestone (complete)
