@@ -19,6 +19,11 @@
         font-family: system-ui, sans-serif;
         padding: 2rem;
       }
+      /* Keep the pixel art crisp when zoomed in past native resolution. */
+      .leaflet-tile {
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
       .home {
         position: absolute;
         z-index: 1000;
@@ -45,10 +50,14 @@
         }
         const base = "/b" + bundle;
         const m = await (await fetch(base + "/manifest.json")).json();
+        // Allow zooming in past native resolution; Leaflet upscales the native tiles
+        // (crisp, thanks to image-rendering above) instead of us baking bigger tiles.
+        const EXTRA_ZOOM = 2;
+        const maxZoom = m.maxZoom + EXTRA_ZOOM;
         const map = L.map("map", {
           crs: L.CRS.Simple,
           minZoom: 0,
-          maxZoom: m.maxZoom,
+          maxZoom: maxZoom,
           attributionControl: false,
         });
         // Place the pixel-space image into Leaflet's tile grid at native zoom.
@@ -58,7 +67,8 @@
         L.tileLayer(base + "/{z}/{x}/{y}.png", {
           tileSize: m.tileSize,
           minZoom: 0,
-          maxZoom: m.maxZoom,
+          maxZoom: maxZoom,
+          maxNativeZoom: m.maxZoom,
           bounds: bounds,
           noWrap: true,
         }).addTo(map);
