@@ -97,33 +97,37 @@
           L.control.layers(null, overlays, { collapsed: false }).addTo(map);
         }
 
-        // "You are here": the party's current position, read from the save.
+        // "You are here": the party's live position, streamed from the server, which watches
+        // the save file and pushes an update whenever you save in-game.
         let playerMarker = null;
-        async function updatePlayer() {
-          try {
-            const pos = await (
-              await fetch("/api/position?game=" + encodeURIComponent(m.game))
-            ).json();
-            if (pos.px == null || pos.py == null) return;
-            const ll = at(pos.px, pos.py);
-            if (playerMarker) {
-              playerMarker.setLatLng(ll);
-            } else {
-              playerMarker = L.circleMarker(ll, {
-                radius: 7,
-                color: "#ffffff",
-                weight: 3,
-                fillColor: "#39ff14",
-                fillOpacity: 0.9,
-              })
-                .bindTooltip("You are here", { permanent: false })
-                .addTo(map);
-            }
-          } catch (e) {
-            /* no save / not available */
+        function setPlayer(px, py) {
+          const ll = at(px, py);
+          if (playerMarker) {
+            playerMarker.setLatLng(ll);
+          } else {
+            playerMarker = L.circleMarker(ll, {
+              radius: 7,
+              color: "#ffffff",
+              weight: 3,
+              fillColor: "#39ff14",
+              fillOpacity: 0.9,
+            })
+              .bindTooltip("You are here")
+              .addTo(map);
           }
         }
-        updatePlayer();
+        const events = new EventSource(
+          "/api/position/stream?game=" + encodeURIComponent(m.game)
+        );
+        events.onmessage = (ev) => {
+          try {
+            const pos = JSON.parse(ev.data);
+            if (pos.px != null && pos.py != null) setPlayer(pos.px, pos.py);
+          } catch (e) {
+            /* ignore malformed events */
+          }
+        };
+        // EventSource reconnects automatically if the connection drops.
       }
       main();
     </script>

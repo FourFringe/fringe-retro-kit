@@ -929,7 +929,8 @@ The viewer is offline-friendly: Leaflet is served locally, so no internet connec
 
 The overworld view also shows **landmark markers** (castles, towns, signposts — toggleable in
 the top-right control) and a **"you are here"** marker at the party's current position, read
-live from the save file (`PLAYER1.U1`).
+live from the save file (`PLAYER1.U1`). The server watches the save and pushes updates over
+Server-Sent Events, so the marker moves the moment you save in-game.
 
 ---
 

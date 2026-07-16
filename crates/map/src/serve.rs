@@ -5,16 +5,21 @@
 //! tile/manifest files themselves (under `/b`). Serving over `http://localhost` keeps the
 //! browser's `fetch()` of manifests working (which a `file://` page would block).
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::{
     extract::{Query, State},
     http::{header, HeaderValue},
-    response::{Html, IntoResponse},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Html, IntoResponse,
+    },
     routing::get,
     Json, Router,
 };
+use futures_core::Stream;
+use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
@@ -45,6 +50,7 @@ pub async fn serve(root: PathBuf, port: u16, open: bool, config: Config) -> Resu
         .route("/leaflet.js", get(leaflet_js))
         .route("/leaflet.css", get(leaflet_css))
         .route("/api/position", get(position))
+        .route("/api/position/stream", get(position_stream))
         .nest_service("/b", ServeDir::new(root))
         .with_state(state);
 
@@ -111,14 +117,83 @@ async fn position(
     let Some(dir) = app.config.game_input_dir(&q.game) else {
         return Json(empty);
     };
-    let half = ega::TILE_SIZE / 2;
     match ultima1::player_position(&dir) {
-        Ok(Some((x, y))) => Json(PositionResp {
-            px: Some(x * ega::TILE_SIZE + half),
-            py: Some(y * ega::TILE_SIZE + half),
-        }),
+        Ok(Some(pos)) => {
+            let (px, py) = tile_center_px(pos);
+            Json(PositionResp {
+                px: Some(px),
+                py: Some(py),
+            })
+        }
         _ => Json(empty),
     }
+}
+
+/// Live player position: an SSE stream that pushes the party position whenever the save file
+/// changes (the server watches the game directory), plus the current position on connect.
+async fn position_stream(
+    State(app): State<Arc<AppState>>,
+    Query(q): Query<PosQuery>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let dir = (q.game == "ultima1")
+        .then(|| app.config.game_input_dir(&q.game))
+        .flatten();
+
+    let stream = async_stream::stream! {
+        // Without a resolvable save directory there's nothing to watch; hold the connection
+        // open but idle so the browser doesn't reconnect in a tight loop.
+        let Some(dir) = dir else {
+            std::future::pending::<()>().await;
+            return;
+        };
+
+        // Bridge notify's callback thread to this async task via an unbounded channel.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let watcher = notify::recommended_watcher(move |_res| {
+            let _ = tx.send(());
+        });
+        let mut watcher = match watcher {
+            Ok(w) => w,
+            Err(_) => {
+                std::future::pending::<()>().await;
+                return;
+            }
+        };
+        // Watch the directory (saves may be written via atomic replace, not in-place).
+        let _ = watcher.watch(&dir, RecursiveMode::NonRecursive);
+
+        // Emit the current position immediately, then only on change.
+        let mut last: Option<(u32, u32)> = None;
+        if let Ok(Some(pos)) = ultima1::player_position(&dir) {
+            last = Some(pos);
+            yield Ok::<_, Infallible>(position_event(pos));
+        }
+        while rx.recv().await.is_some() {
+            // Debounce a burst of filesystem events into a single read.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            while rx.try_recv().is_ok() {}
+            if let Ok(Some(pos)) = ultima1::player_position(&dir) {
+                if Some(pos) != last {
+                    last = Some(pos);
+                    yield Ok::<_, Infallible>(position_event(pos));
+                }
+            }
+        }
+    };
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// A tile position as a `data:` SSE event carrying `{px, py}` image pixel coordinates.
+fn position_event(pos: (u32, u32)) -> Event {
+    let (px, py) = tile_center_px(pos);
+    Event::default().data(serde_json::json!({ "px": px, "py": py }).to_string())
+}
+
+/// Convert a tile position to image pixel coordinates (the tile's centre).
+fn tile_center_px(pos: (u32, u32)) -> (u32, u32) {
+    let half = ega::TILE_SIZE / 2;
+    (pos.0 * ega::TILE_SIZE + half, pos.1 * ega::TILE_SIZE + half)
 }
 
 /// Dynamic table of contents: every world with a `manifest.json` under the export root.

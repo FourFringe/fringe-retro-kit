@@ -317,7 +317,8 @@ none in the viewer):
       the manifest, shown as toggleable Leaflet markers (curated place-names TBD)
 - [x] Player "you are here" marker: the party's `Map X/Y` from the save (`PLAYER1.U1`, via
       `fringe-retro-core`) served at `/api/position` and shown on the map
-- [ ] Live watch: update the player marker when the save changes (poll/notify + push)
+- [x] Live watch: the server watches the save file and pushes position updates over SSE
+      (`/api/position/stream`), so the marker moves the moment you save in-game
 - [ ] Curated place-names for POIs (from the game manual / lore) as a data table
 - [ ] Extend to the next games in play order (Ultima II → …)
 
