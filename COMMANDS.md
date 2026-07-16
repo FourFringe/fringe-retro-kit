@@ -843,6 +843,92 @@ A proper per-OS config directory (via the `directories` crate) is planned.
 
 ---
 
+## Maps (`fringe-retro-map`)
+
+✅ The map browser is a **separate binary in the kit**, `fringe-retro-map`. It **bakes** a
+game's world map — using the real in-game graphics — into a zoomable web tile bundle, then
+**serves** it in your browser. It reads the same `config.toml` as the main tool, so it can find
+both your game files and where to put the maps.
+
+Currently supported: the **Ultima I** overworld (Sosaria). More worlds and games are planned;
+see [ROADMAP.md](ROADMAP.md), Phase 8.
+
+### Quick start (via `just`)
+
+```bash
+just map-export    # bake the Ultima I map into the configured export dir
+just map-serve     # serve the maps and open your browser
+just map           # do both: export, then serve
+```
+
+### Configuration
+
+Add a `[map]` table to `config.toml` pointing at a persistent folder for the baked maps
+(`~` expands to your home directory):
+
+```toml
+[map]
+export_dir = "~/Documents/Fringe Retro Kit/maps"
+```
+
+With that in place, the input game directory is taken from the game's `save_dir`, and the
+output from `export_dir`, so the commands below need no paths.
+
+### `export` — bake a world map into tiles
+
+```
+fringe-retro-map export [--game <id>] [--input <dir>] [--out <root>] [--png <file>]
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--game` | `ultima1` | Which game to export (currently only `ultima1`). |
+| `--input` | the game's `save_dir` from `config.toml` | Directory holding the game's data (e.g. `MAP.BIN`). |
+| `--out` | `[map] export_dir` from `config.toml` | Export root; the bundle lands in `<out>/<game>/<world>/`. |
+| `--png` | — | Also write the flat composite image here (handy for debugging). |
+
+```bash
+# Fully config-driven (input + output resolved from config.toml):
+fringe-retro-map export --game ultima1
+
+# Explicit paths (no config needed), plus a debug composite PNG:
+fringe-retro-map export \
+  --game ultima1 \
+  --input "/Applications/Ultima I™.app/Contents/Resources/game" \
+  --out ~/maps \
+  --png /tmp/ultima1-overworld.png
+```
+
+Each bundle is `<out>/<game>/<world>/` containing a `manifest.json` and a `z/x/y` PNG tile
+pyramid. Re-running `export` overwrites the bundle in place; the export dir is persistent and
+never auto-cleaned.
+
+### `serve` — browse the exported maps
+
+```
+fringe-retro-map serve [--root <dir>] [--port <n>] [--open]
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--root` | `[map] export_dir` from `config.toml` | Directory of baked bundles to serve. |
+| `--port` | `8737` | Port to listen on. |
+| `--open` | off | Open the map browser in your default browser once the server is up. |
+
+```bash
+# Serve the configured export dir and open a browser:
+fringe-retro-map serve --open
+
+# Serve a specific folder on a custom port:
+fringe-retro-map serve --root ~/maps --port 9000
+```
+
+The server prints its address (default `http://127.0.0.1:8737`). The landing page is a table
+of contents generated from whatever bundles it finds — every game and every world within each.
+The viewer is offline-friendly: Leaflet is served locally, so no internet connection is needed.
+
+---
+
 ## 🔷 Planned commands
 
 These are **not implemented yet**; they reflect the direction in [ROADMAP.md](ROADMAP.md).

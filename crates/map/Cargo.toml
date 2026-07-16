@@ -16,9 +16,11 @@ anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
 image.workspace = true
+open.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
 tokio.workspace = true
+toml.workspace = true
 tower-http.workspace = true
 
 [dev-dependencies]

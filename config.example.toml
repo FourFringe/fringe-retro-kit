@@ -63,6 +63,11 @@ save_dir = "/Users/you/Library/Application Support/Wasteland"
 [library]
 path = "~/Documents/Fringe Retro Kit"
 
+# The map browser (Phase 8): a persistent location for exported world-map bundles.
+# `fringe-retro-map export` bakes tiles here; `fringe-retro-map serve` browses them.
+[map]
+export_dir = "~/Documents/Fringe Retro Kit/maps"
+
 # Automatic-backup retention. Before every edit the tool writes a timestamped `.bak` beside
 # the save; these settings prune old ones after each save. A value of 0 (or an omitted key)
 # means "no limit". Library snapshots are never pruned. Run `fringe-retro backups <save>

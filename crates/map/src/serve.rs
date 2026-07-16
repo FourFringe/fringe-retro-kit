@@ -8,7 +8,13 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
-use axum::{extract::State, response::Html, routing::get, Router};
+use axum::{
+    extract::State,
+    http::{header, HeaderValue},
+    response::{Html, IntoResponse},
+    routing::get,
+    Router,
+};
 use tower_http::services::ServeDir;
 
 /// A single browsable world discovered under the export root.
@@ -18,12 +24,14 @@ struct Entry {
     title: String,
 }
 
-/// Run the server until interrupted.
-pub async fn serve(root: PathBuf, port: u16) -> Result<()> {
+/// Run the server until interrupted. Leaflet is served locally, so no internet is required.
+pub async fn serve(root: PathBuf, port: u16, open: bool) -> Result<()> {
     let state = Arc::new(root.clone());
     let app = Router::new()
         .route("/", get(toc))
         .route("/view", get(viewer))
+        .route("/leaflet.js", get(leaflet_js))
+        .route("/leaflet.css", get(leaflet_css))
         .nest_service("/b", ServeDir::new(root))
         .with_state(state);
 
@@ -31,7 +39,11 @@ pub async fn serve(root: PathBuf, port: u16) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
-    println!("Serving maps at http://{addr}  (Ctrl-C to stop)");
+    let url = format!("http://{addr}");
+    println!("Serving maps at {url}  (Ctrl-C to stop)");
+    if open {
+        let _ = open::that(&url);
+    }
     axum::serve(listener, app).await.context("running server")?;
     Ok(())
 }
@@ -39,6 +51,25 @@ pub async fn serve(root: PathBuf, port: u16) -> Result<()> {
 /// Static Leaflet viewer; it reads `?bundle=/game/world` and fetches that manifest + tiles.
 async fn viewer() -> Html<&'static str> {
     Html(include_str!("web/viewer.html"))
+}
+
+/// Vendored Leaflet script (BSD-2-Clause), served locally for offline use.
+async fn leaflet_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/javascript"),
+        )],
+        include_str!("web/vendor/leaflet.js"),
+    )
+}
+
+/// Vendored Leaflet stylesheet, served locally for offline use.
+async fn leaflet_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, HeaderValue::from_static("text/css"))],
+        include_str!("web/vendor/leaflet.css"),
+    )
 }
 
 /// Dynamic table of contents: every world with a `manifest.json` under the export root.

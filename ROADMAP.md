@@ -307,10 +307,12 @@ none in the viewer):
 - [x] Ultima I overworld: decode the nibble-packed `MAP.BIN` grid (168×156) and composite the
       full world to one image (verified against the four-continent Sosaria map)
 - [x] Tile-pyramid generator (256×256 `z/x/y` + downsampled zoom levels) + per-world `manifest.json`
-- [ ] `[map] export_dir` config; bundles written to `<export_dir>/<game>/<world>/…`
+- [x] `[map] export_dir` config; bundles written to `<export_dir>/<game>/<world>/…` (input dir
+      also resolved from each game's `save_dir`; `just map-export` / `map-serve` wrap it)
 - [x] `axum` server (`fringe-retro-map serve`): serves tiles + a dynamically generated
       cross-game / cross-world TOC
-- [x] Leaflet viewer: zoom / pan, driven by the manifest (verified in-browser)
+- [x] Leaflet viewer: zoom / pan, driven by the manifest (verified in-browser); Leaflet is
+      vendored and served locally, so the viewer works offline
 - [ ] Ultima I towns / dungeons as additional worlds (as applicable)
 - [ ] Extend to the next games in play order (Ultima II → …)
 

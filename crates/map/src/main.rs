@@ -4,6 +4,7 @@
 //! First target: the Ultima I overworld. See ROADMAP.md, Phase 8.
 
 mod bundle;
+mod config;
 mod ega;
 mod serve;
 mod ultima1;
@@ -14,6 +15,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
 use bundle::WorldMeta;
+use config::Config;
 
 #[derive(Parser)]
 #[command(name = "fringe-retro-map", version, about)]
@@ -27,41 +29,58 @@ enum Command {
     /// Bake a game's world map into a tile bundle under `<out>/<game>/<world>/`.
     Export {
         /// Game identifier (currently only `ultima1`).
-        #[arg(long)]
+        #[arg(long, default_value = "ultima1")]
         game: String,
-        /// Path to the game's data directory (e.g. the folder containing MAP.BIN).
+        /// Game data directory. Defaults to the game's `save_dir` from `config.toml`.
         #[arg(long)]
-        input: PathBuf,
-        /// Export root; the bundle is written to `<out>/<game>/<world>/`.
+        input: Option<PathBuf>,
+        /// Export root. Defaults to `[map] export_dir` from `config.toml`.
         #[arg(long, short)]
-        out: PathBuf,
+        out: Option<PathBuf>,
         /// Also write the flat composite image to this path (handy for debugging).
         #[arg(long)]
         png: Option<PathBuf>,
     },
     /// Serve exported map bundles in a local web browser.
     Serve {
-        /// Export root to serve (the directory that holds `<game>/<world>/` bundles).
+        /// Export root to serve. Defaults to `[map] export_dir` from `config.toml`.
         #[arg(long, short)]
-        root: PathBuf,
+        root: Option<PathBuf>,
         /// Port to listen on.
         #[arg(long, default_value_t = 8737)]
         port: u16,
+        /// Open the map browser in your default browser once the server is up.
+        #[arg(long)]
+        open: bool,
     },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let config = Config::load()?;
     match cli.command {
         Command::Export {
             game,
             input,
             out,
             png,
-        } => export(&game, &input, &out, png.as_deref()),
-        Command::Serve { root, port } => {
+        } => {
+            let input = input
+                .or_else(|| config.game_input_dir(&game))
+                .with_context(|| {
+                    format!("no --input given and no save_dir for '{game}' in config.toml")
+                })?;
+            let out = out
+                .or_else(|| config.export_dir())
+                .context("no --out given and no [map] export_dir in config.toml")?;
+            export(&game, &input, &out, png.as_deref())
+        }
+        Command::Serve { root, port, open } => {
+            let root = root
+                .or_else(|| config.export_dir())
+                .context("no --root given and no [map] export_dir in config.toml")?;
             let runtime = tokio::runtime::Runtime::new().context("starting async runtime")?;
-            runtime.block_on(serve::serve(root, port))
+            runtime.block_on(serve::serve(root, port, open))
         }
     }
 }

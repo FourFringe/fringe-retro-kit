@@ -503,10 +503,12 @@ dependencies = [
  "axum",
  "clap",
  "image",
+ "open",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "tower-http",
 ]
 

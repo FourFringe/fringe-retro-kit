@@ -27,6 +27,17 @@ run *ARGS:
 build:
     cargo build --release
 
+# Bake the Ultima I world map into the configured export dir (input + output from config.toml).
+map-export:
+    cargo run -q -p fringe-retro-map -- export --game ultima1
+
+# Serve the exported maps and open them in your browser.
+map-serve:
+    cargo run -q -p fringe-retro-map -- serve --open
+
+# Export the map(s), then serve them in the browser.
+map: map-export map-serve
+
 # Cut a release: bump the workspace version, run the gate, commit, tag, and push.
 # Usage: `just release 0.2.0`. The push triggers the GitHub release workflow.
 release VERSION:
