@@ -80,13 +80,13 @@ fn main() -> Result<()> {
                 .or_else(|| config.export_dir())
                 .context("no --root given and no [map] export_dir in config.toml")?;
             let runtime = tokio::runtime::Runtime::new().context("starting async runtime")?;
-            runtime.block_on(serve::serve(root, port, open))
+            runtime.block_on(serve::serve(root, port, open, config))
         }
     }
 }
 
 fn export(game: &str, input: &Path, out: &Path, png: Option<&Path>) -> Result<()> {
-    let (world, meta) = match game {
+    let (overworld, meta) = match game {
         "ultima1" => (
             ultima1::render_overworld(input)?,
             WorldMeta {
@@ -97,6 +97,8 @@ fn export(game: &str, input: &Path, out: &Path, png: Option<&Path>) -> Result<()
         ),
         other => bail!("unsupported game '{other}' (currently only 'ultima1')"),
     };
+    let world = overworld.image;
+    let pois = overworld.pois;
 
     if let Some(path) = png {
         world
@@ -105,12 +107,13 @@ fn export(game: &str, input: &Path, out: &Path, png: Option<&Path>) -> Result<()
         println!("Wrote composite {}", path.display());
     }
 
-    let dir = bundle::write_bundle(&world, out, &meta)?;
+    let dir = bundle::write_bundle(&world, out, &meta, &pois)?;
     println!(
-        "Baked {} ({}×{} px) → {}",
+        "Baked {} ({}×{} px, {} POIs) → {}",
         meta.title,
         world.width(),
         world.height(),
+        pois.len(),
         dir.display()
     );
     Ok(())

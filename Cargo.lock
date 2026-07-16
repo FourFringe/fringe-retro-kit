@@ -502,6 +502,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "fringe-retro-core",
  "image",
  "open",
  "serde",

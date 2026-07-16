@@ -313,8 +313,17 @@ none in the viewer):
       cross-game / cross-world TOC
 - [x] Leaflet viewer: zoom / pan, driven by the manifest (verified in-browser); Leaflet is
       vendored and served locally, so the viewer works offline
-- [ ] Ultima I towns / dungeons as additional worlds (as applicable)
+- [x] POI overlay: castles / towns / signposts detected from the overworld tiles, baked into
+      the manifest, shown as toggleable Leaflet markers (curated place-names TBD)
+- [x] Player "you are here" marker: the party's `Map X/Y` from the save (`PLAYER1.U1`, via
+      `fringe-retro-core`) served at `/api/position` and shown on the map
+- [ ] Live watch: update the player marker when the save changes (poll/notify + push)
+- [ ] Curated place-names for POIs (from the game manual / lore) as a data table
 - [ ] Extend to the next games in play order (Ultima II → …)
+
+Town/castle **interiors** aren't worth exporting (no standalone layout files — they live in the
+executables), and Ultima I's dungeons are first-person and procedurally generated, so there's
+no static dungeon map. The overworld is the map.
 
 The early Ultimas have **uncompressed** map data, so this phase needs no decompression codec.
 When a compressed-map game arrives (Ultima VI's LZW map; later Daggerfall's RLE), that decoder

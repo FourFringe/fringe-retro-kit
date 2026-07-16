@@ -65,6 +65,65 @@
         map.setMaxBounds(bounds);
         map.fitBounds(bounds);
         document.title = m.title + " — Fringe Retro Kit";
+
+        // Pixel (x, y) in the image → a Leaflet LatLng at native zoom.
+        const at = (px, py) => map.unproject([px, py], m.maxZoom);
+
+        // POI markers, grouped by kind so they can be toggled.
+        const STYLE = {
+          castle: { color: "#ff5555", label: "Castles" },
+          town: { color: "#ffd24a", label: "Towns" },
+          signpost: { color: "#8ad2ff", label: "Signposts" },
+        };
+        const groups = {};
+        for (const p of m.pois || []) {
+          const s = STYLE[p.kind] || { color: "#cccccc", label: p.kind };
+          const marker = L.circleMarker(at(p.px, p.py), {
+            radius: 5,
+            color: s.color,
+            weight: 2,
+            fillColor: s.color,
+            fillOpacity: 0.6,
+          }).bindTooltip(p.label);
+          (groups[p.kind] ||= L.layerGroup()).addLayer(marker);
+        }
+        const overlays = {};
+        for (const kind of Object.keys(groups)) {
+          const s = STYLE[kind] || { label: kind };
+          groups[kind].addTo(map);
+          overlays[s.label] = groups[kind];
+        }
+        if (Object.keys(overlays).length) {
+          L.control.layers(null, overlays, { collapsed: false }).addTo(map);
+        }
+
+        // "You are here": the party's current position, read from the save.
+        let playerMarker = null;
+        async function updatePlayer() {
+          try {
+            const pos = await (
+              await fetch("/api/position?game=" + encodeURIComponent(m.game))
+            ).json();
+            if (pos.px == null || pos.py == null) return;
+            const ll = at(pos.px, pos.py);
+            if (playerMarker) {
+              playerMarker.setLatLng(ll);
+            } else {
+              playerMarker = L.circleMarker(ll, {
+                radius: 7,
+                color: "#ffffff",
+                weight: 3,
+                fillColor: "#39ff14",
+                fillOpacity: 0.9,
+              })
+                .bindTooltip("You are here", { permanent: false })
+                .addTo(map);
+            }
+          } catch (e) {
+            /* no save / not available */
+          }
+        }
+        updatePlayer();
       }
       main();
     </script>

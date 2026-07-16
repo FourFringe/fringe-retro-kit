@@ -15,6 +15,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+fringe-retro-core.workspace = true
 image.workspace = true
 open.workspace = true
 serde = { workspace = true }

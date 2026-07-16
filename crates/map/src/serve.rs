@@ -9,13 +9,22 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::{header, HeaderValue},
     response::{Html, IntoResponse},
     routing::get,
-    Router,
+    Json, Router,
 };
+use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
+
+use crate::{config::Config, ega, ultima1};
+
+/// Shared server state: where bundles live, plus the config for resolving each game's save.
+struct AppState {
+    root: PathBuf,
+    config: Config,
+}
 
 /// A single browsable world discovered under the export root.
 struct Entry {
@@ -25,13 +34,17 @@ struct Entry {
 }
 
 /// Run the server until interrupted. Leaflet is served locally, so no internet is required.
-pub async fn serve(root: PathBuf, port: u16, open: bool) -> Result<()> {
-    let state = Arc::new(root.clone());
+pub async fn serve(root: PathBuf, port: u16, open: bool, config: Config) -> Result<()> {
+    let state = Arc::new(AppState {
+        root: root.clone(),
+        config,
+    });
     let app = Router::new()
         .route("/", get(toc))
         .route("/view", get(viewer))
         .route("/leaflet.js", get(leaflet_js))
         .route("/leaflet.css", get(leaflet_css))
+        .route("/api/position", get(position))
         .nest_service("/b", ServeDir::new(root))
         .with_state(state);
 
@@ -72,9 +85,45 @@ async fn leaflet_css() -> impl IntoResponse {
     )
 }
 
+/// Query for the player-position endpoint.
+#[derive(Deserialize)]
+struct PosQuery {
+    game: String,
+}
+
+/// The party's current position in image **pixel** coordinates, if a save is available.
+#[derive(Serialize)]
+struct PositionResp {
+    px: Option<u32>,
+    py: Option<u32>,
+}
+
+/// Read the current party position from the game's save (currently Ultima I only), returning
+/// it in image pixel coordinates so the viewer can place a marker with no game knowledge.
+async fn position(
+    State(app): State<Arc<AppState>>,
+    Query(q): Query<PosQuery>,
+) -> Json<PositionResp> {
+    let empty = PositionResp { px: None, py: None };
+    if q.game != "ultima1" {
+        return Json(empty);
+    }
+    let Some(dir) = app.config.game_input_dir(&q.game) else {
+        return Json(empty);
+    };
+    let half = ega::TILE_SIZE / 2;
+    match ultima1::player_position(&dir) {
+        Ok(Some((x, y))) => Json(PositionResp {
+            px: Some(x * ega::TILE_SIZE + half),
+            py: Some(y * ega::TILE_SIZE + half),
+        }),
+        _ => Json(empty),
+    }
+}
+
 /// Dynamic table of contents: every world with a `manifest.json` under the export root.
-async fn toc(State(root): State<Arc<PathBuf>>) -> Html<String> {
-    let mut entries = discover(&root);
+async fn toc(State(app): State<Arc<AppState>>) -> Html<String> {
+    let mut entries = discover(&app.root);
     entries.sort_by(|a, b| (&a.game, &a.world).cmp(&(&b.game, &b.world)));
 
     let mut body = String::from(

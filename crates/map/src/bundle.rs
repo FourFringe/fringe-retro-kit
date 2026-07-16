@@ -21,6 +21,17 @@ pub struct WorldMeta {
     pub title: String,
 }
 
+/// A point of interest on a map, in image **pixel** coordinates (so the viewer needs no
+/// game-tile knowledge). `kind` groups markers (e.g. `castle`, `town`, `signpost`).
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Poi {
+    pub px: u32,
+    pub py: u32,
+    pub kind: String,
+    pub label: String,
+}
+
 /// The `manifest.json` a viewer reads to render a world. Serialized as camelCase for JS.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,10 +45,16 @@ struct Manifest {
     width: u32,
     height: u32,
     tile_pattern: String,
+    pois: Vec<Poi>,
 }
 
 /// Write the bundle for `world` under `<export_root>/<game>/<world>/`, returning that directory.
-pub fn write_bundle(world: &RgbImage, export_root: &Path, meta: &WorldMeta) -> Result<PathBuf> {
+pub fn write_bundle(
+    world: &RgbImage,
+    export_root: &Path,
+    meta: &WorldMeta,
+    pois: &[Poi],
+) -> Result<PathBuf> {
     let dir = export_root.join(&meta.game).join(&meta.world);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
 
@@ -67,6 +84,7 @@ pub fn write_bundle(world: &RgbImage, export_root: &Path, meta: &WorldMeta) -> R
         width,
         height,
         tile_pattern: "{z}/{x}/{y}.png".to_string(),
+        pois: pois.to_vec(),
     };
     let json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(dir.join("manifest.json"), json)
@@ -125,7 +143,7 @@ mod tests {
             world: "overworld".into(),
             title: "Test".into(),
         };
-        let bundle = write_bundle(&world, dir.path(), &meta).unwrap();
+        let bundle = write_bundle(&world, dir.path(), &meta, &[]).unwrap();
         assert!(bundle.join("manifest.json").exists());
         // 300px → max_zoom 1: z1 is 2×2 tiles, z0 is a single tile.
         assert!(bundle.join("1/0/0.png").exists());
