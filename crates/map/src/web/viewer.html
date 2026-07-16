@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fringe Retro Kit — Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+      html,
+      body,
+      #map {
+        height: 100%;
+        margin: 0;
+        background: #0b0b12;
+      }
+      #err {
+        color: #ddd;
+        font-family: system-ui, sans-serif;
+        padding: 2rem;
+      }
+      .home {
+        position: absolute;
+        z-index: 1000;
+        top: 10px;
+        right: 10px;
+        background: #1b1b2b;
+        color: #ddd;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-family: system-ui, sans-serif;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <a class="home" href="/">← All maps</a>
+    <div id="map"></div>
+    <script>
+      const bundle = new URLSearchParams(location.search).get("bundle");
+      async function main() {
+        if (!bundle) {
+          document.body.innerHTML = '<div id="err">No map selected. <a href="/">Back to the list.</a></div>';
+          return;
+        }
+        const base = "/b" + bundle;
+        const m = await (await fetch(base + "/manifest.json")).json();
+        const map = L.map("map", {
+          crs: L.CRS.Simple,
+          minZoom: 0,
+          maxZoom: m.maxZoom,
+          attributionControl: false,
+        });
+        // Place the pixel-space image into Leaflet's tile grid at native zoom.
+        const sw = map.unproject([0, m.height], m.maxZoom);
+        const ne = map.unproject([m.width, 0], m.maxZoom);
+        const bounds = new L.LatLngBounds(sw, ne);
+        L.tileLayer(base + "/{z}/{x}/{y}.png", {
+          tileSize: m.tileSize,
+          minZoom: 0,
+          maxZoom: m.maxZoom,
+          bounds: bounds,
+          noWrap: true,
+        }).addTo(map);
+        map.setMaxBounds(bounds);
+        map.fitBounds(bounds);
+        document.title = m.title + " — Fringe Retro Kit";
+      }
+      main();
+    </script>
+  </body>
+</html>

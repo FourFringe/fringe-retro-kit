@@ -306,10 +306,11 @@ none in the viewer):
 - [x] EGA tileset decoder → RGBA (Ultima I `EGATILES.BIN`: 16×16, 4 row-interleaved planes)
 - [x] Ultima I overworld: decode the nibble-packed `MAP.BIN` grid (168×156) and composite the
       full world to one image (verified against the four-continent Sosaria map)
-- [ ] Tile-pyramid generator (256×256 `z/x/y` + downsampled zoom levels) + per-world `manifest.json`
+- [x] Tile-pyramid generator (256×256 `z/x/y` + downsampled zoom levels) + per-world `manifest.json`
 - [ ] `[map] export_dir` config; bundles written to `<export_dir>/<game>/<world>/…`
-- [ ] `axum` server: serve tiles + a dynamically generated cross-game / cross-world TOC
-- [ ] Leaflet (or OpenSeadragon) viewer: zoom / pan, driven by the manifest
+- [x] `axum` server (`fringe-retro-map serve`): serves tiles + a dynamically generated
+      cross-game / cross-world TOC
+- [x] Leaflet viewer: zoom / pan, driven by the manifest (verified in-browser)
 - [ ] Ultima I towns / dungeons as additional worlds (as applicable)
 - [ ] Extend to the next games in play order (Ultima II → …)
 

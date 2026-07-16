@@ -20,6 +20,7 @@ fringe-retro-core = { path = "crates/core" }
 # Shared third-party crates (all MIT or MIT/Apache-2.0).
 anyhow = "1"
 assert_cmd = "2" # CLI integration testing (dev-only); MIT/Apache-2.0.
+axum = "0.8" # Local map-browser web server; MIT.
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] } # PNG encode for map export; MIT/Apache-2.0.
@@ -27,6 +28,9 @@ open = "5" # Open URLs/files in the OS default handler; MIT.
 predicates = "3" # Assertions for CLI output (dev-only); MIT/Apache-2.0.
 ratatui = "0.29" # Terminal UI (bundles crossterm); MIT.
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tempfile = "3"
 thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] } # Async runtime for the map server; MIT.
 toml = "0.8"
+tower-http = { version = "0.6", features = ["fs"] } # Static file serving (ServeDir) for map tiles; MIT.
