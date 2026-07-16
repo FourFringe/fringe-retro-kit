@@ -302,9 +302,10 @@ none in the viewer):
 
 **Checklist:**
 
-- [ ] Map exporter binary (new kit crate) reading a game via `crates/core`
-- [ ] EGA/CGA tileset decoder → RGBA (Ultima I first)
-- [ ] Ultima I overworld: locate + decode the tile grid; composite the full world to one image
+- [x] Map exporter binary (`crates/map`, bin `fringe-retro-map`)
+- [x] EGA tileset decoder → RGBA (Ultima I `EGATILES.BIN`: 16×16, 4 row-interleaved planes)
+- [x] Ultima I overworld: decode the nibble-packed `MAP.BIN` grid (168×156) and composite the
+      full world to one image (verified against the four-continent Sosaria map)
 - [ ] Tile-pyramid generator (256×256 `z/x/y` + downsampled zoom levels) + per-world `manifest.json`
 - [ ] `[map] export_dir` config; bundles written to `<export_dir>/<game>/<world>/…`
 - [ ] `axum` server: serve tiles + a dynamically generated cross-game / cross-world TOC

@@ -1,0 +1,20 @@
+[package]
+name = "fringe-retro-map"
+description = "Map exporter for Fringe Retro Kit: bakes classic-game world maps into web tiles."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fringe-retro-map"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
