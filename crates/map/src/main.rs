@@ -4,17 +4,19 @@
 //! First target: the Ultima I overworld. See ROADMAP.md, Phase 8.
 
 mod bundle;
+mod cga;
 mod config;
 mod ega;
 mod serve;
 mod ultima1;
+mod ultima2;
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
-use bundle::WorldMeta;
+use bundle::World;
 use config::Config;
 
 #[derive(Parser)]
@@ -28,7 +30,7 @@ struct Cli {
 enum Command {
     /// Bake a game's world map into a tile bundle under `<out>/<game>/<world>/`.
     Export {
-        /// Game identifier (currently only `ultima1`).
+        /// Game identifier (`ultima1` or `ultima2`).
         #[arg(long, default_value = "ultima1")]
         game: String,
         /// Game data directory. Defaults to the game's `save_dir` from `config.toml`.
@@ -37,7 +39,7 @@ enum Command {
         /// Export root. Defaults to `[map] export_dir` from `config.toml`.
         #[arg(long, short)]
         out: Option<PathBuf>,
-        /// Also write the flat composite image to this path (handy for debugging).
+        /// Also write the first world's flat composite image to this path (handy for debugging).
         #[arg(long)]
         png: Option<PathBuf>,
     },
@@ -86,35 +88,33 @@ fn main() -> Result<()> {
 }
 
 fn export(game: &str, input: &Path, out: &Path, png: Option<&Path>) -> Result<()> {
-    let (overworld, meta) = match game {
-        "ultima1" => (
-            ultima1::render_overworld(input)?,
-            WorldMeta {
-                game: "ultima1".into(),
-                world: "overworld".into(),
-                title: "Ultima I — Sosaria".into(),
-            },
-        ),
-        other => bail!("unsupported game '{other}' (currently only 'ultima1')"),
+    let worlds: Vec<World> = match game {
+        "ultima1" => ultima1::export_worlds(input)?,
+        "ultima2" => ultima2::export_worlds(input)?,
+        other => bail!("unsupported game '{other}' (supported: 'ultima1', 'ultima2')"),
     };
-    let world = overworld.image;
-    let pois = overworld.pois;
 
     if let Some(path) = png {
-        world
-            .save(path)
-            .with_context(|| format!("writing {}", path.display()))?;
-        println!("Wrote composite {}", path.display());
+        if let Some(first) = worlds.first() {
+            first
+                .image
+                .save(path)
+                .with_context(|| format!("writing {}", path.display()))?;
+            println!("Wrote composite {}", path.display());
+        }
     }
 
-    let dir = bundle::write_bundle(&world, out, &meta, &pois)?;
-    println!(
-        "Baked {} ({}×{} px, {} POIs) → {}",
-        meta.title,
-        world.width(),
-        world.height(),
-        pois.len(),
-        dir.display()
-    );
+    for world in &worlds {
+        let dir = bundle::write_bundle(out, world)?;
+        println!(
+            "Baked {} ({}×{} px, {} POIs) → {}",
+            world.meta.title,
+            world.image.width(),
+            world.image.height(),
+            world.pois.len(),
+            dir.display()
+        );
+    }
+    println!("Baked {} world(s) for {game}.", worlds.len());
     Ok(())
 }

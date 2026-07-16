@@ -21,6 +21,15 @@ pub struct WorldMeta {
     pub title: String,
 }
 
+/// A fully rendered world ready to be baked into a bundle: its identity, composite image, and
+/// points of interest. Each game's exporter produces one or more of these (Ultima I has a single
+/// overworld; Ultima II has many map files), and the bake pipeline is otherwise game-agnostic.
+pub struct World {
+    pub meta: WorldMeta,
+    pub image: RgbImage,
+    pub pois: Vec<Poi>,
+}
+
 /// A point of interest on a map, in image **pixel** coordinates (so the viewer needs no
 /// game-tile knowledge). `kind` groups markers (e.g. `castle`, `town`, `signpost`).
 #[derive(Serialize, Clone)]
@@ -49,21 +58,18 @@ struct Manifest {
 }
 
 /// Write the bundle for `world` under `<export_root>/<game>/<world>/`, returning that directory.
-pub fn write_bundle(
-    world: &RgbImage,
-    export_root: &Path,
-    meta: &WorldMeta,
-    pois: &[Poi],
-) -> Result<PathBuf> {
+pub fn write_bundle(export_root: &Path, world: &World) -> Result<PathBuf> {
+    let meta = &world.meta;
+    let image = &world.image;
     let dir = export_root.join(&meta.game).join(&meta.world);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
 
-    let width = world.width();
-    let height = world.height();
+    let width = image.width();
+    let height = image.height();
     let max_zoom = zoom_levels(width.max(height));
 
     // z == max_zoom is native resolution; each lower level halves the image (a mipmap chain).
-    let mut level: RgbaImage = DynamicImage::ImageRgb8(world.clone()).into_rgba8();
+    let mut level: RgbaImage = DynamicImage::ImageRgb8(image.clone()).into_rgba8();
     for z in (0..=max_zoom).rev() {
         write_level(&level, &dir, z)
             .with_context(|| format!("writing zoom level {z} of {}", dir.display()))?;
@@ -84,7 +90,7 @@ pub fn write_bundle(
         width,
         height,
         tile_pattern: "{z}/{x}/{y}.png".to_string(),
-        pois: pois.to_vec(),
+        pois: world.pois.clone(),
     };
     let json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(dir.join("manifest.json"), json)
@@ -137,13 +143,16 @@ mod tests {
     #[test]
     fn writes_pyramid_and_manifest() {
         let dir = tempfile::tempdir().unwrap();
-        let world = RgbImage::from_pixel(300, 300, image::Rgb([1, 2, 3]));
-        let meta = WorldMeta {
-            game: "ultima1".into(),
-            world: "overworld".into(),
-            title: "Test".into(),
+        let world = World {
+            meta: WorldMeta {
+                game: "ultima1".into(),
+                world: "overworld".into(),
+                title: "Test".into(),
+            },
+            image: RgbImage::from_pixel(300, 300, image::Rgb([1, 2, 3])),
+            pois: vec![],
         };
-        let bundle = write_bundle(&world, dir.path(), &meta, &[]).unwrap();
+        let bundle = write_bundle(dir.path(), &world).unwrap();
         assert!(bundle.join("manifest.json").exists());
         // 300px → max_zoom 1: z1 is 2×2 tiles, z0 is a single tile.
         assert!(bundle.join("1/0/0.png").exists());

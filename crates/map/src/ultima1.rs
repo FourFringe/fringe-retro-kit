@@ -10,7 +10,7 @@ use std::path::Path;
 use anyhow::{ensure, Context, Result};
 use image::RgbImage;
 
-use crate::bundle::Poi;
+use crate::bundle::{Poi, World, WorldMeta};
 use crate::ega::{self, TILE_SIZE};
 
 /// Overworld width and height, in tiles.
@@ -37,6 +37,20 @@ const LOCATION_COUNT: usize = 84;
 pub struct Overworld {
     pub image: RgbImage,
     pub pois: Vec<Poi>,
+}
+
+/// Render Ultima I into its exportable worlds: a single overworld (`Sosaria`).
+pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
+    let overworld = render_overworld(game_dir)?;
+    Ok(vec![World {
+        meta: WorldMeta {
+            game: "ultima1".into(),
+            world: "overworld".into(),
+            title: "Ultima I — Sosaria".into(),
+        },
+        image: overworld.image,
+        pois: overworld.pois,
+    }])
 }
 
 /// Render the full Ultima I overworld and collect its named locations as POIs.
