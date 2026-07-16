@@ -927,10 +927,12 @@ The server prints its address (default `http://127.0.0.1:8737`). The landing pag
 of contents generated from whatever bundles it finds — every game and every world within each.
 The viewer is offline-friendly: Leaflet is served locally, so no internet connection is needed.
 
-The overworld view also shows **landmark markers** (castles, towns, signposts — toggleable in
-the top-right control) and a **"you are here"** marker at the party's current position, read
-live from the save file (`PLAYER1.U1`). The server watches the save and pushes updates over
-Server-Sent Events, so the marker moves the moment you save in-game.
+The overworld view also shows **named landmark markers** — towns, castles, monuments, and
+dungeons (toggleable in the top-right control), read from the game's own location table so each
+marker shows its real name (e.g. *The Castle of Lord British*, *The Dungeon of Perinia*). A
+**"you are here"** marker tracks the party's current position, read live from the save file
+(`PLAYER1.U1`): the server watches the save and pushes updates over Server-Sent Events, so the
+marker moves the moment you save in-game.
 
 ---
 

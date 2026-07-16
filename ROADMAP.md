@@ -313,13 +313,14 @@ none in the viewer):
       cross-game / cross-world TOC
 - [x] Leaflet viewer: zoom / pan, driven by the manifest (verified in-browser); Leaflet is
       vendored and served locally, so the viewer works offline
-- [x] POI overlay: castles / towns / signposts detected from the overworld tiles, baked into
-      the manifest, shown as toggleable Leaflet markers (curated place-names TBD)
+- [x] POI overlay: **named** towns / castles / monuments / dungeons read from the game's own
+      location table in `OUT.EXE` (84 places with authoritative coordinates + names; the table
+      is auto-located by validating positions against the map), baked into the manifest and
+      shown as toggleable, labelled Leaflet markers
 - [x] Player "you are here" marker: the party's `Map X/Y` from the save (`PLAYER1.U1`, via
       `fringe-retro-core`) served at `/api/position` and shown on the map
 - [x] Live watch: the server watches the save file and pushes position updates over SSE
       (`/api/position/stream`), so the marker moves the moment you save in-game
-- [ ] Curated place-names for POIs (from the game manual / lore) as a data table
 - [ ] Extend to the next games in play order (Ultima II → …)
 
 Town/castle **interiors** aren't worth exporting (no standalone layout files — they live in the

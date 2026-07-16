@@ -71,9 +71,10 @@
 
         // POI markers, grouped by kind so they can be toggled.
         const STYLE = {
-          castle: { color: "#ff5555", label: "Castles" },
           town: { color: "#ffd24a", label: "Towns" },
-          signpost: { color: "#8ad2ff", label: "Signposts" },
+          castle: { color: "#ff5555", label: "Castles" },
+          monument: { color: "#8ad2ff", label: "Monuments" },
+          dungeon: { color: "#c78bff", label: "Dungeons" },
         };
         const groups = {};
         for (const p of m.pois || []) {
