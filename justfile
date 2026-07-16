@@ -27,16 +27,26 @@ run *ARGS:
 build:
     cargo build --release
 
-# Bake the Ultima I world map into the configured export dir (input + output from config.toml).
-map-export:
-    cargo run -q -p fringe-retro-map -- export --game ultima1
+# Bake a game's world map(s) into the export dir, e.g. `just map-export ultima2` (default: ultima1).
+map-export GAME=("ultima1"):
+    cargo run -q -p fringe-retro-map -- export --game {{ GAME }}
 
-# Serve the exported maps and open them in your browser.
+# Serve all exported maps in your browser (one server spans every baked game).
 map-serve:
     cargo run -q -p fringe-retro-map -- serve --open
 
-# Export the map(s), then serve them in the browser.
-map: map-export map-serve
+# Bake maps and serve them: `just map` bakes every game, `just map ultima2` bakes just one.
+map GAME=("all"):
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{ GAME }}" = "all" ]; then
+        for game in ultima1 ultima2; do
+            cargo run -q -p fringe-retro-map -- export --game "$game"
+        done
+    else
+        cargo run -q -p fringe-retro-map -- export --game "{{ GAME }}"
+    fi
+    cargo run -q -p fringe-retro-map -- serve --open
 
 # Cut a release: bump the workspace version, run the gate, commit, tag, and push.
 # Usage: `just release 0.2.0`. The push triggers the GitHub release workflow.
