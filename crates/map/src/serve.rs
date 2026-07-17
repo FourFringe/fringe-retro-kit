@@ -270,13 +270,19 @@ async fn toc(State(app): State<Arc<AppState>>) -> Html<String> {
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
          <title>Fringe Retro Kit — Maps</title><style>\
          body{background:#0b0b12;color:#e6e6f0;font-family:system-ui,sans-serif;margin:0;padding:2rem}\
-         h1{font-weight:600}h2{font-weight:600;font-size:1.1rem;margin:1.8rem 0 .5rem;\
+         h1{font-weight:600}\
+         details{max-width:44rem}summary{cursor:pointer;user-select:none}\
+         summary.game{font-weight:600;font-size:1.15rem;margin:1.5rem 0 .5rem;\
          border-bottom:1px solid #2a2a44;padding-bottom:.3rem}\
+         summary.subs{margin:.35rem 0;padding:.55rem .9rem;background:#161622;color:#9cf;\
+         border-radius:6px;font-size:.85rem}summary.subs:hover{background:#23233c}\
+         details.region{margin-left:1.6rem}\
          ul{list-style:none;padding:0;max-width:44rem}li{margin:.35rem 0}\
          a{display:flex;align-items:center;gap:.6rem;padding:.6rem .9rem;background:#1b1b2b;\
          color:#cfe;text-decoration:none;border-radius:6px}a:hover{background:#2a2a44}\
-         li.town{margin-left:1.6rem}li.town a{background:#161622}\
+         li.sub a{background:#161622}\
          .name{flex:1}.g{color:#8ab;font-size:.75rem}\
+         .count{color:#8ab;font-size:.75rem;font-weight:400;margin-left:.4rem}\
          .badge{font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;padding:.15rem .45rem;\
          border-radius:4px;background:#2a2a44;color:#9df}\
          .badge.overworld{background:#3a3320;color:#ffd24a}.empty{color:#99a}</style></head><body>\
@@ -309,38 +315,70 @@ async fn toc(State(app): State<Arc<AppState>>) -> Html<String> {
             .filter(|s| !s.is_empty())
             .unwrap_or(game)
             .to_owned();
-        body.push_str(&format!("<h2>{}</h2><ul>", html_escape(&header)));
-        for e in group {
-            let li_class = if e.kind == "overworld" {
-                "overworld"
-            } else {
-                "town"
-            };
-            // Drop the redundant game prefix now that the world sits under a game heading.
-            let name = e
-                .title
-                .split_once(" — ")
-                .map_or(e.title.as_str(), |(_, r)| r);
-            let badge = if e.kind.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "<span class=\"badge {kind}\">{kind}</span>",
-                    kind = html_escape(&e.kind)
-                )
-            };
-            body.push_str(&format!(
-                "<li class=\"{li_class}\"><a href=\"/view?bundle=/{game}/{world}\">\
-                 <span class=\"name\">{name}</span>{badge}<span class=\"g\">{world}</span></a></li>",
-                game = html_escape(&e.game),
-                world = html_escape(&e.world),
-                name = html_escape(name),
-            ));
+        // Each game is a collapsible section; its overworlds show directly, and the sub-maps of
+        // each overworld nest in their own collapsed group so long town lists don't flood the page.
+        body.push_str(&format!(
+            "<details class=\"game\"><summary class=\"game\">{header}\
+             <span class=\"count\">{n} map{s}</span></summary><ul>",
+            header = html_escape(&header),
+            n = group.len(),
+            s = if group.len() == 1 { "" } else { "s" },
+        ));
+        let mut i = 0;
+        while i < group.len() {
+            let region = &group[i].group;
+            let mut j = i;
+            while j < group.len() && &group[j].group == region {
+                j += 1;
+            }
+            let (overworlds, subs): (Vec<&Entry>, Vec<&Entry>) =
+                group[i..j].iter().partition(|e| e.kind == "overworld");
+            for e in overworlds {
+                push_toc_item(&mut body, e, false);
+            }
+            if !subs.is_empty() {
+                body.push_str(&format!(
+                    "<li><details class=\"region\"><summary class=\"subs\">\
+                     {n} sub-map{s}</summary><ul>",
+                    n = subs.len(),
+                    s = if subs.len() == 1 { "" } else { "s" },
+                ));
+                for e in subs {
+                    push_toc_item(&mut body, e, true);
+                }
+                body.push_str("</ul></details></li>");
+            }
+            i = j;
         }
-        body.push_str("</ul>");
+        body.push_str("</ul></details>");
     }
     body.push_str("</body></html>");
     Html(body)
+}
+
+/// Append one world as a table-of-contents list item link; `sub` marks a nested sub-map.
+fn push_toc_item(body: &mut String, e: &Entry, sub: bool) {
+    // Drop the redundant game prefix now that the world sits under a game heading.
+    let name = e
+        .title
+        .split_once(" — ")
+        .map_or(e.title.as_str(), |(_, r)| r);
+    let badge = if e.kind.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<span class=\"badge {kind}\">{kind}</span>",
+            kind = html_escape(&e.kind)
+        )
+    };
+    body.push_str(&format!(
+        "<li{class}><a href=\"/view?bundle=/{game}/{world}\">\
+         <span class=\"name\">{name}</span>{badge}<span class=\"g\">{world}</span></a></li>",
+        class = if sub { " class=\"sub\"" } else { "" },
+        game = html_escape(&e.game),
+        world = html_escape(&e.world),
+        name = html_escape(name),
+    ));
 }
 
 /// Scan `<root>/<game>/<world>/manifest.json`, reading each world's title.
