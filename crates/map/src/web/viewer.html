@@ -85,7 +85,6 @@
           castle: { color: "#ff5555", label: "Castles" },
           monument: { color: "#8ad2ff", label: "Monuments" },
           dungeon: { color: "#c78bff", label: "Dungeons" },
-          sign: { color: "#ff9f43", label: "Signs" },
         };
         const groups = {};
         for (const p of m.pois || []) {
@@ -128,18 +127,26 @@
               .addTo(map);
           }
         }
-        const events = new EventSource(
-          "/api/position/stream?game=" + encodeURIComponent(m.game)
-        );
-        events.onmessage = (ev) => {
-          try {
-            const pos = JSON.parse(ev.data);
-            if (pos.px != null && pos.py != null) setPlayer(pos.px, pos.py);
-          } catch (e) {
-            /* ignore malformed events */
-          }
-        };
-        // EventSource reconnects automatically if the connection drops.
+        // Ask once whether this game supports a live position. If not (e.g. no save parser yet),
+        // skip the stream entirely so we don't hold an idle server connection open.
+        const pos0 = await (
+          await fetch("/api/position?game=" + encodeURIComponent(m.game))
+        ).json();
+        if (pos0.supported) {
+          if (pos0.px != null && pos0.py != null) setPlayer(pos0.px, pos0.py);
+          const events = new EventSource(
+            "/api/position/stream?game=" + encodeURIComponent(m.game)
+          );
+          events.onmessage = (ev) => {
+            try {
+              const pos = JSON.parse(ev.data);
+              if (pos.px != null && pos.py != null) setPlayer(pos.px, pos.py);
+            } catch (e) {
+              /* ignore malformed events */
+            }
+          };
+          // EventSource reconnects automatically if the connection drops.
+        }
       }
       main();
     </script>

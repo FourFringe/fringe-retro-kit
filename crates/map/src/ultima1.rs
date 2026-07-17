@@ -47,6 +47,8 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             game: "ultima1".into(),
             world: "overworld".into(),
             title: "Ultima I — Sosaria".into(),
+            kind: "overworld".into(),
+            group: "overworld".into(),
         },
         image: overworld.image,
         pois: overworld.pois,

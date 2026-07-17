@@ -82,14 +82,14 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
 
         // Only towns paint readable labels; on overworlds the font tiles double as terrain, so
         // reading them there would yield noise. Towns are exactly the maps with a `TLK` file.
-        let (pois, title) = if has_dialogue(game_dir, &name) {
-            let pois = extract_labels(grid);
-            let title = town_name(&pois)
+        // We read the labels only to name the town — they're not shown as markers (the painted
+        // text is already legible on the map, so markers would just obscure it).
+        let title = if has_dialogue(game_dir, &name) {
+            town_name(&extract_labels(grid))
                 .map(|n| format!("Ultima II — {n}"))
-                .unwrap_or_else(|| format!("Ultima II — Town ({})", name.to_ascii_uppercase()));
-            (pois, title)
+                .unwrap_or_else(|| format!("Ultima II — Town ({})", name.to_ascii_uppercase()))
         } else {
-            (vec![], format!("Ultima II — {}", name.to_ascii_uppercase()))
+            format!("Ultima II — {}", name.to_ascii_uppercase())
         };
 
         let world_id = name.to_ascii_lowercase();
@@ -97,10 +97,12 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             meta: WorldMeta {
                 game: "ultima2".into(),
                 title,
+                kind: map_kind(&name).into(),
+                group: map_group(&name),
                 world: world_id,
             },
             image,
-            pois,
+            pois: vec![],
         });
     }
 
@@ -135,12 +137,13 @@ fn read_tileset(game_dir: &Path) -> Result<Vec<RgbImage>> {
     Ok(tiles)
 }
 
-/// List the names of all `MAP[XG]NN` files in `game_dir` (case-insensitive on disk).
+/// List the names of the renderable `MAP[XG]NN` tile maps in `game_dir` (case-insensitive on
+/// disk). Non-tile map slots (see [`is_tile_map`]) are skipped.
 fn discover_maps(game_dir: &Path) -> Result<Vec<String>> {
     let mut names = Vec::new();
     for entry in std::fs::read_dir(game_dir)? {
         let name = entry?.file_name().to_string_lossy().into_owned();
-        if is_map_name(&name) {
+        if is_tile_map(&name) {
             names.push(name);
         }
     }
@@ -155,6 +158,32 @@ fn is_map_name(name: &str) -> bool {
         && matches!(b[3].to_ascii_uppercase(), b'X' | b'G')
         && b[4].is_ascii_digit()
         && b[5].is_ascii_digit()
+}
+
+/// Whether a map is a top-down **tile** map we can render. The final digit encodes the map's
+/// type: `0` = overworld, `1`–`3` = towns/castles, and `4`–`5` = dungeons and other data stored
+/// in a different (non-top-down) format that decodes to noise. We render only types `0`–`3`.
+fn is_tile_map(name: &str) -> bool {
+    is_map_name(name) && matches!(name.as_bytes()[5], b'0'..=b'3')
+}
+
+/// The map's category from its final digit: `0` = overworld, otherwise a town/castle (`1`–`3`).
+fn map_kind(name: &str) -> &'static str {
+    match name.as_bytes()[5] {
+        b'0' => "overworld",
+        _ => "town",
+    }
+}
+
+/// A grouping key that ties a world's sub-maps to it. Ultima II names encode a region in the
+/// world letter + tens digit (`MAPX2N` → `x2`), so an overworld (`MAPX20`) and its towns
+/// (`MAPX21`, `MAPX22`, …) all share one group.
+fn map_group(name: &str) -> String {
+    format!(
+        "{}{}",
+        (name.as_bytes()[3] as char).to_ascii_lowercase(),
+        name.as_bytes()[4] as char
+    )
 }
 
 /// Whether a map has a companion `TLK` dialogue file, which marks it as a town. The suffix keeps
@@ -370,6 +399,31 @@ mod tests {
         assert!(!is_map_name("MAPX000")); // too long
         assert!(!is_map_name("MAPZ00")); // wrong world letter
         assert!(!is_map_name("MAPXAB")); // non-digit index
+    }
+
+    #[test]
+    fn tile_maps_exclude_dungeon_slots() {
+        // Types 0–3 render as tiles (overworlds, towns, castles).
+        assert!(is_tile_map("MAPX20")); // overworld
+        assert!(is_tile_map("MAPX21")); // town
+        assert!(is_tile_map("MAPG93")); // castle
+        assert!(is_tile_map("mapg82")); // lowercase on disk
+                                        // Types 4–5 are dungeon/other data that decodes to noise.
+        assert!(!is_tile_map("MAPX24"));
+        assert!(!is_tile_map("MAPX35"));
+        assert!(!is_tile_map("MAPG45"));
+        assert!(!is_tile_map("mapg44"));
+    }
+
+    #[test]
+    fn kind_and_group_from_name() {
+        assert_eq!(map_kind("MAPX20"), "overworld");
+        assert_eq!(map_kind("MAPX21"), "town");
+        assert_eq!(map_kind("MAPG93"), "town");
+        // A region shares one group across its overworld and sub-maps.
+        assert_eq!(map_group("MAPX20"), "x2");
+        assert_eq!(map_group("MAPX23"), "x2");
+        assert_eq!(map_group("mapg82"), "g8");
     }
 
     #[test]

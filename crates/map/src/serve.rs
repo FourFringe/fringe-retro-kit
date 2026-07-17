@@ -36,6 +36,8 @@ struct Entry {
     game: String,
     world: String,
     title: String,
+    kind: String,
+    group: String,
 }
 
 /// Run the server until interrupted. Leaflet is served locally, so no internet is required.
@@ -98,8 +100,11 @@ struct PosQuery {
 }
 
 /// The party's current position in image **pixel** coordinates, if a save is available.
+/// `supported` tells the viewer whether this game has live-position support at all, so it can
+/// avoid opening a position stream (and holding an idle connection) for games that don't.
 #[derive(Serialize)]
 struct PositionResp {
+    supported: bool,
     px: Option<u32>,
     py: Option<u32>,
 }
@@ -110,22 +115,31 @@ async fn position(
     State(app): State<Arc<AppState>>,
     Query(q): Query<PosQuery>,
 ) -> Json<PositionResp> {
-    let empty = PositionResp { px: None, py: None };
     if q.game != "ultima1" {
-        return Json(empty);
+        return Json(PositionResp {
+            supported: false,
+            px: None,
+            py: None,
+        });
     }
+    let unknown = PositionResp {
+        supported: true,
+        px: None,
+        py: None,
+    };
     let Some(dir) = app.config.game_input_dir(&q.game) else {
-        return Json(empty);
+        return Json(unknown);
     };
     match ultima1::player_position(&dir) {
         Ok(Some(pos)) => {
             let (px, py) = tile_center_px(pos);
             Json(PositionResp {
+                supported: true,
                 px: Some(px),
                 py: Some(py),
             })
         }
-        _ => Json(empty),
+        _ => Json(unknown),
     }
 }
 
@@ -196,32 +210,81 @@ fn tile_center_px(pos: (u32, u32)) -> (u32, u32) {
     (pos.0 * ega::TILE_SIZE + half, pos.1 * ega::TILE_SIZE + half)
 }
 
-/// Dynamic table of contents: every world with a `manifest.json` under the export root.
+/// Dynamic table of contents: every world with a `manifest.json`, grouped by game and then by
+/// region — an overworld with its towns/castles nested beneath it.
 async fn toc(State(app): State<Arc<AppState>>) -> Html<String> {
-    let mut entries = discover(&app.root);
-    entries.sort_by(|a, b| (&a.game, &a.world).cmp(&(&b.game, &b.world)));
+    let entries = discover(&app.root);
 
     let mut body = String::from(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
          <title>Fringe Retro Kit — Maps</title><style>\
          body{background:#0b0b12;color:#e6e6f0;font-family:system-ui,sans-serif;margin:0;padding:2rem}\
-         h1{font-weight:600}ul{list-style:none;padding:0;max-width:40rem}\
-         li{margin:.4rem 0}a{display:block;padding:.7rem 1rem;background:#1b1b2b;color:#cfe;\
-         text-decoration:none;border-radius:6px}a:hover{background:#2a2a44}\
-         .g{color:#8ab;font-size:.8rem}.empty{color:#99a}</style></head><body>\
+         h1{font-weight:600}h2{font-weight:600;font-size:1.1rem;margin:1.8rem 0 .5rem;\
+         border-bottom:1px solid #2a2a44;padding-bottom:.3rem}\
+         ul{list-style:none;padding:0;max-width:44rem}li{margin:.35rem 0}\
+         a{display:flex;align-items:center;gap:.6rem;padding:.6rem .9rem;background:#1b1b2b;\
+         color:#cfe;text-decoration:none;border-radius:6px}a:hover{background:#2a2a44}\
+         li.town{margin-left:1.6rem}li.town a{background:#161622}\
+         .name{flex:1}.g{color:#8ab;font-size:.75rem}\
+         .badge{font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;padding:.15rem .45rem;\
+         border-radius:4px;background:#2a2a44;color:#9df}\
+         .badge.overworld{background:#3a3320;color:#ffd24a}.empty{color:#99a}</style></head><body>\
          <h1>Exported maps</h1>",
     );
+
     if entries.is_empty() {
-        body.push_str("<p class=\"empty\">No maps found. Bake one with <code>fringe-retro-map export</code>.</p>");
-    } else {
-        body.push_str("<ul>");
-        for e in &entries {
+        body.push_str("<p class=\"empty\">No maps found. Bake one with <code>fringe-retro-map export</code>.</p></body></html>");
+        return Html(body);
+    }
+
+    let mut games: Vec<&str> = entries.iter().map(|e| e.game.as_str()).collect();
+    games.sort_unstable();
+    games.dedup();
+
+    for game in games {
+        let mut group: Vec<&Entry> = entries.iter().filter(|e| e.game == game).collect();
+        // Region key, then overworld before its sub-maps, then world id.
+        group.sort_by(|a, b| {
+            (&a.group, a.kind != "overworld", &a.world).cmp(&(
+                &b.group,
+                b.kind != "overworld",
+                &b.world,
+            ))
+        });
+        // The game heading is the shared title prefix (e.g. "Ultima II — Towne Linda" → "Ultima II").
+        let header = group
+            .first()
+            .map(|e| e.title.split(" — ").next().unwrap_or(&e.title))
+            .filter(|s| !s.is_empty())
+            .unwrap_or(game)
+            .to_owned();
+        body.push_str(&format!("<h2>{}</h2><ul>", html_escape(&header)));
+        for e in group {
+            let li_class = if e.kind == "overworld" {
+                "overworld"
+            } else {
+                "town"
+            };
+            // Drop the redundant game prefix now that the world sits under a game heading.
+            let name = e
+                .title
+                .split_once(" — ")
+                .map_or(e.title.as_str(), |(_, r)| r);
+            let badge = if e.kind.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<span class=\"badge {kind}\">{kind}</span>",
+                    kind = html_escape(&e.kind)
+                )
+            };
             body.push_str(&format!(
-                "<li><a href=\"/view?bundle=/{game}/{world}\">{title}<span class=\"g\"> — {game}/{world}</span></a></li>",
+                "<li class=\"{li_class}\"><a href=\"/view?bundle=/{game}/{world}\">\
+                 <span class=\"name\">{name}</span>{badge}<span class=\"g\">{world}</span></a></li>",
                 game = html_escape(&e.game),
                 world = html_escape(&e.world),
-                title = html_escape(&e.title),
+                name = html_escape(name),
             ));
         }
         body.push_str("</ul>");
@@ -247,24 +310,36 @@ fn discover(root: &PathBuf) -> Vec<Entry> {
                 continue;
             }
             let world_name = world.file_name().to_string_lossy().into_owned();
-            let title =
-                read_title(&manifest).unwrap_or_else(|| format!("{game_name}/{world_name}"));
+            let meta = read_manifest(&manifest);
+            let field = |key: &str| meta.as_ref().and_then(|m| manifest_str(m, key));
+            let title = field("title").unwrap_or_else(|| format!("{game_name}/{world_name}"));
+            let kind = field("kind").unwrap_or_default();
+            // Ungrouped worlds each form their own group so they still list cleanly.
+            let group = field("group").unwrap_or_else(|| world_name.clone());
             out.push(Entry {
                 game: game_name.clone(),
                 world: world_name,
                 title,
+                kind,
+                group,
             });
         }
     }
     out
 }
 
-fn read_title(manifest: &std::path::Path) -> Option<String> {
+/// Parse a bundle's `manifest.json`, if present and valid.
+fn read_manifest(manifest: &std::path::Path) -> Option<serde_json::Value> {
     let text = std::fs::read_to_string(manifest).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Read a non-empty string field from a parsed manifest.
+fn manifest_str(value: &serde_json::Value, key: &str) -> Option<String> {
     value
-        .get("title")
+        .get(key)
         .and_then(|t| t.as_str())
+        .filter(|s| !s.is_empty())
         .map(str::to_owned)
 }
 

@@ -19,6 +19,12 @@ pub struct WorldMeta {
     pub game: String,
     pub world: String,
     pub title: String,
+    /// Map category, used for badges and ordering, e.g. `overworld` or `town`.
+    pub kind: String,
+    /// A key that clusters related maps within a game so the browser can list a world's
+    /// sub-maps (towns, castles) beside it — e.g. every Ultima II map in the same region shares
+    /// one group. Worlds with the same `(game, group)` belong together.
+    pub group: String,
 }
 
 /// A fully rendered world ready to be baked into a bundle: its identity, composite image, and
@@ -48,6 +54,8 @@ struct Manifest {
     game: String,
     world: String,
     title: String,
+    kind: String,
+    group: String,
     tile_size: u32,
     min_zoom: u32,
     max_zoom: u32,
@@ -84,6 +92,8 @@ pub fn write_bundle(export_root: &Path, world: &World) -> Result<PathBuf> {
         game: meta.game.clone(),
         world: meta.world.clone(),
         title: meta.title.clone(),
+        kind: meta.kind.clone(),
+        group: meta.group.clone(),
         tile_size: TILE_SIZE,
         min_zoom: 0,
         max_zoom,
@@ -148,6 +158,8 @@ mod tests {
                 game: "ultima1".into(),
                 world: "overworld".into(),
                 title: "Test".into(),
+                kind: "overworld".into(),
+                group: "overworld".into(),
             },
             image: RgbImage::from_pixel(300, 300, image::Rgb([1, 2, 3])),
             pois: vec![],
