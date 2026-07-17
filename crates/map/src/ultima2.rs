@@ -103,12 +103,19 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         // reading them there would yield noise. Towns are exactly the maps with a `TLK` file.
         // We read the labels only to name the town — they're not shown as markers (the painted
         // text is already legible on the map, so markers would just obscure it).
-        let title = if has_dialogue(game_dir, &name) {
+        let is_town = has_dialogue(game_dir, &name);
+        let title = if is_town {
             town_name(&extract_labels(grid))
                 .map(|n| format!("Ultima II — {n}"))
                 .unwrap_or_else(|| format!("Ultima II — Town ({})", name.to_ascii_uppercase()))
         } else {
             format!("Ultima II — {}", name.to_ascii_uppercase())
+        };
+        // Overworlds get typed location markers (towns/castles/dungeons/towers); towns get none.
+        let pois = if is_town {
+            vec![]
+        } else {
+            overworld_pois(grid)
         };
 
         let world_id = name.to_ascii_lowercase();
@@ -121,7 +128,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
                 world: world_id,
             },
             image,
-            pois: vec![],
+            pois,
         });
     }
 
@@ -203,6 +210,45 @@ fn map_group(name: &str) -> String {
         (name.as_bytes()[3] as char).to_ascii_lowercase(),
         name.as_bytes()[4] as char
     )
+}
+
+/// The location type of an overworld landmark tile, if it is one. Per the Ultima II manual's
+/// tile legend: `5` = village, `6` = town, `7` = tower, `8` = castle, `9` = dungeon.
+fn landmark_kind(tile_index: u8) -> Option<&'static str> {
+    match tile_index {
+        5 => Some("village"),
+        6 => Some("town"),
+        7 => Some("tower"),
+        8 => Some("castle"),
+        9 => Some("dungeon"),
+        _ => None,
+    }
+}
+
+/// Scan an overworld grid for landmark tiles and emit a POI for each, typed by tile.
+///
+/// These are **not** linked to their sub-maps: Ultima II has no overworld→map table (confirmed
+/// absent from both `ULTIMAII.EXE` and the town files' headers), so each marker carries only a
+/// generic type label and acts as a toggleable "locations" overlay. The first column and the
+/// bottom two rows hold border/leftover data rather than real landmarks, so they're skipped.
+fn overworld_pois(grid: &[u8]) -> Vec<Poi> {
+    let mut pois = Vec::new();
+    for (i, &byte) in grid.iter().enumerate() {
+        let x = (i % MAP_W) as u32;
+        let y = (i / MAP_W) as u32;
+        if x == 0 || y as usize >= MAP_H - 2 {
+            continue;
+        }
+        if let Some(kind) = landmark_kind(byte >> 2) {
+            pois.push(Poi {
+                px: x * TILE_SIZE + TILE_SIZE / 2,
+                py: y * TILE_SIZE + TILE_SIZE / 2,
+                kind: kind.to_string(),
+                label: title_case(kind),
+            });
+        }
+    }
+    pois
 }
 
 /// Whether a map has a companion `TLK` dialogue file, which marks it as a town. The suffix keeps
@@ -443,6 +489,30 @@ mod tests {
         assert_eq!(map_group("MAPX20"), "x2");
         assert_eq!(map_group("MAPX23"), "x2");
         assert_eq!(map_group("mapg82"), "g8");
+    }
+
+    #[test]
+    fn overworld_pois_type_and_filter_landmarks() {
+        let mut grid = vec![0u8; MAP_GRID_LEN];
+        let put = |g: &mut [u8], x: usize, y: usize, tile: u8| g[y * MAP_W + x] = tile << 2;
+        put(&mut grid, 20, 10, 5); // village
+        put(&mut grid, 36, 27, 6); // town
+        put(&mut grid, 25, 3, 7); // tower
+        put(&mut grid, 38, 44, 8); // castle
+        put(&mut grid, 35, 20, 9); // dungeon
+        put(&mut grid, 0, 62, 6); // border artifact — must be skipped
+        put(&mut grid, 10, 10, 2); // plain terrain — not a landmark
+
+        let pois = overworld_pois(&grid);
+        let kinds: Vec<&str> = pois.iter().map(|p| p.kind.as_str()).collect();
+        assert_eq!(pois.len(), 5);
+        for k in ["village", "town", "tower", "castle", "dungeon"] {
+            assert!(kinds.contains(&k), "missing {k}");
+        }
+        // The (0,62) artifact and plain terrain produced no POI.
+        assert!(pois.iter().all(|p| p.px >= TILE_SIZE));
+        // Labels are the title-cased kind.
+        assert!(pois.iter().any(|p| p.label == "Town"));
     }
 
     #[test]
