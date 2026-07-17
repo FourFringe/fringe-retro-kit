@@ -11,7 +11,7 @@
 #
 # It installs the pre-built macOS binary from the matching GitHub release (no compilation).
 class FringeRetro < Formula
-  desc "Inspect, edit, and back up classic computer game save files"
+  desc "Inspect, edit, back up, and browse world maps from classic game saves"
   homepage "https://github.com/FourFringe/fringe-retro-kit"
   version "0.2.0"
   license "MIT"
@@ -28,12 +28,13 @@ class FringeRetro < Formula
   end
 
   def install
-    bin.install "fringe-retro"
+    bin.install "fringe-retro", "fringe-retro-map"
     # The release tarball also bundles the docs.
     doc.install "README.md", "COMMANDS.md" if File.exist?("README.md")
   end
 
   test do
     assert_match "fringe-retro #{version}", shell_output("#{bin}/fringe-retro --version")
+    assert_match "fringe-retro-map #{version}", shell_output("#{bin}/fringe-retro-map --version")
   end
 end

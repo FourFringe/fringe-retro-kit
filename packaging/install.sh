@@ -1,5 +1,9 @@
 #!/bin/sh
-# fringe-retro installer — downloads a released binary from GitHub and installs it.
+# fringe-retro installer — downloads a released build from GitHub and installs it.
+#
+# Installs two binaries: `fringe-retro` (the save-file CLI/TUI) and `fringe-retro-map`
+# (the world-map browser). The map tool is optional — older releases that predate it are
+# still installed fine.
 #
 # Quick start:
 #   curl -fsSL https://raw.githubusercontent.com/FourFringe/fringe-retro-kit/main/packaging/install.sh | sh
@@ -21,6 +25,7 @@ set -eu
 
 REPO="FourFringe/fringe-retro-kit"
 BIN_NAME="fringe-retro"
+MAP_BIN_NAME="fringe-retro-map"
 VERSION="${FRINGE_RETRO_VERSION:-}"
 BIN_DIR="${FRINGE_RETRO_BIN_DIR:-$HOME/.local/bin}"
 
@@ -145,20 +150,31 @@ say "Verifying checksum ..."
 say "Extracting ..."
 tar -xzf "$tmp/$asset" -C "$tmp"
 
-binpath="$tmp/${asset%.tar.gz}/$BIN_NAME"
-if [ ! -f "$binpath" ]; then
-  binpath="$(find "$tmp" -type f -name "$BIN_NAME" | head -n1)"
-fi
-[ -n "$binpath" ] && [ -f "$binpath" ] || err "binary '$BIN_NAME' not found in archive."
-
+extracted="$tmp/${asset%.tar.gz}"
 mkdir -p "$BIN_DIR"
-if ! install -m 0755 "$binpath" "$BIN_DIR/$BIN_NAME" 2>/dev/null; then
-  cp "$binpath" "$BIN_DIR/$BIN_NAME"
-  chmod 0755 "$BIN_DIR/$BIN_NAME"
-fi
+
+install_bin() { # install_bin <name> <required:yes|no>
+  name="$1"; required="${2:-yes}"
+  binpath="$extracted/$name"
+  if [ ! -f "$binpath" ]; then
+    binpath="$(find "$tmp" -type f -name "$name" | head -n1)"
+  fi
+  if [ -z "$binpath" ] || [ ! -f "$binpath" ]; then
+    [ "$required" = yes ] && err "binary '$name' not found in archive."
+    warn "note: '$name' is not in this release — skipping it."
+    return 0
+  fi
+  if ! install -m 0755 "$binpath" "$BIN_DIR/$name" 2>/dev/null; then
+    cp "$binpath" "$BIN_DIR/$name"
+    chmod 0755 "$BIN_DIR/$name"
+  fi
+}
+
+install_bin "$BIN_NAME" yes
+install_bin "$MAP_BIN_NAME" no
 
 say ""
-say "Installed $BIN_NAME $VERSION to $BIN_DIR/$BIN_NAME"
+say "Installed to $BIN_DIR (version $VERSION)."
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -169,4 +185,4 @@ case ":$PATH:" in
     ;;
 esac
 
-say "Run '$BIN_NAME --help' to get started."
+say "Run '$BIN_NAME --help' to get started, or '$MAP_BIN_NAME --help' for the map browser."

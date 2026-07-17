@@ -743,6 +743,52 @@ for the file format and the allowed field names/values per game.
 
 ---
 
+## Map browser (`fringe-retro-map`)
+
+A second binary, **`fringe-retro-map`**, renders a game's world maps into web tiles and serves
+them in a local browser. It reads the same `config.toml` as `fringe-retro`
+([`config.example.toml`](config.example.toml)): each game's `save_dir`, plus a `[map]`
+`export_dir` where baked tiles are written. Supported today: **Ultima I** and **Ultima II**.
+
+### ✅ `export [--game <id>]`
+
+Bake a game's world map(s) into a tile bundle under the export directory.
+
+```bash
+fringe-retro-map export --game ultima2
+```
+
+- `--game <id>` — which game to bake (default `ultima1`).
+- `--input <dir>` — game data directory (defaults to that game's `save_dir` from `config.toml`).
+- `--out <dir>`, `-o` — export root (defaults to `[map] export_dir` from `config.toml`).
+- `--png <file>` — also write the first world's flat composite image (handy for debugging).
+
+Ultima I bakes one overworld; Ultima II bakes every overworld and town (dungeon and other
+non-tile maps are skipped).
+
+### ✅ `serve [--open]`
+
+Serve the exported map bundles in a local web browser. A single server spans every game you've
+baked into the export directory.
+
+```bash
+fringe-retro-map serve --open
+```
+
+- `--root <dir>`, `-r` — export root to serve (defaults to `[map] export_dir`).
+- `--port <n>` — port to listen on (default `8737`).
+- `--open` — open the map browser in your default browser once the server is up.
+
+The listing is grouped by game, with each overworld's towns nested beneath it, and overworlds
+mark their villages, towns, towers, castles, and dungeons. When the game's save is present, your
+party's current position is shown and updates live as you save in-game. Everything is served from
+`http://127.0.0.1` — no internet is required, and no game assets are copied or redistributed.
+
+> **Tip:** with [`just`](https://github.com/casey/just) installed, `just map` bakes every
+> supported game and serves them in one step (`just map ultima2` for a single game).
+
+---
+
 ## Where files live
 
 ### Active save files

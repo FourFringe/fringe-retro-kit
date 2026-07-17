@@ -11,6 +11,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   BIN_NAME: fringe-retro
+  MAP_BIN_NAME: fringe-retro-map
 
 jobs:
   build:
@@ -38,8 +39,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build release binary
-        run: cargo build --release --locked --bin ${{ env.BIN_NAME }} --target ${{ matrix.target }}
+      - name: Build release binaries
+        run: cargo build --release --locked --bin ${{ env.BIN_NAME }} --bin ${{ env.MAP_BIN_NAME }} --target ${{ matrix.target }}
 
       - name: Package tarball + checksum (Unix)
         if: runner.os != 'Windows'
@@ -49,6 +50,7 @@ jobs:
           stage="${BIN_NAME}-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$stage"
           cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$stage/"
+          cp "target/${{ matrix.target }}/release/${MAP_BIN_NAME}" "$stage/"
           cp README.md LICENSE COMMANDS.md "$stage/"
           tar -czf "${stage}.tar.gz" "$stage"
           if command -v shasum >/dev/null 2>&1; then
@@ -65,6 +67,7 @@ jobs:
           $stage = "$env:BIN_NAME-$env:GITHUB_REF_NAME-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $stage | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" "$stage/"
+          Copy-Item "target/${{ matrix.target }}/release/$env:MAP_BIN_NAME.exe" "$stage/"
           Copy-Item README.md, LICENSE, COMMANDS.md "$stage/"
           $zip = "$stage.zip"
           Compress-Archive -Path $stage -DestinationPath $zip

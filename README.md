@@ -24,6 +24,7 @@ demands it (e.g. Wasteland's encryption).
 - Inspect and edit character sheets field-by-field; the TUI adds a section-grouped editor
 - Safe editing with automatic backups (unknown bytes preserved; writes are byte-faithful)
 - A curated Save Library alongside automatic backup retention
+- A local **world-map browser** (`fringe-retro-map`): bake a game's world maps into web tiles and explore them in your browser, with your party's live position (Ultima I & II)
 - Cross-platform: fully tested on macOS; Linux and Windows binaries published as built-but-untested
 - Data-driven game definitions planned (reusable parsers + per-game schema data; simple formats become user-authorable)
 - Community-friendly, MIT-licensed architecture
@@ -61,13 +62,37 @@ curl -fsSL https://raw.githubusercontent.com/FourFringe/fringe-retro-kit/main/pa
 
 **Windows:** download the `.zip` for `x86_64-pc-windows-msvc` from the
 [latest release](https://github.com/FourFringe/fringe-retro-kit/releases/latest), extract it,
-and put `fringe-retro.exe` somewhere on your `PATH`.
+and put `fringe-retro.exe` and `fringe-retro-map.exe` somewhere on your `PATH`.
 
 **From source** (any platform with a Rust toolchain):
 
 ```sh
-cargo install --path crates/cli
+cargo install --path crates/cli   # fringe-retro (save-file tools)
+cargo install --path crates/map   # fringe-retro-map (world-map browser)
 ```
+
+---
+
+## Map browser
+
+Alongside the save-file tools, **`fringe-retro-map`** bakes a game's world maps into web tiles
+and serves them in your browser — pan and zoom a full overworld, browse its towns, and see your
+party's current position. It reads the same `config.toml` as the main tool (see
+[`config.example.toml`](config.example.toml)): each game's `save_dir`, plus a `[map] export_dir`
+for the baked tiles.
+
+```sh
+# Bake a game's maps into the export directory (Ultima I and II today):
+fringe-retro-map export --game ultima2
+
+# Serve every baked map and open it in your browser:
+fringe-retro-map serve --open
+```
+
+The listing groups each overworld with its towns and marks villages, towns, towers, castles, and
+dungeons. When a game's save is present, your party's position is shown and updates live as you
+play. Everything runs locally — no internet required, and no game assets are copied or
+redistributed.
 
 ---
 
