@@ -40,7 +40,7 @@ map GAME=("all"):
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "{{ GAME }}" = "all" ]; then
-        for game in ultima1 ultima2 ultima3 ultima4; do
+        for game in ultima1 ultima2 ultima3 ultima4 ultima5; do
             cargo run -q -p fringe-retro-map -- export --game "$game"
         done
     else

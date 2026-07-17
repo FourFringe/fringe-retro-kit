@@ -29,7 +29,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
-use crate::{config::Config, ega, ultima1, ultima2, ultima3, ultima4};
+use crate::{config::Config, ega, ultima1, ultima2, ultima3, ultima4, ultima5};
 
 /// Shared server state: where bundles live, plus the config for resolving each game's save.
 struct AppState {
@@ -120,17 +120,31 @@ fn supports_position(game: &str, world: &str) -> bool {
         "ultima2" => matches!(world, "mapx20" | "mapx30" | "mapx40"),
         "ultima3" => world == "sosaria",
         "ultima4" => world == "britannia",
+        "ultima5" => matches!(world, "britannia" | "underworld"),
         _ => false,
     }
 }
 
-/// Read the current party position (in tiles) for a game from its save directory.
-fn read_position(game: &str, dir: &Path) -> Option<(u32, u32)> {
+/// Read the current party position (in tiles) for a game from its save directory. `world` is the
+/// world being viewed, so games with more than one positionable world (Ultima V's surface and
+/// Underworld) only return a position when the save is on that world.
+fn read_position(game: &str, world: &str, dir: &Path) -> Option<(u32, u32)> {
     match game {
         "ultima1" => ultima1::player_position(dir).ok().flatten(),
         "ultima2" => ultima2::player_position(dir).ok().flatten(),
         "ultima3" => ultima3::player_position(dir).ok().flatten(),
         "ultima4" => ultima4::player_position(dir).ok().flatten(),
+        "ultima5" => ultima5::player_position(dir)
+            .ok()
+            .flatten()
+            .and_then(|(underworld, x, y)| {
+                let want = if underworld {
+                    "underworld"
+                } else {
+                    "britannia"
+                };
+                (world == want).then_some((x, y))
+            }),
         _ => None,
     }
 }
@@ -162,7 +176,7 @@ async fn position(
     let pos = app
         .config
         .game_input_dir(&q.game)
-        .and_then(|dir| read_position(&q.game, &dir));
+        .and_then(|dir| read_position(&q.game, &q.world, &dir));
     let (px, py) = match pos {
         Some(p) => {
             let (px, py) = tile_center_px(p);
@@ -187,6 +201,7 @@ async fn position_stream(
         .then(|| app.config.game_input_dir(&q.game))
         .flatten();
     let game = q.game;
+    let world = q.world;
 
     let stream = async_stream::stream! {
         // Without a resolvable save directory there's nothing to watch; hold the connection
@@ -213,7 +228,7 @@ async fn position_stream(
 
         // Emit the current position immediately, then only on change.
         let mut last: Option<(u32, u32)> = None;
-        if let Some(pos) = read_position(&game, &dir) {
+        if let Some(pos) = read_position(&game, &world, &dir) {
             last = Some(pos);
             yield Ok::<_, Infallible>(position_event(pos));
         }
@@ -221,7 +236,7 @@ async fn position_stream(
             // Debounce a burst of filesystem events into a single read.
             tokio::time::sleep(Duration::from_millis(150)).await;
             while rx.try_recv().is_ok() {}
-            if let Some(pos) = read_position(&game, &dir) {
+            if let Some(pos) = read_position(&game, &world, &dir) {
                 if Some(pos) != last {
                     last = Some(pos);
                     yield Ok::<_, Infallible>(position_event(pos));

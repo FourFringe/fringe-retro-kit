@@ -1,4 +1,6 @@
-# Ultima V Save Format (`SAVED.GAM`)
+# Ultima V — File Formats
+
+## Save Format (`SAVED.GAM`)
 
 Ultima V: Warriors of Destiny stores the whole game in a single **4192-byte** file,
 `SAVED.GAM`, in the game directory. `INIT.GAM` is the pristine new-game template of the same
@@ -110,3 +112,71 @@ HP 60/60), the "always 7" byte at record offset `0x18`, and party state (food 63
 3 party members) all decoded exactly as documented. The full RAM/save table (dungeon maps,
 NPC schedules, monster tables, and other RAM-only regions beyond `0x1060`) is on the Codex
 page but is out of scope for character/party editing.
+
+## World Maps (`BRIT.DAT`, `UNDER.DAT`)
+
+Ultima V has two full **256×256** tile worlds — the Britannia surface and the Underworld — each
+built from **16×16-tile chunks** arranged in a 16×16 grid (256 chunks). A chunk is 256 bytes, one
+per tile, and the byte *is* the tile index.
+
+- **`UNDER.DAT`** (65536 bytes) stores all 256 chunks in grid order, so the world assembles
+  linearly: chunk `n` is grid cell `n` (row-major), tile `(x, y)` at
+  `((y/16)*16 + x/16) * 256 + (y%16)*16 + (x%16)`.
+- **`BRIT.DAT`** (52480 bytes) stores only the **205 non-water chunks**, concatenated. The
+  arrangement is a separate **256-byte layout table in `DATA.OVL`**: one byte per grid cell giving
+  the chunk index into `BRIT.DAT`, or `0xFF` for open ocean (rendered as deep water, tile 1). The
+  table is a bijection over the stored chunks (each index `0`–`204` appears exactly once), a strong
+  signature, so Fringe Retro Kit finds it by scanning rather than hard-coding an offset. In the
+  sampled build it sits at `0x3886`.
+
+The party's world position is in `SAVED.GAM`: location `0x2ED` is `0` on the world map, the
+Z-coordinate `0x2EF` is `0` on the Britannia surface (`0xFF` in the Underworld, `1`–`7` in a
+dungeon), and X/Y are at `0x2F0`/`0x2F1`.
+
+## Location Maps (`TOWNE.DAT`, `DWELLING.DAT`, `CASTLE.DAT`, `KEEP.DAT`)
+
+Towns, dwellings, castles and keeps are **32×32-tile** maps (1024 bytes, one byte per tile). Each
+of the four files holds **16 floors** grouped into **eight locations**; multi-floor places (Lord
+British's Castle has five, Empath Abbey four) occupy consecutive floors. `DATA.OVL` holds, per file,
+an 8-byte array of each location's **first floor index**, so a location's floors are
+`[start[i], start[i + 1])` (with an implied end of 16):
+
+| Offset | File | Notes |
+| --- | --- | --- |
+| `0x1E2A` | `TOWNE.DAT` | The eight towns (Moonglow … New Magincia) |
+| `0x1E32` | `DWELLING.DAT` | Lighthouses and huts |
+| `0x1E3A` | `CASTLE.DAT` | Lord British's & Blackthorn's castles, the Britannys, small towns |
+| `0x1E42` | `KEEP.DAT` | The keeps and abbeys |
+
+The eight dungeons are first-person (`DUNGEON.DAT`) and aren't rendered as top-down maps.
+
+## Location Coordinates & Names (`DATA.OVL`)
+
+A 40-entry table gives every enterable location's overworld tile coordinate, in **Party-Location
+order**: 8 towns, 8 dwellings, 8 castles/villages, 8 keeps, 8 dungeons.
+
+| Offset | Length | Purpose |
+| --- | --- | --- |
+| `0x1E9A` | 40 | X-coordinate of each location |
+| `0x1EC2` | 40 | Y-coordinate of each location |
+
+Fringe Retro Kit places a named marker at each coordinate. A location sits on the Britannia surface
+unless its coordinate lands on open water there — only **Doom** does, so it's marked on the
+Underworld. The location names come from the canonical Party-Location list (the `0xA4D` "city names"
+strings in `DATA.OVL` cover most, but not all, of them).
+
+## Tile Graphics (`TILES.16`)
+
+`TILES.16` holds **512 tiles** of 16×16, 4-bit EGA graphics: two pixels per byte (**high nibble =
+left pixel**), 128 bytes per tile, in the standard 16-colour EGA palette. The file is
+**LZW-compressed** (see below); decompressed it is exactly 65536 bytes. World maps only reference
+tile indices `0`–`255`.
+
+## LZW Compression
+
+Several Ultima V files (and most of Ultima VI's) are compressed with an **Ultima 6-style LZW**
+codec. A compressed buffer begins with a 4-byte little-endian **uncompressed size**, then a stream
+of variable-width codewords packed **LSB-first**. Codewords start at 9 bits and grow to 12 as the
+dictionary fills. Two codewords are reserved: `0x100` reinitialises the dictionary (resetting the
+width to 9), and `0x101` ends the stream; new dictionary entries therefore begin at `0x102`. This
+matches the algorithm in Nuvie's `U6Lzw`.
