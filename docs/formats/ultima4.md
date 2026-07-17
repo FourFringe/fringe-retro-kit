@@ -1,4 +1,6 @@
-# Ultima IV Save Format (`PARTY.SAV`)
+# Ultima IV — File Formats
+
+## Save Format (`PARTY.SAV`)
 
 Ultima IV: Quest of the Avatar stores the whole party — the eight character slots plus the
 shared party/game state (food, gold, the eight virtues, inventory, location) — in a single
@@ -119,3 +121,71 @@ Absolute file offsets. All numbers little-endian.
 - Verified against a real 502-byte `PARTY.SAV` containing the eight canonical companions
   (Mariah, Iolo, Geoffrey, Jaana, Julia, Dupre, Shamino, Katrina): every class, sex,
   weapon, armor, HP, and stat decoded correctly, and edits load back into the game.
+
+## World Map (`WORLD.MAP`)
+
+Britannia is a **256×256** tile map (65536 bytes, one byte per tile — the byte *is* the tile
+index, 0–255). It is **not** stored row-major: the file is an **8×8 grid of 32×32-tile chunks**
+in chunk-major order, so tile `(x, y)` lives at
+`((y/32)*8 + x/32) * 1024 + (y%32)*32 + (x%32)`. De-chunking yields the linear grid.
+
+The party's overworld position is `PARTY.SAV` **Map X/Y** (`0x1D4`/`0x1D5`), shown only when the
+location word (`0x1F4`) is `0` (on Britannia).
+
+Overworld landmark tiles:
+
+| Tile | Meaning |
+| --- | --- |
+| 0–8 | Terrain (deep/medium/shallow water, swamp, grass, brush, forest, hills, mountains) |
+| 9 | Dungeon entrance |
+| 10 | Town |
+| 11 | Castle |
+| 12 | Village |
+| 13–15 | Lord British's Castle (west wing / entrance / east wing) |
+| 29 | Ruins (Magincia) |
+| 30 | Shrine |
+| 70 | Whirlpool (the Great Stygian Abyss entrance) |
+
+## Location Table (`AVATAR.EXE`)
+
+The overworld coordinates of every named location live in the game executable, `AVATAR.EXE`, as
+**two parallel 32-byte arrays**: 32 X coordinates immediately followed by 32 Y coordinates (so
+location *i* is at `X[i]`, `Y[i]`). The entries are in the game's map-index order:
+
+1. **Sixteen cities** — Lord British's Castle, The Lycaeum, Empath Abbey, Serpent's Hold (castles/
+   abbeys); Moonglow, Britain, Jhelom, Yew, Minoc, Trinsic, Skara Brae, Magincia (towns); Paws,
+   Cove, Buccaneer's Den, Vesper (villages).
+2. **Eight dungeons** — Deceit, Despise, Destard, Wrong, Covetous, Shame, Hythloth, and the Abyss.
+3. **Eight shrines** — Honesty, Compassion, Valor, Justice, Sacrifice, Honor, Spirituality,
+   Humility.
+
+Each coordinate lands exactly on its matching landmark tile (towns on `10`, castles on `11`/`14`,
+villages on `12`, dungeons on `9`, Magincia's ruins on `29`, shrines on `30`, and the Abyss on the
+`70` whirlpool). That full kind sequence is a strong signature, so the table is found by scanning
+for the offset whose 32 pairs all match — no hard-coded address. In the sampled build the X array
+begins at `0xFB01`.
+
+The **Shrine of Spirituality has no overworld entrance** (it's reached only by balloon), so its
+table slot is a placeholder pointing at the Shrine of Humility's coordinates — the two entries
+share a position and only Humility gets a map marker.
+
+## Town Maps (`*.ULT`)
+
+Each town, village and castle is its own `.ULT` file (1280 bytes): a **32×32** tile grid in the
+first 1024 bytes, followed by 256 bytes of NPC data. Names come from the filenames — `BRITAIN`,
+`YEW`, `MINOC`, `TRINSIC`, `JHELOM`, `MOONGLOW`, `SKARA`, `MAGINCIA` (towns); `COVE`, `PAWS`,
+`VESPER`, `DEN` (villages); `LCB_1`/`LCB_2`, `EMPATH`, `LYCAEUM`, `SERPENT` (castles/abbeys).
+Dungeons are first-person `.DNG` files with no top-down map and are skipped.
+
+## Tile Graphics (`SHAPES.EGA`)
+
+`SHAPES.EGA` (32768 bytes) holds **256 tiles** of 16×16 EGA graphics, 128 bytes each, in the
+**same 4-plane row-interleaved layout as Ultima I** (`plane0 plane1 plane2 plane3` per row, two
+bytes per plane, colour index = `p0 | p1<<1 | p2<<2 | p3<<3`), so the same decoder reads both.
+
+The tiles are a **dark stipple**: even deep water and grass are roughly four-fifths *pure black*
+(EGA colour 0) with only sparse coloured specks. Scaled down to fit the screen, that averages the
+whole map toward black and the ocean reads as dead space. Fringe Retro Kit renders the overworld
+with a brightened palette — colour 0 is lifted from black to a dark navy (a legible blue floor for
+the ocean and land shadows) and the other colours get a mild gamma lift so terrain specks stay
+distinct — without changing any pixels.

@@ -11,6 +11,7 @@ mod serve;
 mod ultima1;
 mod ultima2;
 mod ultima3;
+mod ultima4;
 
 use std::path::{Path, PathBuf};
 
@@ -93,7 +94,10 @@ fn export(game: &str, input: &Path, out: &Path, png: Option<&Path>) -> Result<()
         "ultima1" => ultima1::export_worlds(input)?,
         "ultima2" => ultima2::export_worlds(input)?,
         "ultima3" => ultima3::export_worlds(input)?,
-        other => bail!("unsupported game '{other}' (supported: 'ultima1', 'ultima2', 'ultima3')"),
+        "ultima4" => ultima4::export_worlds(input)?,
+        other => {
+            bail!("unsupported game '{other}' (supported: 'ultima1', 'ultima2', 'ultima3', 'ultima4')")
+        }
     };
 
     if let Some(path) = png {

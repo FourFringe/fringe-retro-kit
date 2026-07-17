@@ -59,7 +59,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
 pub fn render_overworld(game_dir: &Path) -> Result<Overworld> {
     let tileset = std::fs::read(game_dir.join(TILESET_FILE))
         .with_context(|| format!("reading {TILESET_FILE} from {}", game_dir.display()))?;
-    let tiles = ega::decode_tileset(&tileset);
+    let tiles = ega::decode_tileset(&tileset, &ega::EGA_PALETTE);
     ensure!(!tiles.is_empty(), "{TILESET_FILE} contained no tiles");
 
     let map = std::fs::read(game_dir.join(MAP_FILE))

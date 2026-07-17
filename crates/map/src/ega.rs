@@ -33,10 +33,12 @@ pub const EGA_PALETTE: [Rgb<u8>; 16] = [
     Rgb([255, 255, 255]),
 ];
 
-/// Decode one row-interleaved 4-plane EGA tile (`BYTES_PER_TILE` bytes) into a 16×16 image.
+/// Decode one row-interleaved 4-plane EGA tile (`BYTES_PER_TILE` bytes) into a 16×16 image,
+/// looking each pixel's colour index up in `palette` (pass [`EGA_PALETTE`] for the standard
+/// colours, or a remapped one to brighten or tint the output).
 ///
 /// Panics if `bytes` is shorter than [`BYTES_PER_TILE`]; callers slice per tile.
-pub fn decode_tile(bytes: &[u8]) -> RgbImage {
+pub fn decode_tile(bytes: &[u8], palette: &[Rgb<u8>; 16]) -> RgbImage {
     let mut img = RgbImage::new(TILE_SIZE, TILE_SIZE);
     for y in 0..TILE_SIZE {
         let row = (y as usize) * 8;
@@ -48,15 +50,17 @@ pub fn decode_tile(bytes: &[u8]) -> RgbImage {
                 let b = bytes[row + plane * 2 + byte_in_plane];
                 color |= ((b >> bit) & 1) << plane;
             }
-            img.put_pixel(x, y, EGA_PALETTE[color as usize]);
+            img.put_pixel(x, y, palette[color as usize]);
         }
     }
     img
 }
 
-/// Decode a tileset blob into its constituent 16×16 tiles.
-pub fn decode_tileset(data: &[u8]) -> Vec<RgbImage> {
-    data.chunks_exact(BYTES_PER_TILE).map(decode_tile).collect()
+/// Decode a tileset blob into its constituent 16×16 tiles, colouring them with `palette`.
+pub fn decode_tileset(data: &[u8], palette: &[Rgb<u8>; 16]) -> Vec<RgbImage> {
+    data.chunks_exact(BYTES_PER_TILE)
+        .map(|tile| decode_tile(tile, palette))
+        .collect()
 }
 
 #[cfg(test)]
@@ -65,14 +69,14 @@ mod tests {
 
     #[test]
     fn all_zero_tile_is_black() {
-        let tile = decode_tile(&[0u8; BYTES_PER_TILE]);
+        let tile = decode_tile(&[0u8; BYTES_PER_TILE], &EGA_PALETTE);
         assert_eq!(*tile.get_pixel(0, 0), EGA_PALETTE[0]);
         assert_eq!(*tile.get_pixel(15, 15), EGA_PALETTE[0]);
     }
 
     #[test]
     fn all_ones_tile_is_white() {
-        let tile = decode_tile(&[0xFFu8; BYTES_PER_TILE]);
+        let tile = decode_tile(&[0xFFu8; BYTES_PER_TILE], &EGA_PALETTE);
         assert_eq!(*tile.get_pixel(0, 0), EGA_PALETTE[15]);
         assert_eq!(*tile.get_pixel(15, 15), EGA_PALETTE[15]);
     }
@@ -85,7 +89,7 @@ mod tests {
             bytes[y * 8] = 0xFF;
             bytes[y * 8 + 1] = 0xFF;
         }
-        let tile = decode_tile(&bytes);
+        let tile = decode_tile(&bytes, &EGA_PALETTE);
         assert_eq!(*tile.get_pixel(0, 0), EGA_PALETTE[1]);
         assert_eq!(*tile.get_pixel(15, 0), EGA_PALETTE[1]);
     }
@@ -93,6 +97,6 @@ mod tests {
     #[test]
     fn decode_tileset_splits_by_tile() {
         let data = vec![0u8; BYTES_PER_TILE * 3];
-        assert_eq!(decode_tileset(&data).len(), 3);
+        assert_eq!(decode_tileset(&data, &EGA_PALETTE).len(), 3);
     }
 }

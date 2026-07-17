@@ -749,7 +749,7 @@ for the file format and the allowed field names/values per game.
 A second binary, **`fringe-retro-map`**, renders a game's world maps into web tiles and serves
 them in a local browser. It reads the same `config.toml` as `fringe-retro`
 ([`config.example.toml`](config.example.toml)): each game's `save_dir`, plus a `[map]`
-`export_dir` where baked tiles are written. Supported today: **Ultima I**, **Ultima II**, and **Ultima III**.
+`export_dir` where baked tiles are written. Supported today: **Ultima I**, **Ultima II**, **Ultima III**, and **Ultima IV**.
 
 ### ✅ `export [--game <id>]`
 
@@ -765,7 +765,8 @@ fringe-retro-map export --game ultima2
 - `--png <file>` — also write the first world's flat composite image (handy for debugging).
 
 Ultima I bakes one overworld; Ultima II bakes every overworld and town (dungeon and other
-non-tile maps are skipped). Ultima III bakes Sosaria plus its named towns and castles.
+non-tile maps are skipped). Ultima III bakes Sosaria plus its named towns and castles. Ultima IV
+bakes the 256×256 Britannia overworld plus its towns, villages and castles.
 
 ### ✅ `serve [--open]`
 
