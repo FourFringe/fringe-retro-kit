@@ -92,14 +92,38 @@ jobs:
     permissions:
       contents: write # create the release and upload assets
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, so we can list commits since the previous tag
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
+      - name: Build the commit changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$GITHUB_REF_NAME"
+          # The most recent tag before this one (by ancestry), if any.
+          prev="$(git describe --tags --abbrev=0 "${current}^" 2>/dev/null || true)"
+          if [ -n "$prev" ]; then
+            echo "### Commits since ${prev}" > CHANGELOG_NOTES.md
+            range="${prev}..${current}"
+          else
+            echo "### Commits" > CHANGELOG_NOTES.md
+            range="$current"
+          fi
+          echo "" >> CHANGELOG_NOTES.md
+          git log --no-merges --reverse --pretty='- %s (%h)' "$range" >> CHANGELOG_NOTES.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          # Our commit list is prepended to GitHub's auto-generated notes (compare link, etc.).
+          body_path: CHANGELOG_NOTES.md
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.tar.gz.sha256
