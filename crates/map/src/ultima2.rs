@@ -43,6 +43,25 @@ const FONT_A: u8 = 32;
 const FONT_Z: u8 = 57;
 const FONT_SPACE: u8 = 58;
 
+/// The `PLAYER` save file holding the party's character sheet and overworld position.
+const SAVE_FILE: &str = "PLAYER";
+
+/// The party's current overworld position (in tiles) from the `PLAYER` save, or `None` if there
+/// is no save. Ultima II records only an overworld position, not which world/era it belongs to,
+/// so the caller decides which overworld map to place it on. Uses the parser in
+/// `fringe-retro-core`.
+pub fn player_position(game_dir: &Path) -> Result<Option<(u32, u32)>> {
+    let save = game_dir.join(SAVE_FILE);
+    if !save.exists() {
+        return Ok(None);
+    }
+    let parsed = fringe_retro_core::games::ultima2::Ultima2Save::load(&save)
+        .with_context(|| format!("reading {}", save.display()))?;
+    let x = parsed.get_field("x").and_then(|v| v.parse::<u32>().ok());
+    let y = parsed.get_field("y").and_then(|v| v.parse::<u32>().ok());
+    Ok(x.zip(y))
+}
+
 /// Render every Ultima II map file in `game_dir` into its own world.
 pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let tiles = read_tileset(game_dir)?;

@@ -5,7 +5,13 @@
 //! tile/manifest files themselves (under `/b`). Serving over `http://localhost` keeps the
 //! browser's `fetch()` of manifests working (which a `file://` page would block).
 
-use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -23,7 +29,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
-use crate::{config::Config, ega, ultima1};
+use crate::{config::Config, ega, ultima1, ultima2};
 
 /// Shared server state: where bundles live, plus the config for resolving each game's save.
 struct AppState {
@@ -93,10 +99,36 @@ async fn leaflet_css() -> impl IntoResponse {
     )
 }
 
-/// Query for the player-position endpoint.
+/// Query for the player-position endpoint: which `game`, and which `world` is being viewed (the
+/// marker is only shown on worlds that make sense for the save's position).
 #[derive(Deserialize)]
 struct PosQuery {
     game: String,
+    #[serde(default)]
+    world: String,
+}
+
+/// Whether a `(game, world)` pair should display a live "you are here" marker.
+///
+/// Ultima I has a single overworld, so any world qualifies. Ultima II records an overworld
+/// position but not *which* world/era it belongs to, so we show it on the three Earth overworlds
+/// (`MAPX20`/`MAPX30`/`MAPX40`) until the save's map-selector byte is reverse-engineered; towns
+/// and other worlds get no marker.
+fn supports_position(game: &str, world: &str) -> bool {
+    match game {
+        "ultima1" => true,
+        "ultima2" => matches!(world, "mapx20" | "mapx30" | "mapx40"),
+        _ => false,
+    }
+}
+
+/// Read the current party position (in tiles) for a game from its save directory.
+fn read_position(game: &str, dir: &Path) -> Option<(u32, u32)> {
+    match game {
+        "ultima1" => ultima1::player_position(dir).ok().flatten(),
+        "ultima2" => ultima2::player_position(dir).ok().flatten(),
+        _ => None,
+    }
 }
 
 /// The party's current position in image **pixel** coordinates, if a save is available.
@@ -109,38 +141,36 @@ struct PositionResp {
     py: Option<u32>,
 }
 
-/// Read the current party position from the game's save (currently Ultima I only), returning
-/// it in image pixel coordinates so the viewer can place a marker with no game knowledge.
+/// Read the current party position from the game's save, returning it in image pixel coordinates
+/// so the viewer can place a marker with no game knowledge. `supported` reflects whether this
+/// world shows a marker at all (see [`supports_position`]).
 async fn position(
     State(app): State<Arc<AppState>>,
     Query(q): Query<PosQuery>,
 ) -> Json<PositionResp> {
-    if q.game != "ultima1" {
+    if !supports_position(&q.game, &q.world) {
         return Json(PositionResp {
             supported: false,
             px: None,
             py: None,
         });
     }
-    let unknown = PositionResp {
-        supported: true,
-        px: None,
-        py: None,
-    };
-    let Some(dir) = app.config.game_input_dir(&q.game) else {
-        return Json(unknown);
-    };
-    match ultima1::player_position(&dir) {
-        Ok(Some(pos)) => {
-            let (px, py) = tile_center_px(pos);
-            Json(PositionResp {
-                supported: true,
-                px: Some(px),
-                py: Some(py),
-            })
+    let pos = app
+        .config
+        .game_input_dir(&q.game)
+        .and_then(|dir| read_position(&q.game, &dir));
+    let (px, py) = match pos {
+        Some(p) => {
+            let (px, py) = tile_center_px(p);
+            (Some(px), Some(py))
         }
-        _ => Json(unknown),
-    }
+        None => (None, None),
+    };
+    Json(PositionResp {
+        supported: true,
+        px,
+        py,
+    })
 }
 
 /// Live player position: an SSE stream that pushes the party position whenever the save file
@@ -149,9 +179,10 @@ async fn position_stream(
     State(app): State<Arc<AppState>>,
     Query(q): Query<PosQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let dir = (q.game == "ultima1")
+    let dir = supports_position(&q.game, &q.world)
         .then(|| app.config.game_input_dir(&q.game))
         .flatten();
+    let game = q.game;
 
     let stream = async_stream::stream! {
         // Without a resolvable save directory there's nothing to watch; hold the connection
@@ -178,7 +209,7 @@ async fn position_stream(
 
         // Emit the current position immediately, then only on change.
         let mut last: Option<(u32, u32)> = None;
-        if let Ok(Some(pos)) = ultima1::player_position(&dir) {
+        if let Some(pos) = read_position(&game, &dir) {
             last = Some(pos);
             yield Ok::<_, Infallible>(position_event(pos));
         }
@@ -186,7 +217,7 @@ async fn position_stream(
             // Debounce a burst of filesystem events into a single read.
             tokio::time::sleep(Duration::from_millis(150)).await;
             while rx.try_recv().is_ok() {}
-            if let Ok(Some(pos)) = ultima1::player_position(&dir) {
+            if let Some(pos) = read_position(&game, &dir) {
                 if Some(pos) != last {
                     last = Some(pos);
                     yield Ok::<_, Infallible>(position_event(pos));

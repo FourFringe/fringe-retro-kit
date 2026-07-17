@@ -127,16 +127,17 @@
               .addTo(map);
           }
         }
-        // Ask once whether this game supports a live position. If not (e.g. no save parser yet),
-        // skip the stream entirely so we don't hold an idle server connection open.
-        const pos0 = await (
-          await fetch("/api/position?game=" + encodeURIComponent(m.game))
-        ).json();
+        // Ask once whether this game+world shows a live position. If not, skip the stream
+        // entirely so we don't hold an idle server connection open.
+        const posQuery =
+          "?game=" +
+          encodeURIComponent(m.game) +
+          "&world=" +
+          encodeURIComponent(m.world);
+        const pos0 = await (await fetch("/api/position" + posQuery)).json();
         if (pos0.supported) {
           if (pos0.px != null && pos0.py != null) setPlayer(pos0.px, pos0.py);
-          const events = new EventSource(
-            "/api/position/stream?game=" + encodeURIComponent(m.game)
-          );
+          const events = new EventSource("/api/position/stream" + posQuery);
           events.onmessage = (ev) => {
             try {
               const pos = JSON.parse(ev.data);
