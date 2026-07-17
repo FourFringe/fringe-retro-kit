@@ -8,8 +8,7 @@
 
 use image::{Rgb, RgbImage};
 
-/// Tile edge length, in pixels.
-pub const TILE_SIZE: u32 = 16;
+use crate::tilemap::TILE_SIZE;
 
 /// Bytes of pixel data per 16×16 tile (16 rows × 4 bytes).
 pub const BYTES_PER_TILE: usize = (TILE_SIZE as usize * TILE_SIZE as usize) / 4;

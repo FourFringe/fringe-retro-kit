@@ -22,10 +22,11 @@
 use std::path::Path;
 
 use anyhow::{ensure, Context, Result};
-use image::{Rgb, RgbImage};
+use image::Rgb;
 
-use crate::bundle::{Poi, World, WorldMeta};
-use crate::ega::{self, TILE_SIZE};
+use crate::bundle::{Poi, World};
+use crate::ega;
+use crate::tilemap;
 
 /// Overworld edge length, in tiles.
 const WORLD_W: usize = 256;
@@ -48,6 +49,9 @@ const EXE_FILE: &str = "AVATAR.EXE";
 
 /// Every world shares one region so the browser nests the towns under the overworld.
 const GROUP: &str = "britannia";
+
+/// This game's identifier, shared by every world it exports.
+const GAME: &str = "ultima4";
 
 /// A gently brightened EGA palette for the overworld. Ultima IV's tiles are a dark stipple: even
 /// deep water and grass are roughly four-fifths *pure black* (EGA colour 0) with only sparse
@@ -153,12 +157,14 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let mut worlds = Vec::with_capacity(1 + TOWNS.len());
 
     let overworld = read_overworld(game_dir)?;
-    worlds.push(world(
+    worlds.push(tilemap::world(
+        GAME,
         "britannia",
         "Ultima IV — Britannia",
         "overworld",
+        GROUP,
         overworld_pois(game_dir, &overworld),
-        render(&overworld, WORLD_W, WORLD_H, &tiles),
+        tilemap::render(&overworld, WORLD_W, WORLD_H, &tiles),
     ));
 
     for (file, title, kind) in TOWNS {
@@ -174,12 +180,14 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             data.len()
         );
         let world_id = file.trim_end_matches(".ULT").to_ascii_lowercase();
-        worlds.push(world(
+        worlds.push(tilemap::world(
+            GAME,
             &world_id,
             &format!("Ultima IV — {title}"),
             kind,
+            GROUP,
             vec![],
-            render(&data[..TOWN_GRID_LEN], TOWN_W, TOWN_H, &tiles),
+            tilemap::render(&data[..TOWN_GRID_LEN], TOWN_W, TOWN_H, &tiles),
         ));
     }
 
@@ -301,12 +309,7 @@ fn named_pois(game_dir: &Path, grid: &[u8]) -> Option<Vec<Poi>> {
             continue;
         }
         if let Some(display) = display_kind(kind) {
-            pois.push(Poi {
-                px: u32::from(x) * TILE_SIZE + TILE_SIZE / 2,
-                py: u32::from(y) * TILE_SIZE + TILE_SIZE / 2,
-                kind: display.to_string(),
-                label: (*label).to_string(),
-            });
+            pois.push(tilemap::poi(u32::from(x), u32::from(y), display, label));
         }
     }
     Some(pois)
@@ -338,48 +341,10 @@ fn tile_scan_pois(grid: &[u8]) -> Vec<Poi> {
         if let Some((kind, label)) = landmark(tile) {
             let x = (i % WORLD_W) as u32;
             let y = (i / WORLD_W) as u32;
-            pois.push(Poi {
-                px: x * TILE_SIZE + TILE_SIZE / 2,
-                py: y * TILE_SIZE + TILE_SIZE / 2,
-                kind: kind.to_string(),
-                label: label.to_string(),
-            });
+            pois.push(tilemap::poi(x, y, kind, label));
         }
     }
     pois
-}
-
-/// Assemble a [`World`] with Ultima IV's shared game id and region group.
-fn world(id: &str, title: &str, kind: &str, pois: Vec<Poi>, image: RgbImage) -> World {
-    World {
-        meta: WorldMeta {
-            game: "ultima4".into(),
-            world: id.into(),
-            title: title.into(),
-            kind: kind.into(),
-            group: GROUP.into(),
-        },
-        image,
-        pois,
-    }
-}
-
-/// Composite a `w`×`h` tile grid into a full-resolution image.
-fn render(grid: &[u8], w: usize, h: usize, tiles: &[RgbImage]) -> RgbImage {
-    let mut image = RgbImage::new(w as u32 * TILE_SIZE, h as u32 * TILE_SIZE);
-    for ty in 0..h {
-        for tx in 0..w {
-            let tile_index = grid[ty * w + tx] as usize;
-            let tile = tiles.get(tile_index).unwrap_or(&tiles[0]);
-            image::imageops::replace(
-                &mut image,
-                tile,
-                (tx as u32 * TILE_SIZE) as i64,
-                (ty as u32 * TILE_SIZE) as i64,
-            );
-        }
-    }
-    image
 }
 
 #[cfg(test)]

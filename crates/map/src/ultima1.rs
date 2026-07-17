@@ -10,8 +10,9 @@ use std::path::Path;
 use anyhow::{ensure, Context, Result};
 use image::RgbImage;
 
-use crate::bundle::{Poi, World, WorldMeta};
-use crate::ega::{self, TILE_SIZE};
+use crate::bundle::{Poi, World};
+use crate::ega;
+use crate::tilemap;
 
 /// Overworld width and height, in tiles.
 pub const OVERWORLD_W: u32 = 168;
@@ -33,6 +34,9 @@ const NAME_ANCHOR: &[u8] = b"Moon\0Fawn\0Paws\0Montor\0";
 /// Named overworld locations: 31 towns, 8 castles, 8 monuments, 37 dungeons.
 const LOCATION_COUNT: usize = 84;
 
+/// This game's identifier, shared by every world it exports.
+const GAME: &str = "ultima1";
+
 /// A rendered overworld: the composite image plus the named locations found on it.
 pub struct Overworld {
     pub image: RgbImage,
@@ -42,17 +46,15 @@ pub struct Overworld {
 /// Render Ultima I into its exportable worlds: a single overworld (`Sosaria`).
 pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let overworld = render_overworld(game_dir)?;
-    Ok(vec![World {
-        meta: WorldMeta {
-            game: "ultima1".into(),
-            world: "overworld".into(),
-            title: "Ultima I — Sosaria".into(),
-            kind: "overworld".into(),
-            group: "overworld".into(),
-        },
-        image: overworld.image,
-        pois: overworld.pois,
-    }])
+    Ok(vec![tilemap::world(
+        GAME,
+        "overworld",
+        "Ultima I — Sosaria",
+        "overworld",
+        "overworld",
+        overworld.pois,
+        overworld.image,
+    )])
 }
 
 /// Render the full Ultima I overworld and collect its named locations as POIs.
@@ -70,29 +72,22 @@ pub fn render_overworld(game_dir: &Path) -> Result<Overworld> {
         map.len()
     );
 
-    let mut world = RgbImage::new(OVERWORLD_W * TILE_SIZE, OVERWORLD_H * TILE_SIZE);
+    // Unpack the nibble-packed map (two tiles per byte) into a linear tile-index grid, then
+    // composite it with the shared renderer.
     let mut grid = vec![0u8; (OVERWORLD_W * OVERWORLD_H) as usize];
     for row in 0..OVERWORLD_H as usize {
         for bx in 0..BYTES_PER_ROW {
             let byte = map[row * BYTES_PER_ROW + bx];
-            for (nibble, tile_index) in [byte >> 4, byte & 0x0F].into_iter().enumerate() {
-                let tile_x = (bx * 2 + nibble) as u32;
-                let tile_y = row as u32;
-                let tile = tiles.get(tile_index as usize).unwrap_or(&tiles[0]);
-                image::imageops::replace(
-                    &mut world,
-                    tile,
-                    (tile_x * TILE_SIZE) as i64,
-                    (tile_y * TILE_SIZE) as i64,
-                );
-                grid[tile_y as usize * OVERWORLD_W as usize + tile_x as usize] = tile_index;
-            }
+            let base = row * OVERWORLD_W as usize + bx * 2;
+            grid[base] = byte >> 4;
+            grid[base + 1] = byte & 0x0F;
         }
     }
+    let image = tilemap::render(&grid, OVERWORLD_W as usize, OVERWORLD_H as usize, &tiles);
 
     // POIs come from the game's own location table; if it can't be read, the map still renders.
     let pois = read_locations(game_dir, &grid).unwrap_or_default();
-    Ok(Overworld { image: world, pois })
+    Ok(Overworld { image, pois })
 }
 
 /// Read Ultima I's named-location table from `OUT.EXE` into POIs. Returns `None` if the file
@@ -108,13 +103,14 @@ fn read_locations(game_dir: &Path, grid: &[u8]) -> Option<Vec<Poi>> {
     let xs = &exe[coords..coords + LOCATION_COUNT];
     let ys = &exe[coords + LOCATION_COUNT..coords + 2 * LOCATION_COUNT];
 
-    let half = TILE_SIZE / 2;
     let pois = (0..LOCATION_COUNT)
-        .map(|i| Poi {
-            px: u32::from(xs[i]) * TILE_SIZE + half,
-            py: u32::from(ys[i]) * TILE_SIZE + half,
-            kind: location_kind(i).to_string(),
-            label: names[i].clone(),
+        .map(|i| {
+            tilemap::poi(
+                u32::from(xs[i]),
+                u32::from(ys[i]),
+                location_kind(i),
+                &names[i],
+            )
         })
         .collect();
     Some(pois)

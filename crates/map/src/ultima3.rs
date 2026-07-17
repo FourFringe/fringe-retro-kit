@@ -20,8 +20,9 @@ use std::path::Path;
 use anyhow::{ensure, Context, Result};
 use image::{Rgb, RgbImage};
 
-use crate::bundle::{Poi, World, WorldMeta};
-use crate::cga::{self, TILE_SIZE};
+use crate::bundle::{Poi, World};
+use crate::cga;
+use crate::tilemap;
 
 /// Map edge length, in tiles.
 const MAP_W: usize = 64;
@@ -48,6 +49,9 @@ const SOFT_PALETTE: [Rgb<u8>; 4] = [
 
 /// Every world shares one region so the browser nests the towns under the overworld.
 const GROUP: &str = "sosaria";
+
+/// This game's identifier, shared by every world it exports.
+const GAME: &str = "ultima3";
 
 /// The overworld locations named in the browser, **in the order of the `EXODUS.BIN` coordinate
 /// table**: the two castles, then the ten towns, then the seven dungeons. (Ambrosia is reached
@@ -102,10 +106,12 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let mut worlds = Vec::with_capacity(1 + TOWNS.len());
 
     let overworld = read_grid(&game_dir.join(OVERWORLD_FILE))?;
-    worlds.push(world(
+    worlds.push(tilemap::world(
+        GAME,
         "sosaria",
         "Ultima III — Sosaria",
         "overworld",
+        GROUP,
         overworld_pois(game_dir, &overworld),
         render(&overworld, &tiles),
     ));
@@ -117,10 +123,12 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         }
         let grid = read_grid(&path)?;
         let world_id = file.trim_end_matches(".ULT").to_ascii_lowercase();
-        worlds.push(world(
+        worlds.push(tilemap::world(
+            GAME,
             &world_id,
             &format!("Ultima III — {title}"),
             kind,
+            GROUP,
             vec![],
             render(&grid, &tiles),
         ));
@@ -142,21 +150,6 @@ pub fn player_position(game_dir: &Path) -> Result<Option<(u32, u32)>> {
         return Ok(None);
     }
     Ok(Some((u32::from(data[0x08]), u32::from(data[0x09]))))
-}
-
-/// Assemble a [`World`] with Ultima III's shared game id and region group.
-fn world(id: &str, title: &str, kind: &str, pois: Vec<Poi>, image: RgbImage) -> World {
-    World {
-        meta: WorldMeta {
-            game: "ultima3".into(),
-            world: id.into(),
-            title: title.into(),
-            kind: kind.into(),
-            group: GROUP.into(),
-        },
-        image,
-        pois,
-    }
 }
 
 /// The location type of a Sosaria landmark tile, if it is one. Derived authoritatively from the
@@ -189,12 +182,7 @@ fn named_pois(game_dir: &Path, grid: &[u8]) -> Option<Vec<Poi>> {
         .map(|(i, (label, kind))| {
             let x = u32::from(exe[start + 2 * i]);
             let y = u32::from(exe[start + 2 * i + 1]);
-            Poi {
-                px: x * TILE_SIZE + TILE_SIZE / 2,
-                py: y * TILE_SIZE + TILE_SIZE / 2,
-                kind: (*kind).to_string(),
-                label: (*label).to_string(),
-            }
+            tilemap::poi(x, y, kind, label)
         })
         .collect();
     Some(pois)
@@ -231,12 +219,7 @@ fn tile_scan_pois(grid: &[u8]) -> Vec<Poi> {
         if let Some(kind) = landmark(byte >> 2) {
             let x = (i % MAP_W) as u32;
             let y = (i / MAP_W) as u32;
-            pois.push(Poi {
-                px: x * TILE_SIZE + TILE_SIZE / 2,
-                py: y * TILE_SIZE + TILE_SIZE / 2,
-                kind: kind.to_string(),
-                label: label(kind).to_string(),
-            });
+            pois.push(tilemap::poi(x, y, kind, label(kind)));
         }
     }
     pois
@@ -264,27 +247,17 @@ fn read_grid(path: &Path) -> Result<Vec<u8>> {
     Ok(data[..MAP_GRID_LEN].to_vec())
 }
 
-/// Composite a 64×64 tile grid into a full-resolution image.
+/// Composite a 64×64 tile grid into a full-resolution image. Sosaria's map bytes pack the tile
+/// index in the top six bits (`byte >> 2`), so they're normalised before the shared render.
 fn render(grid: &[u8], tiles: &[RgbImage]) -> RgbImage {
-    let mut image = RgbImage::new((MAP_W as u32) * TILE_SIZE, (MAP_H as u32) * TILE_SIZE);
-    for ty in 0..MAP_H {
-        for tx in 0..MAP_W {
-            let tile_index = (grid[ty * MAP_W + tx] >> 2) as usize;
-            let tile = tiles.get(tile_index).unwrap_or(&tiles[0]);
-            image::imageops::replace(
-                &mut image,
-                tile,
-                (tx as u32 * TILE_SIZE) as i64,
-                (ty as u32 * TILE_SIZE) as i64,
-            );
-        }
-    }
-    image
+    let indices: Vec<u8> = grid.iter().map(|byte| byte >> 2).collect();
+    tilemap::render(&indices, MAP_W, MAP_H, tiles)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tilemap::TILE_SIZE;
 
     #[test]
     fn render_composites_grid_at_tile_size() {

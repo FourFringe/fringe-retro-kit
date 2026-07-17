@@ -19,8 +19,9 @@ use std::path::Path;
 use anyhow::{ensure, Context, Result};
 use image::RgbImage;
 
-use crate::bundle::{Poi, World, WorldMeta};
-use crate::cga::{self, CGA_PALETTE1, TILE_SIZE};
+use crate::bundle::{Poi, World};
+use crate::cga::{self, CGA_PALETTE1};
+use crate::tilemap;
 
 /// Map edge length, in tiles.
 const MAP_W: usize = 64;
@@ -45,6 +46,9 @@ const FONT_SPACE: u8 = 58;
 
 /// The `PLAYER` save file holding the party's character sheet and overworld position.
 const SAVE_FILE: &str = "PLAYER";
+
+/// This game's identifier, shared by every world it exports.
+const GAME: &str = "ultima2";
 
 /// The party's current overworld position (in tiles) from the `PLAYER` save, or `None` if there
 /// is no save. Ultima II records only an overworld position, not which world/era it belongs to,
@@ -85,19 +89,9 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         // Some maps prepend a 128-byte NPC header; the grid is always the final 4096 bytes.
         let grid = &data[data.len() - MAP_GRID_LEN..];
 
-        let mut image = RgbImage::new((MAP_W as u32) * TILE_SIZE, (MAP_H as u32) * TILE_SIZE);
-        for ty in 0..MAP_H {
-            for tx in 0..MAP_W {
-                let tile_index = (grid[ty * MAP_W + tx] >> 2) as usize;
-                let tile = tiles.get(tile_index).unwrap_or(&tiles[0]);
-                image::imageops::replace(
-                    &mut image,
-                    tile,
-                    (tx as u32 * TILE_SIZE) as i64,
-                    (ty as u32 * TILE_SIZE) as i64,
-                );
-            }
-        }
+        // The tile index is the top six bits of each byte; normalise before the shared render.
+        let indices: Vec<u8> = grid.iter().map(|&b| b >> 2).collect();
+        let image = tilemap::render(&indices, MAP_W, MAP_H, &tiles);
 
         // Only towns paint readable labels; on overworlds the font tiles double as terrain, so
         // reading them there would yield noise. Towns are exactly the maps with a `TLK` file.
@@ -119,17 +113,15 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         };
 
         let world_id = name.to_ascii_lowercase();
-        worlds.push(World {
-            meta: WorldMeta {
-                game: "ultima2".into(),
-                title,
-                kind: map_kind(&name).into(),
-                group: map_group(&name),
-                world: world_id,
-            },
-            image,
+        worlds.push(tilemap::world(
+            GAME,
+            &world_id,
+            &title,
+            map_kind(&name),
+            &map_group(&name),
             pois,
-        });
+            image,
+        ));
     }
 
     ensure!(
@@ -240,12 +232,7 @@ fn overworld_pois(grid: &[u8]) -> Vec<Poi> {
             continue;
         }
         if let Some(kind) = landmark_kind(byte >> 2) {
-            pois.push(Poi {
-                px: x * TILE_SIZE + TILE_SIZE / 2,
-                py: y * TILE_SIZE + TILE_SIZE / 2,
-                kind: kind.to_string(),
-                label: title_case(kind),
-            });
+            pois.push(tilemap::poi(x, y, kind, &title_case(kind)));
         }
     }
     pois
@@ -401,12 +388,7 @@ fn merge_runs(runs: Vec<Run>) -> Vec<Poi> {
             let label = title_case(&lines.join(" "));
             let center_col = (c.min_col + c.max_col) / 2;
             let center_row = (c.min_row + c.max_row) / 2;
-            Poi {
-                px: center_col as u32 * TILE_SIZE + TILE_SIZE / 2,
-                py: center_row as u32 * TILE_SIZE + TILE_SIZE / 2,
-                kind: "sign".to_string(),
-                label,
-            }
+            tilemap::poi(center_col as u32, center_row as u32, "sign", &label)
         })
         .collect()
 }
@@ -447,6 +429,7 @@ fn title_case(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tilemap::TILE_SIZE;
 
     #[test]
     fn recognises_map_names() {

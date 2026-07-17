@@ -9,6 +9,7 @@ mod config;
 mod ega;
 mod lzw;
 mod serve;
+mod tilemap;
 mod ultima1;
 mod ultima2;
 mod ultima3;

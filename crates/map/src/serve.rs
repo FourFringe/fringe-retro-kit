@@ -29,7 +29,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
-use crate::{config::Config, ega, ultima1, ultima2, ultima3, ultima4, ultima5};
+use crate::{config::Config, tilemap, ultima1, ultima2, ultima3, ultima4, ultima5};
 
 /// Shared server state: where bundles live, plus the config for resolving each game's save.
 struct AppState {
@@ -256,8 +256,11 @@ fn position_event(pos: (u32, u32)) -> Event {
 
 /// Convert a tile position to image pixel coordinates (the tile's centre).
 fn tile_center_px(pos: (u32, u32)) -> (u32, u32) {
-    let half = ega::TILE_SIZE / 2;
-    (pos.0 * ega::TILE_SIZE + half, pos.1 * ega::TILE_SIZE + half)
+    let half = tilemap::TILE_SIZE / 2;
+    (
+        pos.0 * tilemap::TILE_SIZE + half,
+        pos.1 * tilemap::TILE_SIZE + half,
+    )
 }
 
 /// Dynamic table of contents: every world with a `manifest.json`, grouped by game and then by

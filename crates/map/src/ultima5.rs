@@ -27,9 +27,10 @@ use std::path::Path;
 use anyhow::{ensure, Context, Result};
 use image::RgbImage;
 
-use crate::bundle::{Poi, World, WorldMeta};
+use crate::bundle::{Poi, World};
 use crate::ega::EGA_PALETTE;
 use crate::lzw;
+use crate::tilemap::{self, TILE_SIZE};
 
 /// World edge length, in tiles (both Britannia and the Underworld are 256×256).
 const WORLD_W: usize = 256;
@@ -46,7 +47,6 @@ const WATER_CHUNK: u8 = 0xFF;
 const WATER_TILE: u8 = 1;
 
 /// One tile is 16×16 pixels at 4 bits per pixel: 128 bytes.
-const TILE_SIZE: u32 = 16;
 const TILE_BYTES: usize = 128;
 
 /// Town/dwelling/castle/keep maps are 32×32 tiles, one byte each (1024 bytes per floor).
@@ -74,6 +74,9 @@ const UNDERWORLD_FILE: &str = "UNDER.DAT";
 const DATA_FILE: &str = "DATA.OVL";
 /// The saved game; holds the party's world position.
 const SAVE_FILE: &str = "SAVED.GAM";
+
+/// This game's identifier, shared by every world it exports.
+const GAME: &str = "ultima5";
 
 /// The 40 enterable locations in Party-Location order — the order of the `DATA.OVL` coordinate and
 /// first-map-index tables: 8 towns, 8 dwellings, 8 castles/villages, 8 keeps, then 8 dungeons. Each
@@ -134,21 +137,23 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let (brit_pois, under_pois) = location_pois(&data, &britannia);
 
     let mut worlds = vec![
-        world(
+        tilemap::world(
+            GAME,
             "britannia",
             "Ultima V — Britannia",
             "overworld",
             "britannia",
             brit_pois,
-            render(&britannia, WORLD_W, WORLD_H, &tiles),
+            tilemap::render(&britannia, WORLD_W, WORLD_H, &tiles),
         ),
-        world(
+        tilemap::world(
+            GAME,
             "underworld",
             "Ultima V — The Underworld",
             "overworld",
             "underworld",
             under_pois,
-            render(&underworld, WORLD_W, WORLD_H, &tiles),
+            tilemap::render(&underworld, WORLD_W, WORLD_H, &tiles),
         ),
     ];
     worlds.extend(location_worlds(game_dir, &data, &tiles)?);
@@ -301,16 +306,11 @@ fn location_pois(data: &[u8], britannia: &[u8]) -> (Vec<Poi>, Vec<Poi>) {
     for (i, (name, kind)) in LOCATIONS.iter().enumerate() {
         let x = data[LOC_X_OFF + i];
         let y = data[LOC_Y_OFF + i];
-        let poi = Poi {
-            px: u32::from(x) * TILE_SIZE + TILE_SIZE / 2,
-            py: u32::from(y) * TILE_SIZE + TILE_SIZE / 2,
-            kind: (*kind).to_string(),
-            label: (*name).to_string(),
-        };
+        let marker = tilemap::poi(u32::from(x), u32::from(y), kind, name);
         if britannia[usize::from(y) * WORLD_W + usize::from(x)] == WATER_TILE {
-            under.push(poi);
+            under.push(marker);
         } else {
-            brit.push(poi);
+            brit.push(marker);
         }
     }
     (brit, under)
@@ -352,13 +352,14 @@ fn location_worlds(game_dir: &Path, data: &[u8], tiles: &[RgbImage]) -> Result<V
                 } else {
                     (slug(name), format!("Ultima V — {name}"))
                 };
-                worlds.push(world(
+                worlds.push(tilemap::world(
+                    GAME,
                     &id,
                     &title,
                     kind,
                     "britannia",
                     Vec::new(),
-                    render(map, LOC_MAP, LOC_MAP, tiles),
+                    tilemap::render(map, LOC_MAP, LOC_MAP, tiles),
                 ));
             }
         }
@@ -377,39 +378,6 @@ fn slug(name: &str) -> String {
         }
     }
     out.trim_end_matches('-').to_string()
-}
-
-/// Assemble a [`World`] with Ultima V's shared game id.
-fn world(id: &str, title: &str, kind: &str, group: &str, pois: Vec<Poi>, image: RgbImage) -> World {
-    World {
-        meta: WorldMeta {
-            game: "ultima5".into(),
-            world: id.into(),
-            title: title.into(),
-            kind: kind.into(),
-            group: group.into(),
-        },
-        image,
-        pois,
-    }
-}
-
-/// Composite a `w`×`h` tile grid into a full-resolution image.
-fn render(grid: &[u8], w: usize, h: usize, tiles: &[RgbImage]) -> RgbImage {
-    let mut image = RgbImage::new(w as u32 * TILE_SIZE, h as u32 * TILE_SIZE);
-    for ty in 0..h {
-        for tx in 0..w {
-            let tile_index = grid[ty * w + tx] as usize;
-            let tile = tiles.get(tile_index).unwrap_or(&tiles[0]);
-            image::imageops::replace(
-                &mut image,
-                tile,
-                (tx as u32 * TILE_SIZE) as i64,
-                (ty as u32 * TILE_SIZE) as i64,
-            );
-        }
-    }
-    image
 }
 
 #[cfg(test)]
