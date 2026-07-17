@@ -321,11 +321,15 @@ none in the viewer):
       `fringe-retro-core`) served at `/api/position` and shown on the map
 - [x] Live watch: the server watches the save file and pushes position updates over SSE
       (`/api/position/stream`), so the marker moves the moment you save in-game
-- [ ] Extend to the next games in play order (Ultima II → …)
+- [x] Extend to **Ultima II**: overworlds + town/castle interiors (CGA tiles from `ULTIMAII.EXE`),
+      towns named from their painted map labels, typed location POIs (village/town/tower/castle/
+      dungeon), and the party position on the Earth overworlds
+- [ ] Extend to Ultima III and beyond, in play order
 
-Town/castle **interiors** aren't worth exporting (no standalone layout files — they live in the
-executables), and Ultima I's dungeons are first-person and procedurally generated, so there's
-no static dungeon map. The overworld is the map.
+For **Ultima I**, town/castle interiors aren't worth exporting (no standalone layout files — they
+live in the executable) and its dungeons are first-person and procedurally generated, so the
+overworld is the whole map. Later games differ: **Ultima II** stores each town as its own map
+file (exported as sub-maps), while its dungeons and towers are first-person and skipped.
 
 The early Ultimas have **uncompressed** map data, so this phase needs no decompression codec.
 When a compressed-map game arrives (Ultima VI's LZW map; later Daggerfall's RLE), that decoder

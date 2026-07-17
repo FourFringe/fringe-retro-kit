@@ -3,10 +3,11 @@
 The command-line tool is `fringe-retro`. This document lists every command it supports
 today, plus commands that are planned but not yet built.
 
-> **Current status:** Phase 1 — a command-line tool with **Ultima I** and **Ultima III**
-> support hardcoded. The game is auto-detected from the save file, so the same commands
-> work across both. A terminal UI (TUI), automatic game discovery, and the Save Library
-> are planned; see [ROADMAP.md](ROADMAP.md) and [PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md).
+> **Current status:** supports **Ultima I–VI** and **Wasteland**, with both a command-line
+> interface and an interactive terminal UI, automatic game discovery, a Save Library, and
+> automatic backups. A companion **map browser** (`fringe-retro-map`) renders world maps —
+> see [Map browser](#map-browser-fringe-retro-map). The game is auto-detected from each save
+> file, so the same commands work across all of them; see [ROADMAP.md](ROADMAP.md).
 
 Legend: ✅ implemented · 🔷 planned (not yet available)
 
