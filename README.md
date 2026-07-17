@@ -82,7 +82,7 @@ party's current position. It reads the same `config.toml` as the main tool (see
 for the baked tiles.
 
 ```sh
-# Bake a game's maps into the export directory (Ultima I–V today):
+# Bake a game's maps into the export directory (Ultima I–V and Wasteland today):
 fringe-retro-map export --game ultima2
 
 # Serve every baked map and open it in your browser:

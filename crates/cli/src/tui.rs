@@ -81,6 +81,8 @@ struct CharList {
     title: String,
     entities: Vec<Entity>,
     list: ListState,
+    /// A transient one-line message (e.g. the result of a restore).
+    status: Option<String>,
 }
 
 /// A chooser for one of a game's save files (e.g. Ultima III roster vs. party).
@@ -570,6 +572,17 @@ impl App {
             (Some(s), Some(Screen::Edit(ed))) => {
                 (s.path().to_path_buf(), ed.entity, ed.title.clone())
             }
+            (Some(s), Some(Screen::Characters(cl))) => {
+                // A backup captures the whole save file (all characters and party state), so
+                // it's reachable straight from the member list. Carry the highlighted entity
+                // only so a later-opened editor can be refreshed after a restore.
+                let entity = cl
+                    .list
+                    .selected()
+                    .and_then(|i| cl.entities.get(i))
+                    .map_or(0, |e| e.index);
+                (s.path().to_path_buf(), entity, cl.title.clone())
+            }
             _ => return,
         };
         let entries = build_backup_entries(&path);
@@ -662,12 +675,28 @@ impl App {
             Err(e) => format!("Restore failed: {e}"),
         };
         let rows = self.session.as_ref().map(|s| s.rows(entity));
-        if let Some(Screen::Edit(ed)) = self.stack.last_mut() {
-            if let Some(rows) = rows {
-                ed.rows = rows;
+        let entities = self.session.as_ref().map(|s| s.entities());
+        match self.stack.last_mut() {
+            Some(Screen::Edit(ed)) => {
+                if let Some(rows) = rows {
+                    ed.rows = rows;
+                }
+                ed.input = None;
+                ed.status = Some(status);
             }
-            ed.input = None;
-            ed.status = Some(status);
+            // Restore was launched from the member list: refresh it (names/summaries may
+            // have changed) and report the outcome there.
+            Some(Screen::Characters(cl)) => {
+                if let Some(entities) = entities {
+                    let sel = cl.list.selected().unwrap_or(0);
+                    cl.entities = entities;
+                    if !cl.entities.is_empty() {
+                        cl.list.select(Some(sel.min(cl.entities.len() - 1)));
+                    }
+                }
+                cl.status = Some(status);
+            }
+            _ => {}
         }
     }
 
@@ -1233,6 +1262,7 @@ impl App {
                             title,
                             entities,
                             list,
+                            status: None,
                         }));
                     }
                 }
@@ -1379,11 +1409,20 @@ impl App {
                     KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => {
                         action = Action::Back;
                     }
-                    KeyCode::Down | KeyCode::Char('j') => select_wrap(&mut cl.list, len, 1),
-                    KeyCode::Up | KeyCode::Char('k') => select_wrap(&mut cl.list, len, -1),
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        cl.status = None;
+                        select_wrap(&mut cl.list, len, 1);
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        cl.status = None;
+                        select_wrap(&mut cl.list, len, -1);
+                    }
                     KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                         action = Action::OpenEntry(cl.list.selected());
                     }
+                    // Backups snapshot the whole save file, so they're reachable here without
+                    // first entering a character.
+                    KeyCode::Char('b') => action = Action::OpenBackups,
                     _ => {}
                 }
             }
@@ -2201,7 +2240,10 @@ fn bottom_line(screen: &Screen) -> String {
         Screen::SaveFiles(_) => {
             " ↑/↓ select · Enter open · Esc back · q quit ".to_string()
         }
-        Screen::Characters(_) => " ↑/↓ select · Enter open · Esc back · q quit ".to_string(),
+        Screen::Characters(cl) => match &cl.status {
+            Some(s) => format!("  {s}"),
+            None => " ↑/↓ select · Enter open · b backups · Esc back · q quit ".to_string(),
+        },
         Screen::Edit(ed) => {
             if let Some(input) = &ed.input {
                 let label = ed.selected_row().map(|r| r.label).unwrap_or("value");

@@ -7,6 +7,7 @@ mod bundle;
 mod cga;
 mod config;
 mod ega;
+mod huffman;
 mod lzw;
 mod serve;
 mod tilemap;
@@ -15,6 +16,7 @@ mod ultima2;
 mod ultima3;
 mod ultima4;
 mod ultima5;
+mod wasteland;
 
 use std::path::{Path, PathBuf};
 
@@ -99,8 +101,9 @@ fn export(game: &str, input: &Path, out: &Path, png: Option<&Path>) -> Result<()
         "ultima3" => ultima3::export_worlds(input)?,
         "ultima4" => ultima4::export_worlds(input)?,
         "ultima5" => ultima5::export_worlds(input)?,
+        "wasteland" => wasteland::export_worlds(input)?,
         other => {
-            bail!("unsupported game '{other}' (supported: 'ultima1', 'ultima2', 'ultima3', 'ultima4', 'ultima5')")
+            bail!("unsupported game '{other}' (supported: 'ultima1', 'ultima2', 'ultima3', 'ultima4', 'ultima5', 'wasteland')")
         }
     };
 

@@ -29,7 +29,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
-use crate::{config::Config, tilemap, ultima1, ultima2, ultima3, ultima4, ultima5};
+use crate::{config::Config, tilemap, ultima1, ultima2, ultima3, ultima4, ultima5, wasteland};
 
 /// Shared server state: where bundles live, plus the config for resolving each game's save.
 struct AppState {
@@ -121,6 +121,8 @@ fn supports_position(game: &str, world: &str) -> bool {
         "ultima3" => world == "sosaria",
         "ultima4" => world == "britannia",
         "ultima5" => matches!(world, "britannia" | "underworld"),
+        // The party can be on any Wasteland map; the marker only shows on the one it's on.
+        "wasteland" => world.starts_with("map"),
         _ => false,
     }
 }
@@ -145,6 +147,12 @@ fn read_position(game: &str, world: &str, dir: &Path) -> Option<(u32, u32)> {
                 };
                 (world == want).then_some((x, y))
             }),
+        // The Wasteland save records the current map id; show the marker only when the viewed
+        // world is that map (disk-1 map id `n` is exported as `map{n + 1}`).
+        "wasteland" => wasteland::player_position(dir)
+            .ok()
+            .flatten()
+            .and_then(|(map, x, y)| (world == format!("map{}", map + 1)).then_some((x, y))),
         _ => None,
     }
 }

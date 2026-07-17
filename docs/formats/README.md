@@ -36,7 +36,7 @@ we leaned on (see [References & credits](#references--credits)).
 
 ## Map & graphics formats
 
-World maps and tile graphics we've mapped so far (Ultima I–V):
+World maps and tile graphics we've mapped so far (Ultima I–V, Wasteland):
 
 | Game | Map(s) | Tile graphics | Notes |
 | --- | --- | --- | --- |
@@ -45,6 +45,7 @@ World maps and tile graphics we've mapped so far (Ultima I–V):
 | [Ultima III](ultima3.md) | `SOSARIA.ULT` + named town/castle `.ULT` — 64×64, `byte>>2` | `SHAPES.ULT` — 80 tiles, 16×16 CGA (linear) | Place names + coordinates in `EXODUS.BIN`; dungeons are first-person |
 | [Ultima IV](ultima4.md) | `WORLD.MAP` — 256×256, 8×8 chunks of 32×32 + named `.ULT` towns (32×32) | `SHAPES.EGA` — 256 tiles, 16×16 EGA (like Ultima I) | Byte is the tile index; dungeons are first-person |
 | [Ultima V](ultima5.md) | `BRIT.DAT` + `UNDER.DAT` — two 256×256 worlds, 16×16 chunks; layout table in `DATA.OVL` | `TILES.16` — 512 tiles, 16×16 EGA 4-bit, LZW-compressed | Ocean chunks omitted from `BRIT.DAT`; Underworld is a second world |
+| [Wasteland](wasteland.md) | `MASTER1`/`MASTER2` — 42 maps, 32×32 or 64×64, encrypted MSQ + Huffman tile map | `ALLHTDS1`/`ALLHTDS2` — Huffman tilesets, 16×16 EGA 4-bit chunky, vertical-XOR encoded | Partial rolling-XOR cipher; per-map tileset index + background tile in the Info block |
 
 ## How these were produced
 

@@ -1,7 +1,8 @@
-# Wasteland — Save Format (`GAME1`)
+# Wasteland — Save & Map Formats
 
 Unlike the Ultima games, Wasteland's save is a **directory of files** and the mutable data
-is **encrypted**. `fringe-retro` can now inspect and edit the character sheets in `GAME1`.
+is **encrypted**. `fringe-retro` can inspect and edit the character sheets in `GAME1`, and
+`fringe-retro-map` renders every map (see [Map rendering](#map-rendering-master1master2--allhtds)).
 
 > **Provenance:** the MSQ cipher and block/record structure are taken from Klaus Reimer's
 > `wlandsuite` (the definitive open-source Wasteland file library) and verified against a
@@ -144,10 +145,62 @@ map/story content, which this tool does not edit.
 - The `0x038`–`0x100` party/state region (only partially labelled).
 - The 5-bit string decoder (only needed for map/story text).
 
+## Map rendering (`MASTER1`/`MASTER2` + `ALLHTDS*`)
+
+`fringe-retro-map` renders every Wasteland map. Maps are read from the pristine `MASTER1`
+(disk 1, incl. the 64×64 desert overworld) and `MASTER2` files — `GAME1`/`GAME2` are used
+only as a fallback, because their block 0 holds the savegame rather than the overworld.
+Tiles come from `ALLHTDS1`/`ALLHTDS2`. See `crates/map/src/wasteland.rs` and
+`crates/map/src/huffman.rs`.
+
+### Map block
+
+Each MSQ map block uses the same rolling-XOR cipher as the save, but encryption **stops at
+the strings** — the tail (strings + tile map) is stored plain. The decrypted body is:
+
+```
+size²/2   action-class nibble map
+size²     action map
+44        central directory
+1         size byte (32 or 64)
+...       Info block (see below), then strings
+tail      Huffman-compressed tile map (plain)
+```
+
+1. **Map size** (`size` = 32 or 64) is found where a size byte and two zero bytes sit at a
+   fixed offset (`size²·3/2 + 44`) past the action maps.
+2. **Encrypted length** — a `u16` LE at `size²·3/2` marks where the XOR cipher stops; decrypt
+   exactly that many bytes and take the rest of the block verbatim.
+3. **Info block** (`size²·3/2 + 45`): byte 3 = **tileset index** (0–3), byte 6 = **background
+   tile** (used to backfill the ~2–3 % of tiles that reference shared graphics outside the
+   local tileset).
+4. **Tile map** is a Huffman stream at the block tail (a `u32` LE uncompressed size = `size²`,
+   a `u32` LE unknown, then the bitstream), decoding to `size²` tile indices.
+
+### Huffman bitstream
+
+MSB-first. The tree is serialized inline: a `0` bit is an internal node (read left subtree,
+skip one separator bit, read right subtree); a `1` bit is a leaf followed by an 8-bit byte.
+Decoding walks from the root (`0` = left, `1` = right) until a leaf.
+
+### Tilesets (`ALLHTDS*`)
+
+A sequence of compressed-MSQ blocks: `[size:u32 LE]["msq" + raw-disk byte][Huffman]`. Each
+decompresses to `size / 128` tiles. `ALLHTDS1` holds four tilesets of 66, 141, 163 and 107
+tiles.
+
+### Tile pixels
+
+Each 16×16 tile is 128 bytes. First undo a **vertical XOR** (each 8-byte row XORed with the
+row above: `b[i] ^= b[i-8]` for `i` in `8..128`), then read **chunky 4-bit EGA** — two pixels
+per byte, high nibble = left pixel — through the standard 16-colour EGA palette. (Unlike the
+Ultima tiles, this is *chunky*, not planar.)
+
 ## References
 
 - [kayahr/wlandsuite](https://github.com/kayahr/wlandsuite) — Klaus Reimer's Wasteland
   Suite (Java, MIT-licensed). Source of the MSQ cipher and block structure; see
-  `RotatingXorInputStream` / `RotatingXorOutputStream`.
+  `RotatingXorInputStream` / `RotatingXorOutputStream`. The map/tileset codecs (`GameMap`,
+  `TileMap`, `Htds`, `HuffmanInputStream`) drove the renderer above.
 - [kayahr/wastelib](https://github.com/kayahr/wastelib) — Reimer's newer TypeScript
   Wasteland library.
