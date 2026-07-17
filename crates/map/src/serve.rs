@@ -29,7 +29,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
-use crate::{config::Config, ega, ultima1, ultima2};
+use crate::{config::Config, ega, ultima1, ultima2, ultima3};
 
 /// Shared server state: where bundles live, plus the config for resolving each game's save.
 struct AppState {
@@ -118,6 +118,7 @@ fn supports_position(game: &str, world: &str) -> bool {
     match game {
         "ultima1" => true,
         "ultima2" => matches!(world, "mapx20" | "mapx30" | "mapx40"),
+        "ultima3" => world == "sosaria",
         _ => false,
     }
 }
@@ -127,6 +128,7 @@ fn read_position(game: &str, dir: &Path) -> Option<(u32, u32)> {
     match game {
         "ultima1" => ultima1::player_position(dir).ok().flatten(),
         "ultima2" => ultima2::player_position(dir).ok().flatten(),
+        "ultima3" => ultima3::player_position(dir).ok().flatten(),
         _ => None,
     }
 }

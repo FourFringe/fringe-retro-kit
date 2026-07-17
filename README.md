@@ -24,7 +24,7 @@ demands it (e.g. Wasteland's encryption).
 - Inspect and edit character sheets field-by-field; the TUI adds a section-grouped editor
 - Safe editing with automatic backups (unknown bytes preserved; writes are byte-faithful)
 - A curated Save Library alongside automatic backup retention
-- A local **world-map browser** (`fringe-retro-map`): bake a game's world maps into web tiles and explore them in your browser, with your party's live position (Ultima I & II)
+- A local **world-map browser** (`fringe-retro-map`): bake a game's world maps into web tiles and explore them in your browser, with your party's live position (Ultima I–III)
 - Cross-platform: fully tested on macOS; Linux and Windows binaries published as built-but-untested
 - Data-driven game definitions planned (reusable parsers + per-game schema data; simple formats become user-authorable)
 - Community-friendly, MIT-licensed architecture
@@ -82,7 +82,7 @@ party's current position. It reads the same `config.toml` as the main tool (see
 for the baked tiles.
 
 ```sh
-# Bake a game's maps into the export directory (Ultima I and II today):
+# Bake a game's maps into the export directory (Ultima I–III today):
 fringe-retro-map export --game ultima2
 
 # Serve every baked map and open it in your browser:

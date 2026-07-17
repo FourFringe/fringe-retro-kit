@@ -10,6 +10,7 @@ mod ega;
 mod serve;
 mod ultima1;
 mod ultima2;
+mod ultima3;
 
 use std::path::{Path, PathBuf};
 
@@ -91,7 +92,8 @@ fn export(game: &str, input: &Path, out: &Path, png: Option<&Path>) -> Result<()
     let worlds: Vec<World> = match game {
         "ultima1" => ultima1::export_worlds(input)?,
         "ultima2" => ultima2::export_worlds(input)?,
-        other => bail!("unsupported game '{other}' (supported: 'ultima1', 'ultima2')"),
+        "ultima3" => ultima3::export_worlds(input)?,
+        other => bail!("unsupported game '{other}' (supported: 'ultima1', 'ultima2', 'ultima3')"),
     };
 
     if let Some(path) = png {
@@ -102,6 +104,15 @@ fn export(game: &str, input: &Path, out: &Path, png: Option<&Path>) -> Result<()
                 .with_context(|| format!("writing {}", path.display()))?;
             println!("Wrote composite {}", path.display());
         }
+    }
+
+    // Clear this game's previously-exported bundles first, so worlds that are no longer produced
+    // (e.g. maps we've since decided to skip, or renamed worlds) don't linger as stale entries.
+    // Scoped to `<out>/<game>/` so other games' bundles in the shared export root are untouched.
+    let game_root = out.join(game);
+    if game_root.exists() {
+        std::fs::remove_dir_all(&game_root)
+            .with_context(|| format!("clearing old export at {}", game_root.display()))?;
     }
 
     for world in &worlds {

@@ -36,12 +36,13 @@ we leaned on (see [References & credits](#references--credits)).
 
 ## Map & graphics formats
 
-World maps and tile graphics we've mapped so far (Ultima I and II):
+World maps and tile graphics we've mapped so far (Ultima I–III):
 
 | Game | Map(s) | Tile graphics | Notes |
 | --- | --- | --- | --- |
 | [Ultima I](ultima1.md) | `MAP.BIN` — 168×156, nibble-packed | `EGATILES.BIN` — 16×16 EGA, row-interleaved | Place names in `OUT.EXE` (84-entry table) |
 | [Ultima II](ultima2.md) | `MAPX##` / `MAPG##` — 41 maps, 64×64, `byte>>2` | in `ULTIMAII.EXE` @ `0x7C40` — 16×16 CGA | Towns are separate maps; dungeons are first-person (no 2-D data) |
+| [Ultima III](ultima3.md) | `SOSARIA.ULT` + named town/castle `.ULT` — 64×64, `byte>>2` | `SHAPES.ULT` — 80 tiles, 16×16 CGA (linear) | Place names + coordinates in `EXODUS.BIN`; dungeons are first-person |
 
 ## How these were produced
 

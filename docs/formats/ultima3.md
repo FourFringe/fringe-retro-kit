@@ -1,4 +1,6 @@
-# Ultima III — Save Format (`ROSTER.ULT`, `PARTY.ULT`)
+# Ultima III — File Formats
+
+## Save Format (`ROSTER.ULT`, `PARTY.ULT`)
 
 Ultima III stores characters as an array of fixed **64-byte (`0x40`) records**. Numeric
 values are **binary-coded decimal (BCD)**; multi-byte BCD values are **little-endian**
@@ -64,11 +66,56 @@ record layout into shared code — the first concrete example driving the engine
 | `0x30` | Ready weapon | byte index | |
 | `0x31–0x3F` | Weapons owned | BCD(1)×15 | Dagger, Mace, Sling, Axe, Bow, Sword, 2H Sword, +2 Axe, +2 Bow, +2 Sword, Gloves, +4 Axe, +4 Bow, +4 Sword, Exotic |
 
-## Related files (not save-editing targets)
+## World Map (`SOSARIA.ULT`)
 
-`SOSARIA.ULT` (`0x1228` = 4648 bytes) holds world/map state (64×64 map, moon phases,
-whirlpool position). It changes as you walk, but the party's position lives in `PARTY.ULT`,
-not here.
+Sosaria's overworld is the first **4096 bytes** of `SOSARIA.ULT` (`0x1228` = 4648 bytes total;
+the rest holds live world state — moon phases, the whirlpool's position — and changes as you
+walk). Those 4096 bytes are a **64×64 grid**, one byte per tile, with the tile index in the
+**high 6 bits** (`tile = byte >> 2`) — the same packing as Ultima II. The party's position is
+read from `PARTY.ULT` (`0x08`/`0x09`), not from here.
+
+| Tile | Meaning |
+| --- | --- |
+| 0–4 | Terrain (water, grass, brush, forest, mountains) |
+| 5 | Dungeon entrance |
+| 6 | Town |
+| 7 | Castle |
+| 33 | Castle/keep wall (the multi-tile castle structures) |
+
+## Town & Castle Maps
+
+Each town and castle is its **own named `.ULT` file** — `BRITISH.ULT`, `YEW.ULT`, `MOON.ULT`,
+`LCB.ULT` (Lord British's Castle), `EXODUS.ULT`, and so on — each a 4648-byte file in the
+identical 64×64, `byte >> 2` format as the overworld, so their names come straight from the
+filenames. Dungeons are smaller **2192-byte** files (`FIRE.ULT`, `MINE.ULT`, `DARDIN.ULT`, …) in
+a first-person layout with no top-down map, and `CNFLCT_*.ULT` are small combat arenas; neither
+is exported.
+
+## Tile Graphics (`SHAPES.ULT`)
+
+`SHAPES.ULT` (5120 bytes) holds **80 tiles** of **16×16 CGA 2-bpp** graphics — 64 bytes each,
+stored **linearly** (16 rows × 4 bytes, most-significant pixel-pair leftmost) with **no per-tile
+header**, so the same decoder as Ultima II's tiles reads it directly. We render them with a
+gently muted CGA palette 1 (dimmed cyan/magenta/white over a near-black blue), because the pure
+CGA colours are harsh against Sosaria's largely black ocean.
+
+## Overworld Locations (`EXODUS.BIN`)
+
+The game executable `EXODUS.BIN` embeds two parallel resources used to name the map's points of
+interest:
+
+- A **filename table** (around `0x14EA`): null-terminated map names in order — `SOSARIA`, then
+  `AMBROSIA`, `BRITISH`, `EXODUS`, `LCB`, `MOON`, `YEW`, `MONTOR_E`, `MONTOR_W`, `GREY`, `DAWN`,
+  `DEVIL`, `FAWN`, `DEATH`, then the seven dungeons.
+- A **coordinate table** (around `0x15E1`): **19** `(x, y)` byte pairs, one per overworld
+  entrance, ordered as the **2 castles, then 10 towns, then 7 dungeons** (Ambrosia is reached by
+  whirlpool and has no overworld tile). Reading each coordinate's map tile reproduces exactly
+  that type breakdown, and known adjacencies pin the names — the castle beside the town of
+  Britain is Lord British's, and Montor East/West sit side by side.
+
+This is the same idea as Ultima I's `OUT.EXE` place list. We locate the table by matching the
+coordinate run against the map's landmark tiles (so no offset is hard-coded) and use it to place
+named town/castle/dungeon markers on the overworld.
 
 ## References
 
