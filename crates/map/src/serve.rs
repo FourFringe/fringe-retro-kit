@@ -129,8 +129,10 @@ fn supports_position(game: &str, world: &str) -> bool {
 
 /// Read the current party position (in tiles) for a game from its save directory. `world` is the
 /// world being viewed, so games with more than one positionable world (Ultima V's surface and
-/// Underworld) only return a position when the save is on that world.
-fn read_position(game: &str, world: &str, dir: &Path) -> Option<(u32, u32)> {
+/// Underworld) only return a position when the save is on that world. `map_id` is the viewed
+/// world's own game map id (from its manifest), used by games like Wasteland whose save records a
+/// global map id that doesn't match the world slug's index.
+fn read_position(game: &str, world: &str, dir: &Path, map_id: Option<u32>) -> Option<(u32, u32)> {
     match game {
         "ultima1" => ultima1::player_position(dir).ok().flatten(),
         "ultima2" => ultima2::player_position(dir).ok().flatten(),
@@ -147,13 +149,22 @@ fn read_position(game: &str, world: &str, dir: &Path) -> Option<(u32, u32)> {
                 };
                 (world == want).then_some((x, y))
             }),
-        // The Wasteland save records the current map id; show the marker only when the viewed
-        // world is that map. Worlds are numbered by the game's own map id (0-based), so the
-        // savegame's `map` matches the `map{id}` world directly.
+        // The Wasteland save records the engine's current map id, which is not the block index.
+        // Show the marker where the viewed world's own `map_id` matches: on the party's current
+        // map, or \u2014 when the party is inside a town \u2014 on the parent map it was entered from, at
+        // the entrance tile (so the location shows on both the town and the overworld).
         "wasteland" => wasteland::player_position(dir)
             .ok()
             .flatten()
-            .and_then(|(map, x, y)| (world == format!("map{map}")).then_some((x, y))),
+            .and_then(|p| {
+                if map_id == Some(p.map as u32) {
+                    Some((p.x, p.y))
+                } else if map_id == Some(p.return_map as u32) {
+                    Some((p.return_x, p.return_y))
+                } else {
+                    None
+                }
+            }),
         _ => None,
     }
 }
@@ -182,10 +193,11 @@ async fn position(
             py: None,
         });
     }
+    let map_id = world_map_id(&app.root, &q.game, &q.world);
     let pos = app
         .config
         .game_input_dir(&q.game)
-        .and_then(|dir| read_position(&q.game, &q.world, &dir));
+        .and_then(|dir| read_position(&q.game, &q.world, &dir, map_id));
     let (px, py) = match pos {
         Some(p) => {
             let (px, py) = tile_center_px(p);
@@ -209,6 +221,7 @@ async fn position_stream(
     let dir = supports_position(&q.game, &q.world)
         .then(|| app.config.game_input_dir(&q.game))
         .flatten();
+    let map_id = world_map_id(&app.root, &q.game, &q.world);
     let game = q.game;
     let world = q.world;
 
@@ -237,7 +250,7 @@ async fn position_stream(
 
         // Emit the current position immediately, then only on change.
         let mut last: Option<(u32, u32)> = None;
-        if let Some(pos) = read_position(&game, &world, &dir) {
+        if let Some(pos) = read_position(&game, &world, &dir, map_id) {
             last = Some(pos);
             yield Ok::<_, Infallible>(position_event(pos));
         }
@@ -245,7 +258,7 @@ async fn position_stream(
             // Debounce a burst of filesystem events into a single read.
             tokio::time::sleep(Duration::from_millis(150)).await;
             while rx.try_recv().is_ok() {}
-            if let Some(pos) = read_position(&game, &world, &dir) {
+            if let Some(pos) = read_position(&game, &world, &dir, map_id) {
                 if Some(pos) != last {
                     last = Some(pos);
                     yield Ok::<_, Infallible>(position_event(pos));
@@ -450,6 +463,16 @@ fn manifest_str(value: &serde_json::Value, key: &str) -> Option<String> {
         .and_then(|t| t.as_str())
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
+}
+
+/// The viewed world's own game map id from its manifest (`<root>/<game>/<world>/manifest.json`),
+/// if recorded. Used to match the save's current map id to the world being viewed.
+fn world_map_id(root: &Path, game: &str, world: &str) -> Option<u32> {
+    let manifest = root.join(game).join(world).join("manifest.json");
+    read_manifest(&manifest)?
+        .get("mapId")
+        .and_then(serde_json::Value::as_u64)
+        .map(|id| id as u32)
 }
 
 fn html_escape(s: &str) -> String {

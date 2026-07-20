@@ -88,13 +88,18 @@ The decrypted savegame body is `0x1200` (4608) bytes:
 | `0x01`–`0x07` | 1 each | Party member order (character slot per position; `0` = empty) |
 | `0x08` | 1 | Party **X** on the current map |
 | `0x09` | 1 | Party **Y** on the current map |
-| `0x0A` | 1 | Current **map id** (block index on disk 1; `0` = SoCal overworld) |
+| `0x0A` | 1 | Current **map id** (the engine's global map id, *not* the block index) |
 | `0x0B`–`0x0D` | 1 each | Return X / Y / map (the tile the party entered the current map from) |
 
 Reverse-engineered by diffing saves across known moves: walking north dropped `0x09`, and
-entering Highpool reset `0x08`/`0x09` and set `0x0A` to Highpool's map id. `fringe-retro`
-exposes X/Y/map as the **Party & Location** editor entry, and the map browser reads them to
-draw a live position marker.
+entering Highpool reset `0x08`/`0x09` and set `0x0A` to Highpool's map id. The map id is the
+engine's own global id (e.g. Highpool is `10` but the 10th map block on disk), so the browser
+resolves it to a world via each map's recovered `map_id` — see [Transitions](#transitions--map-ids--pois).
+The **return** fields (`0x0B`–`0x0D`) are the parent map and the tile the party entered the
+current map from — for a town that's the overworld and the town's entrance — so the browser can
+also draw the marker on the overworld while the party is inside the town.
+`fringe-retro` exposes X/Y/map as the **Party & Location** editor entry, and the map browser
+reads them to draw a live position marker.
 
 ### Character record (256 bytes)
 
@@ -223,6 +228,53 @@ Each 16×16 tile is 128 bytes. First undo a **vertical XOR** (each 8-byte row XO
 row above: `b[i] ^= b[i-8]` for `i` in `8..128`), then read **chunky 4-bit EGA** — two pixels
 per byte, high nibble = left pixel — through the standard 16-colour EGA palette. (Unlike the
 Ultima tiles and the sprites above, this is *chunky*, not planar.)
+
+### Map names (strings)
+
+Each map block carries a **strings** section (its on-screen messages), from the encryption
+boundary (`stringsOffset`) up to the tile map. Layout: a 60-byte **character table**, a word
+**offset table** (`first_word / 2` entries), then string **groups of four**. Each string is a
+stream of **5-bit** indices read **LSB-first**: `0x1F` selects the char table's high half for the
+next character, `0x1E` upper-cases it, an index whose table entry is `0` ends the string, and
+every other index maps through the char table to a byte. (Matches `wlandsuite`'s
+`Strings`/`CharTable`/`BitInputStream` in reverse mode.)
+
+The map browser recovers a **name** from the first "Welcome to X" / "Leaving X" message
+(rejecting generic fragments) — e.g. Map 9 = *Highpool*, Map 10 = *Needles*. The overworld
+(Map 0) instead lists the "Entering X" names of every location reachable from it.
+
+### Transitions → map ids & POIs
+
+The decrypted body opens with an **action-class nibble map** (`size²/2` bytes, two tiles per
+byte, high nibble first) and an **action-selector map** (`size²` bytes). The 44-byte central
+directory at `size²·3/2` begins with three words (strings / monster-names / monster-data
+offsets) followed by a **16-word master table** of per-class action-offset tables. Class `0xa`
+is a **transition** (map change): for a tile whose class nibble is `0xa`, its selector byte
+indexes the class-`0xa` offset table (a word; `0` = none) to reach the action, whose bytes are
+the message (low 6 bits of byte 0), a signed dx/dy, and — at byte 3 — the **destination map
+id**. (Matches `wlandsuite`'s `TransitionAction` / `CentralDirectory`.)
+
+The **overworld** (Map 0) is the key: each town entrance is a transition whose message names
+the destination and whose byte 3 is that town's engine map id. The exporter uses this to
+
+- drop a **POI** ("Towns" layer) on every town entrance, labelled with its name, and
+- build a `name → map id` table, then link each town **block** to its map id by matching the
+  block's recovered name ("Nomads" matches "Desert Nomads" on a trailing word).
+
+Each world's `map_id` is written to its `manifest.json`, so the server can resolve the save's
+current map id to the right world and draw the marker there. A town POI whose destination map id
+resolves to a known world also gets a `target` (that world's bundle path), which the viewer turns
+into a **clickable jump** to that map. Towns whose block carries **no** name (e.g. the
+Agricultural Center) can't be linked from the map files alone — that id → block table lives in the
+game executable — so they get an overworld POI (no jump) and no in-map marker.
+
+The **other blocks' transitions are decoded too** (every map carries them), so the connection
+graph beyond the overworld is visible in the data: towns lead to their sub-areas (Needles →
+Temple of Blood / Police station / Downtown; Las Vegas → the jail / casino / shops), and dungeons
+chain level to level via "climbing down" / "ladder" transitions. Resolving those links to specific
+rendered blocks is only partial, though — many sub-area destinations are **unnamed** blocks (again
+needing the EXE's id → block table), and `targetMap = 255` means "return to the previous map" (the
+save's return slot), not a fixed destination.
 
 ## References
 

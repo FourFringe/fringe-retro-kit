@@ -98,7 +98,20 @@
             weight: 2,
             fillColor: s.color,
             fillOpacity: 0.6,
-          }).bindTooltip(p.label);
+          });
+          // POIs that lead to another map become clickable jumps to that bundle.
+          if (p.target) {
+            marker.bindTooltip(p.label + " — click to open");
+            marker.on("click", () => {
+              window.location.href = "/view?bundle=" + encodeURIComponent(p.target);
+            });
+            marker.on("add", () => {
+              const el = marker.getElement();
+              if (el) el.style.cursor = "pointer";
+            });
+          } else {
+            marker.bindTooltip(p.label);
+          }
           (groups[p.kind] ||= L.layerGroup()).addLayer(marker);
         }
         const overlays = {};

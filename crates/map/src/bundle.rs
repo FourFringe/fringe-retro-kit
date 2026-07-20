@@ -25,6 +25,10 @@ pub struct WorldMeta {
     /// sub-maps (towns, castles) beside it — e.g. every Ultima II map in the same region shares
     /// one group. Worlds with the same `(game, group)` belong together.
     pub group: String,
+    /// The game's own internal map id, when it differs from the world slug's index. Wasteland
+    /// stores a global map id in the save that the position marker must match to a world, so we
+    /// record it here (and in the manifest) for the server to resolve `curMap` to a world.
+    pub map_id: Option<u32>,
 }
 
 /// A fully rendered world ready to be baked into a bundle: its identity, composite image, and
@@ -37,7 +41,9 @@ pub struct World {
 }
 
 /// A point of interest on a map, in image **pixel** coordinates (so the viewer needs no
-/// game-tile knowledge). `kind` groups markers (e.g. `castle`, `town`, `signpost`).
+/// game-tile knowledge). `kind` groups markers (e.g. `castle`, `town`, `signpost`). `target`,
+/// when set, is the bundle path of the world this POI leads to (e.g. `/wasteland/map9`), which the
+/// viewer turns into a clickable link.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Poi {
@@ -45,6 +51,8 @@ pub struct Poi {
     pub py: u32,
     pub kind: String,
     pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 /// The `manifest.json` a viewer reads to render a world. Serialized as camelCase for JS.
@@ -62,6 +70,8 @@ struct Manifest {
     width: u32,
     height: u32,
     tile_pattern: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    map_id: Option<u32>,
     pois: Vec<Poi>,
 }
 
@@ -100,6 +110,7 @@ pub fn write_bundle(export_root: &Path, world: &World) -> Result<PathBuf> {
         width,
         height,
         tile_pattern: "{z}/{x}/{y}.png".to_string(),
+        map_id: meta.map_id,
         pois: world.pois.clone(),
     };
     let json = serde_json::to_string_pretty(&manifest)?;
@@ -160,6 +171,7 @@ mod tests {
                 title: "Test".into(),
                 kind: "overworld".into(),
                 group: "overworld".into(),
+                map_id: None,
             },
             image: RgbImage::from_pixel(300, 300, image::Rgb([1, 2, 3])),
             pois: vec![],

@@ -560,12 +560,14 @@ mod tests {
                 py: 0,
                 kind: "sign".into(),
                 label: "Weapons".into(),
+                target: None,
             },
             Poi {
                 px: 0,
                 py: 0,
                 kind: "sign".into(),
                 label: "Towne Linda".into(),
+                target: None,
             },
         ];
         assert_eq!(town_name(&pois).as_deref(), Some("Towne Linda"));
@@ -574,6 +576,7 @@ mod tests {
             py: 0,
             kind: "sign".into(),
             label: "Weapons".into(),
+            target: None,
         }];
         assert_eq!(town_name(&none), None);
     }

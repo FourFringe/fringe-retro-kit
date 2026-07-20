@@ -43,6 +43,7 @@ pub fn poi(tx: u32, ty: u32, kind: &str, label: &str) -> Poi {
         py: ty * TILE_SIZE + TILE_SIZE / 2,
         kind: kind.to_string(),
         label: label.to_string(),
+        target: None,
     }
 }
 
@@ -63,6 +64,7 @@ pub fn world(
             title: title.into(),
             kind: kind.into(),
             group: group.into(),
+            map_id: None,
         },
         image,
         pois,
