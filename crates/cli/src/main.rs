@@ -382,6 +382,19 @@ fn main() -> Result<()> {
                     save.write(&path)?;
                     println!("slot {slot} {field}: {old} -> {level}");
                     println!("backup: {}", backup_path.display());
+                } else if let Some(item_slot) = wasteland::item_slot(&field) {
+                    let load: u8 = value
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("ammo must be a number 0..=255"))?;
+                    let old = save
+                        .item_load(member, item_slot)
+                        .map(|l| l.to_string())
+                        .unwrap_or_else(|| "?".to_string());
+                    save.item_set_load(member, item_slot, load)?;
+                    let backup_path = backup::create(&path)?;
+                    save.write(&path)?;
+                    println!("slot {slot} {field}: {old} -> {load}");
+                    println!("backup: {}", backup_path.display());
                 } else {
                     let is_party = WastelandSave::party_field_keys().any(|k| k == field);
                     let read = |s: &WastelandSave| {

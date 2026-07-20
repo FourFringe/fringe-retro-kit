@@ -91,6 +91,7 @@ const fn enum1(variants: Variants) -> FieldKind {
 const S_CHARACTER: &str = "Character";
 const S_ATTRIBUTES: &str = "Attributes";
 const S_VITALS: &str = "Vitals";
+const S_EQUIPMENT: &str = "Equipment";
 
 /// The fields of one character record (offsets are within the 256-byte record).
 #[rustfmt::skip]
@@ -114,8 +115,11 @@ const CHARACTER_FIELDS: &[Field] = &[
     Field::new("level",        "Level",        0x24, u8m(255)).in_section(S_VITALS),
     Field::new("experience",   "Experience",   0x21, u24le(0xFF_FFFF)).in_section(S_VITALS),
     Field::new("skill_points", "Skill Points", 0x20, FieldKind::Byte).in_section(S_VITALS),
-    Field::new("money",        "Money",        0x15, u24le(0xFF_FFFF)).in_section(S_VITALS),
+    Field::new("cash",         "Cash",         0x15, u24le(0xFF_FFFF)).in_section(S_VITALS),
     Field::new("afflictions",  "Afflictions",  0x28, FieldKind::Byte).in_section(S_VITALS),
+    // Equipped weapon/armor are 1-based indices into the character's own item list (`0` = none).
+    Field::new("weapon",       "Weapon (item #)", 0x1F, u8m(ITEM_SLOTS as u32)).in_section(S_EQUIPMENT),
+    Field::new("armor",        "Armor (item #)",  0x25, u8m(ITEM_SLOTS as u32)).in_section(S_EQUIPMENT),
 ];
 
 // --- Party (savegame header) ---
@@ -128,10 +132,11 @@ const S_ORDER: &str = "Marching Order";
 /// The party/game-state fields, at offsets within the decrypted savegame body (base 0).
 ///
 /// The current map id (`0x0A`) and the party's coordinates on it (`0x08`/`0x09`) — editing these
-/// moves the party (the map id is the map's block index on disk 1; 0 is the SoCal overworld). The
-/// return slot (`0x0B`–`0x0D`) is where the party pops back to when it leaves the current sub-map
-/// (only meaningful while inside one). The marching order (`0x01`–`0x07`) lists the character in
-/// each of the seven party positions (`1`–`7`, matching the inspect/edit slots; `0` = empty).
+/// moves the party. The map id is the engine's own global map id (assigned by the game, *not* the
+/// map's block index on disk); the map browser resolves it to a world. The return slot
+/// (`0x0B`–`0x0D`) is where the party pops back to when it leaves the current sub-map (only
+/// meaningful while inside one). The marching order (`0x01`–`0x07`) lists the character in each of
+/// the seven party positions (`1`–`7`, matching the inspect/edit slots; `0` = empty).
 #[rustfmt::skip]
 const PARTY_FIELDS: &[Field] = &[
     Field::new("map",        "Map",        0x0A, u8m(255)).in_section(S_LOCATION),
@@ -156,6 +161,81 @@ const SKILL_BASE: usize = 0x80;
 /// Number of skill slots (each `id, level`).
 const SKILL_SLOTS: usize = 30;
 
+// --- Items ---
+
+/// Offset of the item list within a character record. Thirty `(id, load)` slots follow the
+/// skills (packed from the start; an id of `0` marks an empty slot), matching `wlandsuite`'s
+/// `Items`/`Item`. `load` is a weapon's loaded ammo (0 for non-weapons).
+const ITEM_BASE: usize = 0xBD;
+/// Number of item slots (each `id, load`).
+const ITEM_SLOTS: usize = 30;
+
+/// The game's item list, indexed by the id stored in each item slot. Decoded from the "inventory"
+/// string table in `WL.EXE` (the same 5-bit encoding as map strings): item id `N` is inventory
+/// string `36 + N`, right after the 35 skill names. Verified against a real save (a `M1911A1 45
+/// pistol` with 7 loaded, plus a matching `45 clip`). Ids `70`–`72` are unused (empty) in the
+/// shipped game and so are absent here.
+#[rustfmt::skip]
+const ITEMS: &[(u8, &str)] = &[
+    (1, "Ax"), (2, "Club"), (3, "Chainsaw"), (4, "Knife"), (5, "Proton ax"),
+    (6, "Grenade"), (7, "Plastic explosive"), (8, "TNT"), (9, "Mangler"), (10, "Sabot rocket"),
+    (11, "LAW rocket"), (12, "RPG-7"), (13, "M1911A1 45 pistol"), (14, "Spear"),
+    (15, "Throwing knife"), (16, "VP91Z 9mm pistol"), (17, "Flamethrower"), (18, "M17 carbine"),
+    (19, "M19 rifle"), (20, "Red Ryder"), (21, "Mac 17 SMG"), (22, "Uzi SMG Mark 27"),
+    (23, "AK 97 assault rifle"), (24, "M1989A1 Nato assault rifle"), (25, "Laser pistol"),
+    (26, "Ion beamer"), (27, "Laser carbine"), (28, "Laser rifle"), (29, "Meson cannon"),
+    (30, "45 clip"), (31, "7.62mm clip"), (32, "9mm clip"), (33, "Howitzer shell"),
+    (34, "Power pack"), (35, "Power armor"), (36, "Bullet proof shirt"), (37, "Kevlar vest"),
+    (38, "Leather jacket"), (39, "Kevlar suit"), (40, "Pseudo-chitin armor"), (41, "Rad suit"),
+    (42, "Robe"), (43, "Book"), (44, "Canteen"), (45, "Crowbar"), (46, "Engine"), (47, "Gas mask"),
+    (48, "Geiger counter"), (49, "Hand mirror"), (50, "Jug"), (51, "Map"), (52, "Match"),
+    (53, "Pick ax"), (54, "Rope"), (55, "Shovel"), (56, "Sledge hammer"), (57, "Snake squeezin"),
+    (58, "Android head"), (59, "Antitoxin"), (60, "Finster's head"), (61, "Blackstar key"),
+    (62, "Bloodstaff"), (63, "Bloodstaff"), (64, "Broken toaster"), (65, "Chemical"),
+    (66, "Clone fluid"), (67, "Visa card"), (68, "Fusion cell"), (69, "Grazer bat fetish"),
+    (73, "Nova key"), (74, "Onyx ring"), (75, "Passkey"), (76, "Plasma coupler"),
+    (77, "Power converter"), (78, "Pulsar key"), (79, "Quasar key"), (80, "Rom board"),
+    (81, "Room key #18"), (82, "Ruby ring"), (83, "Secpass 1"), (84, "Secpass 3"),
+    (85, "Secpass 7"), (86, "Secpass A"), (87, "Secpass B"), (88, "Servo motor"), (89, "Sonic key"),
+    (90, "Toaster"), (91, "Clay pot"), (92, "Fruit"), (93, "Jewelry"), (94, "Cash"),
+];
+
+/// The display name for an item id, if known.
+fn item_name(id: u8) -> Option<&'static str> {
+    ITEMS.iter().find(|(i, _)| *i == id).map(|(_, n)| *n)
+}
+
+/// Stable editor keys for the 30 item slots (`ammo:1`..`ammo:30`), so an item's `load` can be
+/// addressed by a `&'static str` key (like skills use their name) in the editor and CLI.
+#[rustfmt::skip]
+const ITEM_KEYS: [&str; ITEM_SLOTS] = [
+    "ammo:1", "ammo:2", "ammo:3", "ammo:4", "ammo:5", "ammo:6", "ammo:7", "ammo:8", "ammo:9",
+    "ammo:10", "ammo:11", "ammo:12", "ammo:13", "ammo:14", "ammo:15", "ammo:16", "ammo:17",
+    "ammo:18", "ammo:19", "ammo:20", "ammo:21", "ammo:22", "ammo:23", "ammo:24", "ammo:25",
+    "ammo:26", "ammo:27", "ammo:28", "ammo:29", "ammo:30",
+];
+
+/// The editor key for a 1-based item slot, or `None` if out of range.
+pub fn item_key(slot: usize) -> Option<&'static str> {
+    ITEM_KEYS.get(slot.checked_sub(1)?).copied()
+}
+
+/// The 1-based item slot named by an `ammo:N` editor key, or `None` if it isn't one.
+pub fn item_slot(key: &str) -> Option<usize> {
+    let n: usize = key.strip_prefix("ammo:")?.parse().ok()?;
+    (1..=ITEM_SLOTS).contains(&n).then_some(n)
+}
+
+/// Whether `key` addresses an item's load (an `ammo:N` key).
+pub fn is_item(key: &str) -> bool {
+    item_slot(key).is_some()
+}
+
+/// The catalog of known items as `(id, name)`, for an "add item" picker.
+pub fn item_catalog() -> impl Iterator<Item = (u8, &'static str)> {
+    ITEMS.iter().map(|&(id, name)| (id, name))
+}
+
 /// The game's skill list, indexed by the id stored in each skill slot (`wlandsuite` /
 /// Wasteland manual). A character carries a subset, packed from the start of the list.
 #[rustfmt::skip]
@@ -179,6 +259,20 @@ pub struct CharacterSkill {
     pub name: &'static str,
     /// The skill's level.
     pub level: u8,
+}
+
+/// One of a character's carried items. `slot` is its 1-based position in the packed item list
+/// (which the equipped `weapon`/`armor` fields index). `name` is the item's display name (from
+/// [`ITEMS`]), or `None` for an unrecognised id; `load` is loaded ammo (weapons).
+pub struct CharacterItem {
+    /// 1-based position in the packed item list.
+    pub slot: usize,
+    /// The item's numeric id.
+    pub id: u8,
+    /// The item's display name, if the id is known.
+    pub name: Option<&'static str>,
+    /// The item's load (a weapon's loaded ammo; `0` otherwise).
+    pub load: u8,
 }
 
 /// The display name for a skill id, if known.
@@ -614,6 +708,81 @@ impl WastelandSave {
             "character already has the maximum {SKILL_SLOTS} skills"
         )))
     }
+
+    /// A character's carried items, in packed order (occupied slots only).
+    pub fn items(&self, index: usize) -> Vec<CharacterItem> {
+        if index >= CHARACTER_COUNT {
+            return Vec::new();
+        }
+        let base = character_base(index) + ITEM_BASE;
+        (0..ITEM_SLOTS)
+            .filter_map(|s| {
+                let id = self.body[base + s * 2];
+                (id != 0).then_some((id, self.body[base + s * 2 + 1]))
+            })
+            .enumerate()
+            .map(|(i, (id, load))| CharacterItem {
+                slot: i + 1,
+                id,
+                name: item_name(id),
+                load,
+            })
+            .collect()
+    }
+
+    /// The `load` of a character's item by its 1-based packed slot, or `None` if there's no such
+    /// item. (A weapon's loaded ammo; the quantity/charge for other stackable items.)
+    pub fn item_load(&self, index: usize, slot: usize) -> Option<u8> {
+        self.items(index)
+            .into_iter()
+            .find(|it| it.slot == slot)
+            .map(|it| it.load)
+    }
+
+    /// Set the `load` (loaded ammo) of a character's item by its 1-based packed slot, in place.
+    /// Editing load never reorders the list, so the equipped `weapon`/`armor` indices stay valid.
+    pub fn item_set_load(&mut self, index: usize, slot: usize, load: u8) -> Result<()> {
+        if index >= CHARACTER_COUNT {
+            return Err(Error::Format(format!(
+                "character slot must be 1..={CHARACTER_COUNT} (got {})",
+                index + 1
+            )));
+        }
+        let base = character_base(index) + ITEM_BASE;
+        let nth = slot
+            .checked_sub(1)
+            .ok_or_else(|| Error::Format("item slot must be at least 1".into()))?;
+        // Walk the packed (occupied) items to the requested 1-based slot.
+        let raw = (0..ITEM_SLOTS)
+            .filter(|&s| self.body[base + s * 2] != 0)
+            .nth(nth)
+            .ok_or_else(|| Error::Format(format!("character has no item in slot {slot}")))?;
+        self.body[base + raw * 2 + 1] = load;
+        Ok(())
+    }
+
+    /// Add an item, appending it to the first free slot and returning its 1-based packed slot.
+    /// Appending never shifts existing slots, so the equipped `weapon`/`armor` indices stay
+    /// valid. Errors if the id is unknown or all [`ITEM_SLOTS`] slots are already full.
+    pub fn item_add(&mut self, index: usize, id: u8, load: u8) -> Result<usize> {
+        if index >= CHARACTER_COUNT {
+            return Err(Error::Format(format!(
+                "character slot must be 1..={CHARACTER_COUNT} (got {})",
+                index + 1
+            )));
+        }
+        if id == 0 || item_name(id).is_none() {
+            return Err(Error::Format(format!("unknown item id {id}")));
+        }
+        let base = character_base(index) + ITEM_BASE;
+        let free = (0..ITEM_SLOTS)
+            .find(|&s| self.body[base + s * 2] == 0)
+            .ok_or_else(|| Error::Format(format!("item list is full ({ITEM_SLOTS} items)")))?;
+        self.body[base + free * 2] = id;
+        self.body[base + free * 2 + 1] = load;
+        // Packed slot = how many occupied slots there are up to and including the new one.
+        Ok((0..=free).filter(|&s| self.body[base + s * 2] != 0).count())
+    }
 }
 
 #[cfg(test)]
@@ -684,6 +853,13 @@ mod tests {
         body[base + 0x81] = 2;
         body[base + 0x82] = 25;
         body[base + 0x83] = 1;
+        // Items (id, load) packed from 0xBD: item 12 with 30 rounds loaded, then item 45.
+        body[base + 0xBD] = 12;
+        body[base + 0xBE] = 30;
+        body[base + 0xBF] = 45;
+        body[base + 0xC0] = 0;
+        body[base + 0x1F] = 1; // equipped weapon = item #1
+        body[base + 0x25] = 2; // equipped armor = item #2
 
         // Wrap the body in a savegame block, then append a second (untouched) block that a
         // real GAME1 would carry, to prove we preserve it.
@@ -704,7 +880,7 @@ mod tests {
             save.character_get(0, "nationality").as_deref(),
             Some("Mexican")
         );
-        assert_eq!(save.character_get(0, "money").as_deref(), Some("100000"));
+        assert_eq!(save.character_get(0, "cash").as_deref(), Some("100000"));
         assert_eq!(save.character_get(0, "con").as_deref(), Some("15"));
         assert_eq!(save.character_get(0, "experience").as_deref(), Some("1000"));
         assert_eq!(save.character_get(0, "rank").as_deref(), Some("Captain"));
@@ -713,6 +889,53 @@ mod tests {
         save.character_set(0, "name", "Angela").unwrap();
         assert_eq!(save.character_get(0, "strength").as_deref(), Some("30"));
         assert_eq!(save.character_get(0, "name").as_deref(), Some("Angela"));
+    }
+
+    #[test]
+    fn reads_and_edits_items() {
+        let mut save = WastelandSave::from_bytes(synthetic()).unwrap();
+        let items = save.items(0);
+        assert_eq!(items.len(), 2);
+        assert_eq!((items[0].slot, items[0].id, items[0].load), (1, 12, 30));
+        assert_eq!((items[1].slot, items[1].id, items[1].load), (2, 45, 0));
+        // Ids resolve to friendly names from the item table.
+        assert_eq!(items[0].name, Some("RPG-7"));
+        assert_eq!(items[1].name, item_name(45));
+        // Equipped weapon/armor read as their 1-based item indices.
+        assert_eq!(save.character_get(0, "weapon").as_deref(), Some("1"));
+        assert_eq!(save.character_get(0, "armor").as_deref(), Some("2"));
+        // Reloading a clip: set item #2's load, in place — ids and order are untouched.
+        save.item_set_load(0, 2, 15).unwrap();
+        assert_eq!(save.items(0)[1].load, 15);
+        assert_eq!(save.item_load(0, 1), Some(30));
+        assert_eq!(save.item_load(0, 2), Some(15));
+        assert_eq!(save.items(0)[0].id, 12);
+        // A slot past the last item is an error, not a silent no-op.
+        assert!(save.item_set_load(0, 3, 1).is_err());
+        // Editor key <-> slot round-trips; non-item keys are rejected.
+        assert_eq!(item_key(2), Some("ammo:2"));
+        assert_eq!(item_slot("ammo:2"), Some(2));
+        assert_eq!(item_slot("skill:medic"), None);
+    }
+
+    #[test]
+    fn adds_items_by_appending() {
+        let mut save = WastelandSave::from_bytes(synthetic()).unwrap();
+        assert_eq!(save.items(0).len(), 2);
+        // Append an AK-97 (id 23) with 30 loaded — lands in the next free slot.
+        let slot = save.item_add(0, 23, 30).unwrap();
+        assert_eq!(slot, 3);
+        let items = save.items(0);
+        assert_eq!(items.len(), 3);
+        assert_eq!(
+            (items[2].id, items[2].load, items[2].name),
+            (23, 30, Some("AK 97 assault rifle"))
+        );
+        // Existing items keep their positions (equip indices stay valid).
+        assert_eq!((items[0].id, items[1].id), (12, 45));
+        // Unknown ids are rejected.
+        assert!(save.item_add(0, 200, 0).is_err());
+        assert!(save.item_add(0, 0, 0).is_err());
     }
 
     #[test]

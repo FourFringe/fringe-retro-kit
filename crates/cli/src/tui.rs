@@ -223,6 +223,8 @@ struct Editor {
     edited: BTreeSet<&'static str>,
     /// `Some` while capturing the current character's fields into a new template.
     capture: Option<Capture>,
+    /// `Some` while choosing an item to add to this character's list.
+    add_item: Option<ItemAdd>,
 }
 
 /// In-progress capture of the current character's fields into a new template.
@@ -237,6 +239,52 @@ struct Capture {
 struct Picker {
     options: Vec<String>,
     index: usize,
+}
+
+/// In-progress "add item" picker: a type-to-filter, scrollable list of the game's items.
+struct ItemAdd {
+    /// The full catalog `(id, name)`.
+    catalog: Vec<(u8, &'static str)>,
+    /// Case-insensitive substring filter.
+    filter: String,
+    /// Indices into `catalog` that match the filter.
+    matches: Vec<usize>,
+    list: ListState,
+}
+
+impl ItemAdd {
+    fn new(catalog: Vec<(u8, &'static str)>) -> Self {
+        let mut picker = ItemAdd {
+            catalog,
+            filter: String::new(),
+            matches: Vec::new(),
+            list: ListState::default(),
+        };
+        picker.refilter();
+        picker
+    }
+
+    /// Recompute `matches` from the current filter and reset the selection to the top.
+    fn refilter(&mut self) {
+        let needle = self.filter.to_ascii_lowercase();
+        self.matches = self
+            .catalog
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, name))| {
+                needle.is_empty() || name.to_ascii_lowercase().contains(&needle)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        self.list.select((!self.matches.is_empty()).then_some(0));
+    }
+
+    /// The highlighted `(id, name)`, if any.
+    fn selected(&self) -> Option<(u8, &'static str)> {
+        self.catalog
+            .get(*self.matches.get(self.list.selected()?)?)
+            .copied()
+    }
 }
 
 /// One rendered row of the editor: either a (non-selectable) section header or a field
@@ -440,6 +488,8 @@ enum Action {
     OpenEntry(Option<usize>),
     Commit(String),
     Save,
+    AddItem,
+    AddItemCommit(u8),
     OpenBackups,
     RequestRestore,
     Snapshot,
@@ -1315,6 +1365,7 @@ impl App {
             status: None,
             edited: BTreeSet::new(),
             capture: None,
+            add_item: None,
         }));
     }
 
@@ -1357,18 +1408,64 @@ impl App {
                 self.prune_backups(&path);
             }
         }
-        if let Some(Screen::Edit(ed)) = self.stack.last_mut() {
-            ed.status = Some(match result {
-                Some(Ok(backup)) => format!("Saved. Backup: {}", backup.display()),
-                Some(Err(e)) => format!("Save failed: {e}"),
-                None => "Nothing to save.".to_string(),
-            });
+        // The session is the whole save file, so a save can be triggered from the character
+        // list or from inside a character; show the result on whichever screen we're on.
+        let status = match result {
+            Some(Ok(backup)) => format!("Saved. Backup: {}", backup.display()),
+            Some(Err(e)) => format!("Save failed: {e}"),
+            None => "Nothing to save.".to_string(),
+        };
+        match self.stack.last_mut() {
+            Some(Screen::Edit(ed)) => ed.status = Some(status),
+            Some(Screen::Characters(cl)) => cl.status = Some(status),
+            _ => {}
         }
     }
 
     /// Prune old automatic backups of `path` per the configured retention policy.
     fn prune_backups(&self, path: &Path) {
         let _ = backup::prune(path, &self.retention);
+    }
+
+    /// Open the "add item" picker for the current character (games with an item list only).
+    fn open_add_item(&mut self) {
+        let catalog = match &self.session {
+            Some(s) if s.supports_items() => s.item_catalog(),
+            _ => return,
+        };
+        if catalog.is_empty() {
+            return;
+        }
+        if let Some(Screen::Edit(ed)) = self.stack.last_mut() {
+            if ed.entity == 0 {
+                return; // the party entity has no item list
+            }
+            ed.add_item = Some(ItemAdd::new(catalog));
+        }
+    }
+
+    /// Append the chosen item (unloaded) to the current character, then refresh the editor.
+    fn commit_add_item(&mut self, id: u8) {
+        let entity = match self.stack.last() {
+            Some(Screen::Edit(ed)) => ed.entity,
+            _ => return,
+        };
+        let result = self.session.as_mut().map(|s| s.add_item(entity, id, 0));
+        let rows = self.session.as_ref().map(|s| s.rows(entity));
+        if let Some(Screen::Edit(ed)) = self.stack.last_mut() {
+            ed.add_item = None;
+            if let Some(rows) = rows {
+                ed.rows = rows;
+                ed.display = build_display(&ed.rows);
+            }
+            ed.status = Some(match result {
+                Some(Ok(slot)) => {
+                    format!("Added item (slot {slot}). Set its ammo below, then press s to save.")
+                }
+                Some(Err(e)) => format!("Add failed: {e}"),
+                None => "Nothing to add.".to_string(),
+            });
+        }
     }
 
     fn handle_key(&mut self, code: KeyCode) {
@@ -1423,6 +1520,9 @@ impl App {
                     // Backups snapshot the whole save file, so they're reachable here without
                     // first entering a character.
                     KeyCode::Char('b') => action = Action::OpenBackups,
+                    // The whole file saves at once, so Save is offered at this top level too
+                    // (not only from inside a character).
+                    KeyCode::Char('s') => action = Action::Save,
                     _ => {}
                 }
             }
@@ -1469,6 +1569,31 @@ impl App {
                     }
                 } else if ed.capture.is_some() {
                     handle_capture_key(ed, code, &mut action);
+                } else if let Some(ia) = &mut ed.add_item {
+                    // Type to filter the item list; arrows navigate; Enter adds, Esc cancels.
+                    let len = ia.matches.len();
+                    match code {
+                        KeyCode::Up => select_wrap(&mut ia.list, len, -1),
+                        KeyCode::Down => select_wrap(&mut ia.list, len, 1),
+                        KeyCode::Enter => {
+                            if let Some((id, _)) = ia.selected() {
+                                action = Action::AddItemCommit(id);
+                            }
+                        }
+                        KeyCode::Esc => {
+                            ed.add_item = None;
+                            ed.status = None;
+                        }
+                        KeyCode::Backspace => {
+                            ia.filter.pop();
+                            ia.refilter();
+                        }
+                        KeyCode::Char(c) => {
+                            ia.filter.push(c);
+                            ia.refilter();
+                        }
+                        _ => {}
+                    }
                 } else {
                     match code {
                         KeyCode::Char('q') => action = Action::Quit,
@@ -1477,6 +1602,7 @@ impl App {
                         KeyCode::Up | KeyCode::Char('k') => ed.move_selection(-1),
                         KeyCode::Enter | KeyCode::Char('e') => ed.begin_edit(),
                         KeyCode::Char('s') => action = Action::Save,
+                        KeyCode::Char('a') => action = Action::AddItem,
                         KeyCode::Char('b') => action = Action::OpenBackups,
                         KeyCode::Char('t') => action = Action::OpenTemplates,
                         KeyCode::Char('T') => ed.begin_capture(),
@@ -1644,6 +1770,8 @@ impl App {
             Action::OpenEntry(Some(i)) => self.open_entry(i),
             Action::Commit(v) => self.commit_edit(v),
             Action::Save => self.save_from_editor(),
+            Action::AddItem => self.open_add_item(),
+            Action::AddItemCommit(id) => self.commit_add_item(id),
             Action::OpenBackups => self.open_backups(),
             Action::RequestRestore => self.request_restore(),
             Action::Snapshot => self.snapshot_current(),
@@ -2014,6 +2142,20 @@ fn draw_library(frame: &mut Frame, area: Rect, ll: &mut LibraryList) {
 }
 
 fn draw_editor(frame: &mut Frame, area: Rect, ed: &mut Editor, dirty: bool) {
+    // While adding an item, the list area shows a type-to-filter item picker instead of fields.
+    if let Some(ia) = &mut ed.add_item {
+        let items: Vec<ListItem> = ia
+            .matches
+            .iter()
+            .map(|&mi| {
+                let (id, name) = ia.catalog[mi];
+                ListItem::new(Line::from(format!("  {name}  (id {id})")))
+            })
+            .collect();
+        let widget = selectable_list(items, format!(" Add item — filter: {}_ ", ia.filter));
+        frame.render_stateful_widget(widget, area, &mut ia.list);
+        return;
+    }
     let capture = ed.capture.as_ref().map(|c| &c.selected);
     let picker = ed.picker.as_ref();
     let cursor = ed.list.selected();
@@ -2242,7 +2384,7 @@ fn bottom_line(screen: &Screen) -> String {
         }
         Screen::Characters(cl) => match &cl.status {
             Some(s) => format!("  {s}"),
-            None => " ↑/↓ select · Enter open · b backups · Esc back · q quit ".to_string(),
+            None => " ↑/↓ select · Enter open · s save · b backups · Esc back · q quit ".to_string(),
         },
         Screen::Edit(ed) => {
             if let Some(input) = &ed.input {
@@ -2251,6 +2393,12 @@ fn bottom_line(screen: &Screen) -> String {
                     Some(s) => format!("  {label}: {input}_   {s}"),
                     None => format!("  {label}: {input}_   (Enter commit · Esc cancel)"),
                 }
+            } else if let Some(ia) = &ed.add_item {
+                format!(
+                    "  Add item: {}_   (type to filter · ↑/↓ · Enter add · Esc cancel · {} matches)",
+                    ia.filter,
+                    ia.matches.len()
+                )
             } else if let Some(p) = &ed.picker {
                 let label = ed.selected_row().map(|r| r.label).unwrap_or("value");
                 let value = p.options.get(p.index).map(|s| s.as_str()).unwrap_or("");
@@ -2270,7 +2418,7 @@ fn bottom_line(screen: &Screen) -> String {
             } else if let Some(status) = &ed.status {
                 format!("  {status}")
             } else {
-                " ↑/↓ field · Enter/e edit · s save · b backups · t templates · T capture · Esc back · q quit ".to_string()
+                " ↑/↓ field · Enter/e edit · s save · a add item · b backups · t templates · T capture · Esc back · q quit ".to_string()
             }
         }
         Screen::Inspect(_) => " ↑/↓ scroll · PgUp/PgDn page · Esc back · q quit ".to_string(),
@@ -2597,6 +2745,28 @@ mod tests {
         let mut app = app_with(1); // no [library] configured
         app.handle_key(KeyCode::Char('L'));
         assert!(matches!(app.stack.last(), Some(Screen::Inspect(_))));
+    }
+
+    #[test]
+    fn item_add_picker_filters_and_selects() {
+        let catalog = vec![
+            (1u8, "Ax"),
+            (13, "M1911A1 45 pistol"),
+            (23, "AK 97 assault rifle"),
+        ];
+        let mut ia = ItemAdd::new(catalog);
+        assert_eq!(ia.matches.len(), 3);
+        assert_eq!(ia.selected(), Some((1, "Ax")));
+        // Filtering narrows the list (case-insensitive substring) and re-tops the selection.
+        ia.filter.push_str("PISTOL");
+        ia.refilter();
+        assert_eq!(ia.matches.len(), 1);
+        assert_eq!(ia.selected(), Some((13, "M1911A1 45 pistol")));
+        // A filter with no matches has no selection.
+        ia.filter = "zzz".to_string();
+        ia.refilter();
+        assert!(ia.matches.is_empty());
+        assert_eq!(ia.selected(), None);
     }
 
     #[test]

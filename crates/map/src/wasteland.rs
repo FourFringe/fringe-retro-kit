@@ -53,6 +53,7 @@ const CONFIRMED_MAP_IDS: &[(usize, u32)] = &[
     (8, 9), // Agricultural Center: its block has no name string; confirmed in-game (curMap 9).
     (18, 43), // A mine shaft: confirmed in-game.
     (35, 35), // The Guardian's Citadel: confirmed in-game.
+    (13, 29), // Ag Center's cellar ("descend down a dark tunnel"): confirmed in-game.
 ];
 
 /// Bytes per 16×16, 4-bit tile, and the per-row byte stride used by the vertical-XOR encoding.
@@ -196,8 +197,15 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
                     pois.push(poi);
                 }
             } else if target.is_some() {
-                // Sub-map: only tiles that jump to another map we render.
-                let label = label.unwrap_or_else(|| format!("Map {}", loc.map_id));
+                // Sub-map: only tiles that jump to another map we render. When the destination
+                // has no recovered name, label it by the map number it opens (from the slug),
+                // which is what the player lands on — not the internal game id.
+                let label = label.unwrap_or_else(|| {
+                    slug_by_id
+                        .get(&loc.map_id)
+                        .map(|slug| format!("Map {}", slug.trim_start_matches("map")))
+                        .unwrap_or_else(|| format!("Map {}", loc.map_id))
+                });
                 let mut poi = tilemap::poi(loc.src_x, loc.src_y, "passage", &label);
                 poi.target = target;
                 pois.push(poi);

@@ -50,6 +50,23 @@ pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
                     out.push(format!("    {:<16} {}", skill.name, skill.level));
                 }
             }
+            let items = save.items(i);
+            if !items.is_empty() {
+                out.push("  Items:".to_string());
+                for item in items {
+                    let name = item
+                        .name
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("item {}", item.id));
+                    // Show loaded ammo for weapons that carry it.
+                    let load = if item.load > 0 {
+                        format!("  ({} loaded)", item.load)
+                    } else {
+                        String::new()
+                    };
+                    out.push(format!("    #{:<2} {:<26}{}", item.slot, name, load));
+                }
+            }
         }
     } else if bytes.len() == ultima3::PARTY_LEN {
         let party = Ultima3Party::from_bytes(bytes.to_vec())?;

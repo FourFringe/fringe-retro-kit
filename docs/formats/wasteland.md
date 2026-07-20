@@ -110,21 +110,23 @@ map-string encoding).
 | --- | --- | --- |
 | `0x00` | 14 | Name (null-terminated) |
 | `0x0E`–`0x14` | 1 each | Strength, IQ, Luck, Speed, Agility, Dexterity, Charisma |
-| `0x15` | int3 | Money |
+| `0x15` | int3 | Cash (per-character money; the manual's "cash") |
 | `0x18` | 1 | Gender (0 male, 1 female) |
 | `0x19` | 1 | Nationality (0 US … 4 Chinese) |
 | `0x1A` | 1 | Armor class |
 | `0x1B` | 2 | Max CON |
 | `0x1D` | 2 | CON (current HP) |
+| `0x1F` | 1 | Equipped weapon (1-based index into the item list; `0` = none) |
 | `0x20` | 1 | Skill points |
 | `0x21` | int3 | Experience |
 | `0x24` | 1 | Level |
+| `0x25` | 1 | Equipped armor (1-based index into the item list; `0` = none) |
 | `0x26` | 2 | Last CON |
 | `0x28` | 1 | Afflictions (bitmap) |
 | `0x29` | 1 | NPC flag |
 | `0x32` | 25 | Rank (null-terminated ASCII) |
 | `0x80` | 60 | Skills (30 × id/level) |
-| `0xBD` | var | Item list — *not yet exposed* |
+| `0xBD` | 60 | Item list (30 × id/load); names from the EXE's inventory strings |
 
 ### Skills (`0x80`)
 
@@ -160,8 +162,14 @@ map/story content, which this tool does not edit.
 
 ## Still to map
 
-- The per-character **item list** (`0xBD`) — layout is known from `wlandsuite` but not yet
-  surfaced (variable-length records + an item-type table).
+- The per-character **item list** (`0xBD`) — the 30 `(id, load)` slots are surfaced with
+  **friendly names**: `load` is editable in place, the equipped `weapon`/`armor` indices are
+  editable, and new items can be **appended** to a free slot (a picker of the known items; append
+  never reorders, so equip indices stay valid). Item names are decoded from the **inventory string
+  table in `WL.EXE`** (the same 5-bit encoding as map strings): item id `N` is inventory string
+  `36 + N`, right after the 35 skill names. Verified against a real save (a `M1911A1 45 pistol`
+  with 7 loaded and matching `45 clip`s). See the `ITEMS` table in
+  [crates/core/src/games/wasteland.rs](../../crates/core/src/games/wasteland.rs).
 - The `0x038`–`0x100` party/state region (only partially labelled).
 - The 5-bit string decoder (only needed for map/story text).
 

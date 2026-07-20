@@ -108,6 +108,34 @@ impl Session {
         &self.path
     }
 
+    /// Whether this save has an editable, appendable item list (Wasteland only).
+    pub fn supports_items(&self) -> bool {
+        matches!(self.save, Loaded::Wasteland(_))
+    }
+
+    /// The catalog of items that can be added, as `(id, name)` (empty for games without items).
+    pub fn item_catalog(&self) -> Vec<(u8, &'static str)> {
+        match &self.save {
+            Loaded::Wasteland(_) => wasteland::item_catalog().collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Append an item to a character's list (Wasteland), returning its new 1-based slot. Appending
+    /// never reorders existing items, so equipped weapon/armor indices stay valid.
+    pub fn add_item(&mut self, entity: usize, id: u8, load: u8) -> Result<usize> {
+        match &mut self.save {
+            Loaded::Wasteland(s) if entity > 0 => {
+                let slot = s
+                    .item_add(entity - 1, id, load)
+                    .map_err(|e| anyhow!("{e}"))?;
+                self.dirty = true;
+                Ok(slot)
+            }
+            _ => Err(anyhow!("this save has no editable item list")),
+        }
+    }
+
     /// Which game this session is editing.
     pub fn kind(&self) -> GameKind {
         match &self.save {
@@ -296,6 +324,11 @@ impl Session {
             if entity > 0 && wasteland::is_skill(key) {
                 return s.skill_get(entity - 1, key).map(|level| level.to_string());
             }
+            if entity > 0 {
+                if let Some(slot) = wasteland::item_slot(key) {
+                    return s.item_load(entity - 1, slot).map(|load| load.to_string());
+                }
+            }
         }
         match &self.save {
             Loaded::Ultima1(s) => s.get_field(key),
@@ -365,6 +398,19 @@ impl Session {
                         section: Some("Skills"),
                     });
                 }
+                // Carried items, with their `load` (ammo/quantity) editable in place. Item type,
+                // order, and add/remove are left to the game; only the safe load edit is offered.
+                for item in s.items(entity - 1) {
+                    if let Some(key) = wasteland::item_key(item.slot) {
+                        rows.push(FieldRow {
+                            key,
+                            label: item.name.unwrap_or("Unknown item"),
+                            value: item.load.to_string(),
+                            kind: FieldKind::Byte,
+                            section: Some("Items"),
+                        });
+                    }
+                }
             }
         }
         rows
@@ -383,6 +429,18 @@ impl Session {
                     .map_err(|e| anyhow!("{e}"))?;
                 self.dirty = true;
                 return Ok(());
+            }
+            // Item load (ammo/quantity) is edited by slot via the `ammo:N` key.
+            if entity > 0 {
+                if let Some(slot) = wasteland::item_slot(key) {
+                    let load: u8 = value
+                        .parse()
+                        .map_err(|_| anyhow!("ammo must be a number 0..=255"))?;
+                    s.item_set_load(entity - 1, slot, load)
+                        .map_err(|e| anyhow!("{e}"))?;
+                    self.dirty = true;
+                    return Ok(());
+                }
             }
         }
         match &mut self.save {
