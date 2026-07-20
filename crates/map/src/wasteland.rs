@@ -44,6 +44,17 @@ const MAP_FILES: [(&str, &str); 2] = [("MASTER1", "GAME1"), ("MASTER2", "GAME2")
 /// otherwise `id - 4` selects one from the second (matching `wlandsuite`).
 const HTDS_FILES: [&str; 2] = ["ALLHTDS1", "ALLHTDS2"];
 
+/// Manually-confirmed `(block index, game map id)` links for locations whose map block has no
+/// name string, so they can't be linked to the engine's map id by parsing alone (that id → block
+/// table lives in the game executable). Confirmed by playing and reading the save's current-map
+/// id, e.g. the Agricultural Center. Applied on top of the name-matched links below.
+const CONFIRMED_MAP_IDS: &[(usize, u32)] = &[
+    // (block index, game map id) — populate as locations are confirmed in-game.
+    (8, 9), // Agricultural Center: its block has no name string; confirmed in-game (curMap 9).
+    (18, 43), // A mine shaft: confirmed in-game.
+    (35, 35), // The Guardian's Citadel: confirmed in-game.
+];
+
 /// Bytes per 16×16, 4-bit tile, and the per-row byte stride used by the vertical-XOR encoding.
 const TILE_BYTES: usize = 128;
 const ROW_BYTES: usize = 8; // 16 pixels / 2 per byte
@@ -73,14 +84,11 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let banks1 = read_banks(&dir.join(HTDS_FILES[0]), &sprites)?;
     let banks2 = read_banks(&dir.join(HTDS_FILES[1]), &sprites)?;
 
-    let mut worlds = Vec::new();
-    let mut index = 0;
-    // The overworld's transition actions name each town and carry the game map id the savegame
-    // records on entry; we collect them here so later blocks can be linked to their map id.
+    // Pass 1: parse every renderable map and remap its tiles, collecting the `name -> map id`
+    // table from *all* maps' transition actions (not just the overworld) so as many blocks as
+    // possible can be linked to the engine's own map id, and their transitions to each other.
+    let mut parsed: Vec<(Map, Vec<u8>)> = Vec::new();
     let mut id_by_name: HashMap<String, u32> = HashMap::new();
-    // Each overworld POI's `(poi index, destination map id)`, resolved to a target world after
-    // the loop (once every world's map id is known) so the marker links to that map.
-    let mut overworld_pois: Vec<(usize, u32)> = Vec::new();
     for (primary, fallback) in MAP_FILES {
         let Some(map_path) = existing(&dir, &[primary, fallback]) else {
             continue; // this disk isn't present
@@ -92,15 +100,9 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             let Some(map) = parse_map(block) else {
                 continue; // savegame or non-map block
             };
-            let bank = if map.tileset < 4 {
-                banks1.get(map.tileset)
-            } else {
-                banks2.get(map.tileset - 4)
-            };
-            let Some(bank) = bank.filter(|b| b.len() > sprites.len()) else {
+            let Some(bank) = select_bank(&banks1, &banks2, map.tileset, sprites.len()) else {
                 continue;
             };
-
             // Remap tiles that fall outside this bank (a few shared NPC/special tiles) to the
             // map's background tile so nothing renders as garbage.
             let background = if usize::from(map.background) < bank.len() {
@@ -119,77 +121,104 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
                     }
                 })
                 .collect();
-
-            // Worlds are numbered by their block index on disk, which is *not* the game's own
-            // map id (the id the savegame stores): that id is assigned by the engine, so we
-            // recover the link below from the overworld's transition actions.
-            //
-            // Only the SoCal wilderness (block 0) is a true overworld; the other large (64×64)
-            // maps — Highpool, the Nevada towns — are locations, so they nest beneath it.
-            let kind = if index == 0 { "overworld" } else { "town" };
-            // Link this world to the game's own map id, and (on the overworld) drop a marker on
-            // every town entrance. The overworld is block 0, so its `name -> id` table is built
-            // before any town block is matched against it.
-            let (pois, map_id) = if index == 0 {
-                let mut pois = Vec::new();
-                for loc in &map.locations {
-                    if let Some(name) = &loc.name {
-                        id_by_name
-                            .entry(name.to_ascii_lowercase())
-                            .or_insert(loc.map_id);
-                        // Remember each town entrance's destination map id so the POI can be
-                        // linked to its world once every world's map id is known (below).
-                        overworld_pois.push((pois.len(), loc.map_id));
-                        pois.push(tilemap::poi(loc.src_x, loc.src_y, "town", name));
-                    }
+            for loc in &map.locations {
+                if let Some(name) = &loc.name {
+                    id_by_name
+                        .entry(name.to_ascii_lowercase())
+                        .or_insert(loc.map_id);
                 }
-                (pois, Some(0))
-            } else {
-                let map_id = map
-                    .name
-                    .as_deref()
-                    .and_then(|n| match_map_id(&id_by_name, n));
-                (Vec::new(), map_id)
-            };
-            // Keep the map number (it matches the save's map id) and append the recovered name.
-            let title = match &map.name {
-                Some(name) => format!("Wasteland — Map {index}: {name}"),
-                None => format!("Wasteland — Map {index}"),
-            };
-            let mut world = tilemap::world(
-                GAME,
-                &format!("map{index}"),
-                &title,
-                kind,
-                GROUP,
-                pois,
-                tilemap::render(&grid, map.size, map.size, bank),
-            );
-            world.meta.map_id = map_id;
-            worlds.push(world);
-            index += 1;
+            }
+            parsed.push((map, grid));
         }
     }
 
-    // Now every world's map id is known: link each overworld town marker to the world it opens
-    // (by destination map id), so the viewer can make it a clickable jump. Towns whose block
-    // couldn't be identified (unnamed) stay as plain markers.
-    let slug_by_id: HashMap<u32, String> = worlds
+    // Resolve each block's game map id: block 0 is the overworld (id 0); the rest match by their
+    // recovered name, with any manually-confirmed links overriding. Then index those ids so a
+    // transition's destination id resolves to a world slug (for links) and a name (for labels).
+    let map_ids: Vec<Option<u32>> = parsed
         .iter()
-        .filter_map(|w| w.meta.map_id.map(|id| (id, w.meta.world.clone())))
-        .collect();
-    if let Some(overworld) = worlds.first_mut() {
-        for (poi_idx, dest) in overworld_pois {
-            // Skip self-links (Ranger Center sits on the overworld, map id 0).
-            if dest == 0 {
-                continue;
+        .enumerate()
+        .map(|(i, (map, _))| {
+            if i == 0 {
+                return Some(0);
             }
-            if let Some(slug) = slug_by_id.get(&dest) {
-                if let Some(poi) = overworld.pois.get_mut(poi_idx) {
-                    poi.target = Some(format!("/{GAME}/{slug}"));
+            CONFIRMED_MAP_IDS
+                .iter()
+                .find(|&&(block, _)| block == i)
+                .map(|&(_, id)| id)
+                .or_else(|| {
+                    map.name
+                        .as_deref()
+                        .and_then(|n| match_map_id(&id_by_name, n))
+                })
+        })
+        .collect();
+    let slug_by_id: HashMap<u32, String> = map_ids
+        .iter()
+        .enumerate()
+        .filter_map(|(i, id)| id.map(|id| (id, format!("map{i}"))))
+        .collect();
+    let name_by_id: HashMap<u32, String> = parsed
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (map, _))| Some((map_ids[i]?, map.name.clone()?)))
+        .collect();
+
+    // Pass 2: render each map and attach POIs. The overworld shows every named town entrance;
+    // sub-maps show only transitions that lead to another rendered map, as clickable jumps — as
+    // close to in-game navigation as we can get without a POI on every unrenderable shop door.
+    let mut worlds = Vec::new();
+    for (i, (map, grid)) in parsed.iter().enumerate() {
+        let Some(bank) = select_bank(&banks1, &banks2, map.tileset, sprites.len()) else {
+            continue;
+        };
+        // Only the SoCal wilderness (block 0) is a true overworld; the other large maps are
+        // locations, so they nest beneath it.
+        let kind = if i == 0 { "overworld" } else { "town" };
+        let self_id = map_ids[i];
+        let mut pois = Vec::new();
+        for loc in &map.locations {
+            // Link to the destination map when it's a *different* rendered map (not the
+            // overworld's own "Ranger Center" tile, and not a tile that loops back to itself).
+            let target = (loc.map_id != 0 && Some(loc.map_id) != self_id)
+                .then(|| slug_by_id.get(&loc.map_id))
+                .flatten()
+                .map(|slug| format!("/{GAME}/{slug}"));
+            let label = loc
+                .name
+                .clone()
+                .or_else(|| name_by_id.get(&loc.map_id).cloned());
+            if i == 0 {
+                // Overworld: every named location, clickable when we can open it.
+                if let Some(label) = label {
+                    let mut poi = tilemap::poi(loc.src_x, loc.src_y, "town", &label);
+                    poi.target = target;
+                    pois.push(poi);
                 }
+            } else if target.is_some() {
+                // Sub-map: only tiles that jump to another map we render.
+                let label = label.unwrap_or_else(|| format!("Map {}", loc.map_id));
+                let mut poi = tilemap::poi(loc.src_x, loc.src_y, "passage", &label);
+                poi.target = target;
+                pois.push(poi);
             }
         }
+        // Keep the map number (the world slug) and append the recovered name.
+        let title = match &map.name {
+            Some(name) => format!("Wasteland — Map {i}: {name}"),
+            None => format!("Wasteland — Map {i}"),
+        };
+        let mut world = tilemap::world(
+            GAME,
+            &format!("map{i}"),
+            &title,
+            kind,
+            GROUP,
+            pois,
+            tilemap::render(grid, map.size, map.size, bank),
+        );
+        world.meta.map_id = map_ids[i];
+        worlds.push(world);
     }
 
     ensure!(
@@ -198,6 +227,23 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         dir.display()
     );
     Ok(worlds)
+}
+
+/// Select the tileset "bank" for a map's tileset id: `< 4` picks from `banks1` (ALLHTDS1),
+/// otherwise `id - 4` from `banks2` (ALLHTDS2). `None` if the bank is missing or empty (only the
+/// shared sprites), in which case the map can't be rendered.
+fn select_bank<'a>(
+    banks1: &'a [Vec<RgbImage>],
+    banks2: &'a [Vec<RgbImage>],
+    tileset: usize,
+    sprite_count: usize,
+) -> Option<&'a Vec<RgbImage>> {
+    let bank = if tileset < 4 {
+        banks1.get(tileset)
+    } else {
+        banks2.get(tileset - 4)
+    };
+    bank.filter(|b| b.len() > sprite_count)
 }
 
 /// The working save file that holds the live party state.
@@ -594,13 +640,20 @@ fn decode_locations(full: &[u8], size: usize, strings: &[String]) -> Vec<Locatio
     out
 }
 
-/// The place named by a transition's message ("Entering X" / "X"), cleaned to a bare name, or
-/// `None` if it doesn't look like a location (rejecting generic fragments as [`map_name`] does).
+/// The place a transition **leads to**, from its message ("Entering X" / "X"), cleaned to a bare
+/// name — or `None` if it doesn't look like a destination. A "Leaving X" message names where you
+/// *are* (the exit), not where you're going, so it's rejected: used as a destination name it would
+/// mislink a block (e.g. "Leaving Nomads" → the overworld would tag Nomads with the overworld's
+/// id). Generic fragments are rejected as [`map_name`] does.
 fn location_name(message: Option<&String>) -> Option<String> {
     let raw = message?.trim();
+    let lower = raw.to_ascii_lowercase();
+    if lower.starts_with("leaving ") {
+        return None;
+    }
     let mut rest = raw;
-    for prefix in ["entering ", "welcome to ", "leaving "] {
-        if raw.to_ascii_lowercase().starts_with(prefix) {
+    for prefix in ["entering ", "welcome to "] {
+        if lower.starts_with(prefix) {
             rest = &raw[prefix.len()..];
             break;
         }
@@ -617,17 +670,44 @@ fn location_name(message: Option<&String>) -> Option<String> {
     ((2..=24).contains(&name.len()) && !generic).then(|| name.to_owned())
 }
 
-/// Match a data block's recovered [`map_name`] against the overworld's `name -> map id` table,
-/// returning the game map id the savegame would store for that block. Comparison is
-/// case-insensitive and allows a trailing-word match ("Nomads" ⊂ "Desert Nomads").
+/// Match a data block's recovered [`map_name`] against the `name -> map id` table (built from
+/// every map's transition messages), returning the engine map id for that block. To stay
+/// deterministic and avoid false links, matching only succeeds when it's **unambiguous**: an exact
+/// (case-insensitive) match, else a space-insensitive one ("Stagecoach Inn" = "Stage Coach Inn"),
+/// else a trailing-word match ("Nomads" ⊂ "Desert Nomads") — the last two only when exactly one
+/// map id qualifies. The shared part must be at least [`MIN_FUZZY`] chars so short words like
+/// "inn" or "bar" don't link unrelated places.
+const MIN_FUZZY: usize = 5;
+
 fn match_map_id(table: &HashMap<String, u32>, block_name: &str) -> Option<u32> {
     let name = block_name.trim().to_ascii_lowercase();
     if let Some(&id) = table.get(&name) {
         return Some(id);
     }
-    table.iter().find_map(|(key, &id)| {
-        (key.ends_with(&format!(" {name}")) || name.ends_with(&format!(" {key}"))).then_some(id)
-    })
+    // A single id whose (normalized) name matches, or `None` if zero or several do.
+    let unique = |ids: &mut Vec<u32>| -> Option<u32> {
+        ids.sort_unstable();
+        ids.dedup();
+        (ids.len() == 1).then(|| ids[0])
+    };
+    let squashed = name.replace(' ', "");
+    let mut spaced: Vec<u32> = table
+        .iter()
+        .filter(|(k, _)| k.replace(' ', "") == squashed)
+        .map(|(_, &id)| id)
+        .collect();
+    if let Some(id) = unique(&mut spaced) {
+        return Some(id);
+    }
+    let mut tail: Vec<u32> = table
+        .iter()
+        .filter(|(k, _)| {
+            (k.len() >= MIN_FUZZY && name.ends_with(&format!(" {k}")))
+                || (name.len() >= MIN_FUZZY && k.ends_with(&format!(" {name}")))
+        })
+        .map(|(_, &id)| id)
+        .collect();
+    unique(&mut tail)
 }
 
 /// Decode an `ALLHTDS` file into its tilesets (each a list of 16×16 tiles).
@@ -840,6 +920,8 @@ mod tests {
             location_name(Some(&s("Agricultural Center"))).as_deref(),
             Some("Agricultural Center")
         );
+        // "Leaving X" names the exit, not the destination, so it's rejected as a link target.
+        assert_eq!(location_name(Some(&s("Leaving Highpool."))), None);
         // Generic fragments (a hole through the wall, …) aren't locations.
         assert_eq!(location_name(Some(&s("a hole in the wall"))), None);
         assert_eq!(location_name(None), None);
@@ -850,14 +932,23 @@ mod tests {
         let table = HashMap::from([
             ("highpool".to_owned(), 10u32),
             ("desert nomads".to_owned(), 8),
+            ("stage coach inn".to_owned(), 3),
             ("las vegas".to_owned(), 12),
         ]);
         // Exact (case-insensitive) match.
         assert_eq!(match_map_id(&table, "Highpool"), Some(10));
         // Trailing-word match: a block named "Nomads" links to "Desert Nomads".
         assert_eq!(match_map_id(&table, "Nomads"), Some(8));
+        // Space-insensitive: "Stagecoach Inn" links to "Stage Coach Inn".
+        assert_eq!(match_map_id(&table, "Stagecoach Inn"), Some(3));
         // No spurious match on a shared word.
         assert_eq!(match_map_id(&table, "the Savage Village"), None);
+        // Ambiguous trailing-word match (two ids qualify) resolves to nothing, not a guess.
+        let ambiguous = HashMap::from([
+            ("going downtown".to_owned(), 32u32),
+            ("old downtown".to_owned(), 33u32),
+        ]);
+        assert_eq!(match_map_id(&ambiguous, "Downtown"), None);
     }
 
     #[test]

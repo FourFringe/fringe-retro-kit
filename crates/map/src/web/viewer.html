@@ -88,31 +88,43 @@
           dungeon: { color: "#c78bff", label: "Dungeons" },
           shrine: { color: "#8ad2ff", label: "Shrines" },
           monument: { color: "#8ad2ff", label: "Monuments" },
+          passage: { color: "#33d6ff", label: "Passages" },
         };
         const groups = {};
         for (const p of m.pois || []) {
           const s = STYLE[p.kind] || { color: "#cccccc", label: p.kind };
-          const marker = L.circleMarker(at(p.px, p.py), {
-            radius: 5,
+          const ll = at(p.px, p.py);
+          // Draw each POI as a "donut": a filled centre dot inside a bold ring, so even a single
+          // tile is easy to spot on a busy map. Both parts share the tooltip and click target.
+          const dot = L.circleMarker(ll, {
+            radius: 4,
             color: s.color,
-            weight: 2,
+            weight: 1,
             fillColor: s.color,
-            fillOpacity: 0.6,
+            fillOpacity: 1,
           });
-          // POIs that lead to another map become clickable jumps to that bundle.
-          if (p.target) {
-            marker.bindTooltip(p.label + " — click to open");
-            marker.on("click", () => {
-              window.location.href = "/view?bundle=" + encodeURIComponent(p.target);
-            });
-            marker.on("add", () => {
-              const el = marker.getElement();
-              if (el) el.style.cursor = "pointer";
-            });
-          } else {
-            marker.bindTooltip(p.label);
+          const ring = L.circleMarker(ll, {
+            radius: 10,
+            color: s.color,
+            weight: 3,
+            fill: false,
+            opacity: 0.95,
+          });
+          const tip = p.target ? p.label + " — click to open" : p.label;
+          for (const part of [ring, dot]) {
+            part.bindTooltip(tip);
+            // POIs that lead to another map become clickable jumps to that bundle.
+            if (p.target) {
+              part.on("click", () => {
+                window.location.href = "/view?bundle=" + encodeURIComponent(p.target);
+              });
+              part.on("add", () => {
+                const el = part.getElement();
+                if (el) el.style.cursor = "pointer";
+              });
+            }
           }
-          (groups[p.kind] ||= L.layerGroup()).addLayer(marker);
+          (groups[p.kind] ||= L.layerGroup()).addLayer(L.layerGroup([ring, dot]));
         }
         const overlays = {};
         for (const kind of Object.keys(groups)) {
@@ -154,6 +166,10 @@
         if (pos0.supported) {
           if (pos0.px != null && pos0.py != null) setPlayer(pos0.px, pos0.py);
           const events = new EventSource("/api/position/stream" + posQuery);
+          // Close the stream when leaving the page. Otherwise the long-lived connection can
+          // linger past navigation and, stacked across map clicks, exhaust the browser's
+          // per-host connection limit — which stalls tile loads until the server times it out.
+          window.addEventListener("pagehide", () => events.close());
           events.onmessage = (ev) => {
             try {
               const pos = JSON.parse(ev.data);

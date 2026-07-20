@@ -267,7 +267,10 @@ async fn position_stream(
         }
     };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    // A short keep-alive interval doubles as prompt disconnect detection: when a client
+    // navigates away, the next ping write fails and the stream (and its file watcher) is dropped
+    // within a few seconds instead of lingering, so streams don't accumulate across map clicks.
+    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(5)))
 }
 
 /// A tile position as a `data:` SSE event carrying `{px, py}` image pixel coordinates.

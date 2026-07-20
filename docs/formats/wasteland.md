@@ -255,26 +255,35 @@ the message (low 6 bits of byte 0), a signed dx/dy, and — at byte 3 — the **
 id**. (Matches `wlandsuite`'s `TransitionAction` / `CentralDirectory`.)
 
 The **overworld** (Map 0) is the key: each town entrance is a transition whose message names
-the destination and whose byte 3 is that town's engine map id. The exporter uses this to
+the destination and whose byte 3 is that town's engine map id. The exporter decodes **every**
+map's transitions (not just the overworld's) and uses them to
 
-- drop a **POI** ("Towns" layer) on every town entrance, labelled with its name, and
-- build a `name → map id` table, then link each town **block** to its map id by matching the
-  block's recovered name ("Nomads" matches "Desert Nomads" on a trailing word).
+- drop a **POI** on transition tiles — the "Towns" layer on the overworld, and a "Passages"
+  layer on sub-maps — labelled with the destination name, and
+- build a `name → map id` table from those messages, then link each **block** to its map id by
+  matching the block's recovered name against it.
 
-Each world's `map_id` is written to its `manifest.json`, so the server can resolve the save's
-current map id to the right world and draw the marker there. A town POI whose destination map id
-resolves to a known world also gets a `target` (that world's bundle path), which the viewer turns
-into a **clickable jump** to that map. Towns whose block carries **no** name (e.g. the
-Agricultural Center) can't be linked from the map files alone — that id → block table lives in the
-game executable — so they get an overworld POI (no jump) and no in-map marker.
+Matching is deliberately **precise and deterministic** so a block never links to the wrong map:
+an exact (case-insensitive) match, else a space-insensitive one ("Stagecoach Inn" = "Stage Coach
+Inn"), else a trailing-word match ("Nomads" ⊂ "Desert Nomads") — the fuzzy cases only when
+exactly one map id qualifies. Crucially, **"Leaving X" messages are ignored** when building the
+table: they name the exit you're standing on, not the destination, so treating them as a link
+target would mislink the block (e.g. "Leaving Nomads" leads to the overworld, which would tag
+Nomads with the overworld's id).
 
-The **other blocks' transitions are decoded too** (every map carries them), so the connection
-graph beyond the overworld is visible in the data: towns lead to their sub-areas (Needles →
-Temple of Blood / Police station / Downtown; Las Vegas → the jail / casino / shops), and dungeons
-chain level to level via "climbing down" / "ladder" transitions. Resolving those links to specific
-rendered blocks is only partial, though — many sub-area destinations are **unnamed** blocks (again
-needing the EXE's id → block table), and `targetMap = 255` means "return to the previous map" (the
-save's return slot), not a fixed destination.
+Each world's `map_id` is written to its `manifest.json`, so the server resolves the save's
+current map id to the right world and draws the marker there. A transition POI whose destination
+resolves to a rendered world also gets a `target` (that world's bundle path), which the viewer
+turns into a **clickable jump** — so the browser navigates much like the game does: overworld →
+town → its sub-areas (Quartz ↔ Stagecoach Inn ↔ Courthouse; Needles ↔ Temple of Blood / Police
+station / Downtown; Las Vegas ↔ the jail), and back again.
+
+Some locations still can't be linked from the map files alone: their block carries **no** name
+string (e.g. the Agricultural Center — confirmed in-game to have no "Leaving" message), so the
+`id → block` table for those lives only in the game executable. They get a labelled overworld POI
+(no jump) and no in-map marker, unless added to the small **confirmed-links** table (keyed by
+block index) as they're verified by playing. `targetMap = 255` means "return to the previous map"
+(the save's return slot), not a fixed destination.
 
 ## References
 
