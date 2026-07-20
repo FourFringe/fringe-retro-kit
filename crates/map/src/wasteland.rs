@@ -116,7 +116,10 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             // Worlds are numbered by the game's own map id: for disk 1 (SoCal) this is the
             // block index (0-based), which is what the savegame's current-map byte stores, so
             // the position marker matches. Disk 2's maps continue the count (no marker there).
-            let kind = if map.size == 64 { "overworld" } else { "town" };
+            //
+            // Only the SoCal wilderness (map 0) is a true overworld; the other large (64×64)
+            // maps — Highpool, the Nevada towns — are locations, so they nest beneath it.
+            let kind = if index == 0 { "overworld" } else { "town" };
             worlds.push(tilemap::world(
                 GAME,
                 &format!("map{index}"),

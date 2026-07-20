@@ -312,12 +312,13 @@ async fn toc(State(app): State<Arc<AppState>>) -> Html<String> {
 
     for game in games {
         let mut group: Vec<&Entry> = entries.iter().filter(|e| e.game == game).collect();
-        // Region key, then overworld before its sub-maps, then world id.
+        // Region key, then overworld before its sub-maps, then world id (numbers sorted
+        // numerically so "map2" comes before "map10").
         group.sort_by(|a, b| {
-            (&a.group, a.kind != "overworld", &a.world).cmp(&(
+            (&a.group, a.kind != "overworld", natural_key(&a.world)).cmp(&(
                 &b.group,
                 b.kind != "overworld",
-                &b.world,
+                natural_key(&b.world),
             ))
         });
         // The game heading is the shared title prefix (e.g. "Ultima II — Towne Linda" → "Ultima II").
@@ -366,6 +367,14 @@ async fn toc(State(app): State<Arc<AppState>>) -> Html<String> {
     }
     body.push_str("</body></html>");
     Html(body)
+}
+
+/// A sort key that orders any trailing digits in a world id numerically, so "map2" sorts
+/// before "map10" while non-numeric ids (e.g. "britannia") still order lexically.
+fn natural_key(world: &str) -> (&str, u64) {
+    let prefix = world.trim_end_matches(|c: char| c.is_ascii_digit());
+    let number = world[prefix.len()..].parse().unwrap_or(0);
+    (prefix, number)
 }
 
 /// Append one world as a table-of-contents list item link; `sub` marks a nested sub-map.
@@ -477,5 +486,16 @@ mod tests {
     #[test]
     fn html_escape_escapes() {
         assert_eq!(html_escape("a<b>&\"c"), "a&lt;b&gt;&amp;&quot;c");
+    }
+
+    #[test]
+    fn natural_key_orders_numeric_suffixes() {
+        // Trailing digits sort numerically, not lexically.
+        let mut worlds = ["map10", "map2", "map1", "map20"];
+        worlds.sort_by_key(|w| natural_key(w));
+        assert_eq!(worlds, ["map1", "map2", "map10", "map20"]);
+        // Non-numeric ids still order lexically.
+        assert_eq!(natural_key("britannia"), ("britannia", 0));
+        assert_eq!(natural_key("mapx30"), ("mapx", 30));
     }
 }
