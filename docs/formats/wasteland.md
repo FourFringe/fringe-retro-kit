@@ -76,10 +76,25 @@ The decrypted savegame body is `0x1200` (4608) bytes:
 
 | Offset | Size | Field |
 | --- | --- | --- |
-| `0x000` | `0x38` | Parties (member order + positions) |
+| `0x000` | `0x38` | Party header (member order + position) |
 | `0x038` | 200 | Assorted state (viewport, current party/map, time, serial, …) |
 | `0x100` | `0x100`×7 | **Seven character records** (256 bytes each) |
 | `0x800` | 2560 | Padding |
+
+### Party header (`0x000`)
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| `0x01`–`0x07` | 1 each | Party member order (character slot per position; `0` = empty) |
+| `0x08` | 1 | Party **X** on the current map |
+| `0x09` | 1 | Party **Y** on the current map |
+| `0x0A` | 1 | Current **map id** (block index on disk 1; `0` = SoCal overworld) |
+| `0x0B`–`0x0D` | 1 each | Return X / Y / map (the tile the party entered the current map from) |
+
+Reverse-engineered by diffing saves across known moves: walking north dropped `0x09`, and
+entering Highpool reset `0x08`/`0x09` and set `0x0A` to Highpool's map id. `fringe-retro`
+exposes X/Y/map as the **Party & Location** editor entry, and the map browser reads them to
+draw a live position marker.
 
 ### Character record (256 bytes)
 

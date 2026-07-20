@@ -239,13 +239,18 @@ fn main() -> Result<()> {
                         }
                     }
                 } else {
-                    match save.character_get(member, &field) {
+                    match save
+                        .party_get(&field)
+                        .or_else(|| save.character_get(member, &field))
+                    {
                         Some(value) => println!("{value}"),
                         None => {
-                            let keys: Vec<_> = WastelandSave::character_field_keys().collect();
+                            let party: Vec<_> = WastelandSave::party_field_keys().collect();
+                            let character: Vec<_> = WastelandSave::character_field_keys().collect();
                             anyhow::bail!(
-                                "unknown field '{field}' (character fields use --slot; skills use skill:<name>): {}",
-                                keys.join(", ")
+                                "unknown field '{field}'.\n  Party fields: {}\n  Character fields (use --slot): {}\n  Skills: skill:<name>",
+                                party.join(", "),
+                                character.join(", ")
                             );
                         }
                     }
@@ -378,16 +383,29 @@ fn main() -> Result<()> {
                     println!("slot {slot} {field}: {old} -> {level}");
                     println!("backup: {}", backup_path.display());
                 } else {
-                    let old = save
-                        .character_get(member, &field)
-                        .unwrap_or_else(|| "?".to_string());
-                    save.character_set(member, &field, &value)?;
-                    let new = save
-                        .character_get(member, &field)
-                        .unwrap_or_else(|| "?".to_string());
+                    let is_party = WastelandSave::party_field_keys().any(|k| k == field);
+                    let read = |s: &WastelandSave| {
+                        if is_party {
+                            s.party_get(&field)
+                        } else {
+                            s.character_get(member, &field)
+                        }
+                        .unwrap_or_else(|| "?".to_string())
+                    };
+                    let old = read(&save);
+                    if is_party {
+                        save.party_set(&field, &value)?;
+                    } else {
+                        save.character_set(member, &field, &value)?;
+                    }
+                    let new = read(&save);
                     let backup_path = backup::create(&path)?;
                     save.write(&path)?;
-                    println!("slot {slot} {field}: {old} -> {new}");
+                    if is_party {
+                        println!("{field}: {old} -> {new}");
+                    } else {
+                        println!("slot {slot} {field}: {old} -> {new}");
+                    }
                     println!("backup: {}", backup_path.display());
                 }
             } else if bytes.len() == ultima3::PARTY_LEN {

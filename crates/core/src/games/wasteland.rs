@@ -118,6 +118,21 @@ const CHARACTER_FIELDS: &[Field] = &[
     Field::new("afflictions",  "Afflictions",  0x28, FieldKind::Byte).in_section(S_VITALS),
 ];
 
+// --- Party (savegame header) ---
+
+/// Display section for the party's map location.
+const S_LOCATION: &str = "Location";
+
+/// The party/game-state fields, at offsets within the decrypted savegame body (base 0). The
+/// current map id (`0x0A`) and the party's coordinates on it (`0x08`/`0x09`) — editing these
+/// moves the party. (The map id is the map's block index on disk 1; 0 is the SoCal overworld.)
+#[rustfmt::skip]
+const PARTY_FIELDS: &[Field] = &[
+    Field::new("map", "Map", 0x0A, u8m(255)).in_section(S_LOCATION),
+    Field::new("x",   "X",   0x08, u8m(63)).in_section(S_LOCATION),
+    Field::new("y",   "Y",   0x09, u8m(63)).in_section(S_LOCATION),
+];
+
 // --- Skills ---
 
 /// Offset of the skill list within a character record.
@@ -264,13 +279,13 @@ fn character_is_occupied(body: &[u8], index: usize) -> bool {
     body[character_base(index)] != 0
 }
 
-fn field_get(buf: &[u8], base: usize, key: &str) -> Option<String> {
-    let field = CHARACTER_FIELDS.iter().find(|f| f.key == key)?;
+fn field_get(fields: &[Field], buf: &[u8], base: usize, key: &str) -> Option<String> {
+    let field = fields.iter().find(|f| f.key == key)?;
     Some(schema::read_field(buf, base, field))
 }
 
-fn field_set(buf: &mut [u8], base: usize, key: &str, value: &str) -> Result<()> {
-    let field = CHARACTER_FIELDS
+fn field_set(fields: &[Field], buf: &mut [u8], base: usize, key: &str, value: &str) -> Result<()> {
+    let field = fields
         .iter()
         .find(|f| f.key == key)
         .ok_or_else(|| Error::Format(format!("unknown field '{key}'")))?;
@@ -280,6 +295,11 @@ fn field_set(buf: &mut [u8], base: usize, key: &str, value: &str) -> Result<()> 
 /// The character-record field table (for building editors).
 pub fn character_fields() -> &'static [Field] {
     CHARACTER_FIELDS
+}
+
+/// The party/game-state field table (for building editors).
+pub fn party_fields() -> &'static [Field] {
+    PARTY_FIELDS
 }
 
 /// A located MSQ block: its byte offset in the file and total size (header + seed + cipher).
@@ -432,7 +452,7 @@ impl WastelandSave {
         if index >= CHARACTER_COUNT {
             return None;
         }
-        field_get(&self.body, character_base(index), key)
+        field_get(CHARACTER_FIELDS, &self.body, character_base(index), key)
     }
 
     /// Set a character field by key, validating the value first.
@@ -443,7 +463,37 @@ impl WastelandSave {
                 index + 1
             )));
         }
-        field_set(&mut self.body, character_base(index), key, value)
+        field_set(
+            CHARACTER_FIELDS,
+            &mut self.body,
+            character_base(index),
+            key,
+            value,
+        )
+    }
+
+    /// Read a party/game-state field (map location) by key, or `None` for an unknown key.
+    pub fn party_get(&self, key: &str) -> Option<String> {
+        field_get(PARTY_FIELDS, &self.body, 0, key)
+    }
+
+    /// Set a party/game-state field by key, validating the value first.
+    pub fn party_set(&mut self, key: &str, value: &str) -> Result<()> {
+        field_set(PARTY_FIELDS, &mut self.body, 0, key, value)
+    }
+
+    /// All party/game-state fields as `(section, label, value)` tuples.
+    pub fn party_inspect(&self) -> Vec<(&'static str, &'static str, String)> {
+        PARTY_FIELDS
+            .iter()
+            .map(|f| {
+                (
+                    f.section.unwrap_or_default(),
+                    f.label,
+                    schema::read_field(&self.body, 0, f),
+                )
+            })
+            .collect()
     }
 
     /// All known fields of a character as `(section, label, value)` tuples.
@@ -464,6 +514,11 @@ impl WastelandSave {
     /// The keys of all known character fields.
     pub fn character_field_keys() -> impl Iterator<Item = &'static str> {
         CHARACTER_FIELDS.iter().map(|f| f.key)
+    }
+
+    /// The keys of all known party/game-state fields.
+    pub fn party_field_keys() -> impl Iterator<Item = &'static str> {
+        PARTY_FIELDS.iter().map(|f| f.key)
     }
 
     /// A character's learned skills, in stored order.
@@ -628,6 +683,24 @@ mod tests {
         save.character_set(0, "name", "Angela").unwrap();
         assert_eq!(save.character_get(0, "strength").as_deref(), Some("30"));
         assert_eq!(save.character_get(0, "name").as_deref(), Some("Angela"));
+    }
+
+    #[test]
+    fn reads_and_edits_party_location() {
+        let mut save = WastelandSave::from_bytes(synthetic()).unwrap();
+        // The synthetic body zeroes the party header, so the party starts at map 0, (0, 0).
+        assert_eq!(save.party_get("map").as_deref(), Some("0"));
+        assert_eq!(save.party_get("x").as_deref(), Some("0"));
+
+        save.party_set("map", "10").unwrap();
+        save.party_set("x", "7").unwrap();
+        save.party_set("y", "1").unwrap();
+        assert_eq!(save.party_get("map").as_deref(), Some("10"));
+        assert_eq!(save.party_get("x").as_deref(), Some("7"));
+        assert_eq!(save.party_get("y").as_deref(), Some("1"));
+
+        // X/Y are clamped to the 0..=63 map range.
+        assert!(save.party_set("x", "200").is_err());
     }
 
     #[test]

@@ -16,14 +16,20 @@ pub fn inspect_lines(bytes: &[u8]) -> Result<Vec<String>> {
     let mut out = Vec::new();
     if bytes.starts_with(b"msq0") {
         let save = WastelandSave::from_bytes(bytes.to_vec())?;
-        let occupied = save.occupied_characters();
-        if occupied.is_empty() {
-            out.push("(no characters in this save)".to_string());
-        }
-        for i in occupied {
-            if !out.is_empty() {
-                out.push(String::new());
+
+        // The party/location, then each character.
+        out.push("Party:".to_string());
+        let mut current_section = "";
+        for (section, label, value) in save.party_inspect() {
+            if section != current_section {
+                out.push(format!("  {section}:"));
+                current_section = section;
             }
+            out.push(format!("    {label:<16} {value}"));
+        }
+
+        for i in save.occupied_characters() {
+            out.push(String::new());
             out.push(format!(
                 "Character {}: {}",
                 i + 1,

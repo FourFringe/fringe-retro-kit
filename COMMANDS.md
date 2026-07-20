@@ -551,12 +551,16 @@ See [docs/formats/ultima6.md](docs/formats/ultima6.md) for the byte-level layout
 
 ---
 
-### Wasteland character fields
+### Wasteland party & character fields
 
 Wasteland's save is an encrypted directory. Configure `wasteland` with `save_dir` pointing at
 the **Wasteland folder** — the tool picks the active save slot (per the `LASTSAVE` file) — or
 pass a `GAME1` path directly. The seven Ranger slots use `--slot 1`…`7`, and writes are
 **byte-faithful** — a re-save with no changes reproduces the original file exactly.
+
+**Party (map location):** `map` (current map id — 0 is the SoCal overworld), `x`, `y` (the
+party's tile on that map). Editing these moves the party; in the interactive editor they're
+the **Party & Location** entry. The map browser draws a live marker at this position.
 
 **Per character (`--slot`):** `name` (≤ 13 chars), `gender` (Male, Female), `nationality`
 (US, Russian, Mexican, Indian, Chinese), `rank`, `strength` / `iq` / `luck` / `speed` /

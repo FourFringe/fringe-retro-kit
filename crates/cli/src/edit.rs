@@ -231,14 +231,18 @@ impl Session {
                 }));
                 entities
             }
-            Loaded::Wasteland(s) => s
-                .occupied_characters()
-                .into_iter()
-                .map(|i| Entity {
-                    index: i,
+            Loaded::Wasteland(s) => {
+                // Entity 0 is the party/location; entities 1..=n are the characters.
+                let mut entities = vec![Entity {
+                    index: 0,
+                    label: "Party & Location".to_string(),
+                }];
+                entities.extend(s.occupied_characters().into_iter().map(|i| Entity {
+                    index: i + 1,
                     label: format!("{}. {}", i + 1, s.character_summary(i)),
-                })
-                .collect(),
+                }));
+                entities
+            }
         }
     }
 
@@ -275,15 +279,22 @@ impl Session {
                     ultima6::character_fields()
                 }
             }
-            Loaded::Wasteland(_) => wasteland::character_fields(),
+            Loaded::Wasteland(_) => {
+                if entity == 0 {
+                    wasteland::party_fields()
+                } else {
+                    wasteland::character_fields()
+                }
+            }
         }
     }
 
     fn value(&self, entity: usize, key: &str) -> Option<String> {
         // Wasteland skills are a dynamic list, addressed by name/id rather than a field key.
+        // They belong to characters (entities 1..=n), not the party entity 0.
         if let Loaded::Wasteland(s) = &self.save {
-            if wasteland::is_skill(key) {
-                return s.skill_get(entity, key).map(|level| level.to_string());
+            if entity > 0 && wasteland::is_skill(key) {
+                return s.skill_get(entity - 1, key).map(|level| level.to_string());
             }
         }
         match &self.save {
@@ -318,7 +329,13 @@ impl Session {
                     s.character_get(entity - 1, key)
                 }
             }
-            Loaded::Wasteland(s) => s.character_get(entity, key),
+            Loaded::Wasteland(s) => {
+                if entity == 0 {
+                    s.party_get(key)
+                } else {
+                    s.character_get(entity - 1, key)
+                }
+            }
         }
     }
 
@@ -335,16 +352,19 @@ impl Session {
                 section: f.section,
             })
             .collect();
-        // Append the character's learned skills as editable level rows (Wasteland only).
+        // Append the character's learned skills as editable level rows (Wasteland only; the
+        // party entity 0 has no skills).
         if let Loaded::Wasteland(s) = &self.save {
-            for skill in s.skills(entity) {
-                rows.push(FieldRow {
-                    key: skill.name,
-                    label: skill.name,
-                    value: skill.level.to_string(),
-                    kind: FieldKind::Byte,
-                    section: Some("Skills"),
-                });
+            if entity > 0 {
+                for skill in s.skills(entity - 1) {
+                    rows.push(FieldRow {
+                        key: skill.name,
+                        label: skill.name,
+                        value: skill.level.to_string(),
+                        kind: FieldKind::Byte,
+                        section: Some("Skills"),
+                    });
+                }
             }
         }
         rows
@@ -353,13 +373,13 @@ impl Session {
     /// Apply a validated edit to the in-memory buffer. Marks the session dirty on success;
     /// returns the validation error (unchanged buffer) on failure.
     pub fn set(&mut self, entity: usize, key: &str, value: &str) -> Result<()> {
-        // Wasteland skills are a dynamic list edited by level.
+        // Wasteland skills are a dynamic list edited by level (characters are entities 1..=n).
         if let Loaded::Wasteland(s) = &mut self.save {
-            if wasteland::is_skill(key) {
+            if entity > 0 && wasteland::is_skill(key) {
                 let level: u8 = value
                     .parse()
                     .map_err(|_| anyhow!("skill level must be a number 1..=255"))?;
-                s.skill_set(entity, key, level)
+                s.skill_set(entity - 1, key, level)
                     .map_err(|e| anyhow!("{e}"))?;
                 self.dirty = true;
                 return Ok(());
@@ -397,7 +417,13 @@ impl Session {
                     s.character_set(entity - 1, key, value)
                 }
             }
-            Loaded::Wasteland(s) => s.character_set(entity, key, value),
+            Loaded::Wasteland(s) => {
+                if entity == 0 {
+                    s.party_set(key, value)
+                } else {
+                    s.character_set(entity - 1, key, value)
+                }
+            }
         }
         .map_err(|e| anyhow!("{e}"))?;
         self.dirty = true;
@@ -516,8 +542,8 @@ mod tests {
         let (_dir, path) = write_temp(&wasteland_game1());
         let mut session = Session::load(&path).unwrap().unwrap();
 
-        // Entity 0 is the first character; its rows include a Skills section.
-        let rows = session.rows(0);
+        // Entity 0 is the party; entity 1 is the first character, whose rows include Skills.
+        let rows = session.rows(1);
         let skill = rows
             .iter()
             .find(|r| r.key == "Perception")
@@ -527,13 +553,30 @@ mod tests {
         assert!(skill.pick_options().is_none()); // numeric: free text
 
         // Editing the skill routes to skill_set and shows the new level.
-        session.set(0, "Perception", "5").unwrap();
-        let rows = session.rows(0);
+        session.set(1, "Perception", "5").unwrap();
+        let rows = session.rows(1);
         let skill = rows.iter().find(|r| r.key == "Perception").unwrap();
         assert_eq!(skill.value, "5");
 
         // A character field on the same entity still works alongside skills.
-        session.set(0, "strength", "20").unwrap();
-        assert_eq!(session.value(0, "strength").as_deref(), Some("20"));
+        session.set(1, "strength", "20").unwrap();
+        assert_eq!(session.value(1, "strength").as_deref(), Some("20"));
+    }
+
+    #[test]
+    fn wasteland_party_entity_edits_location() {
+        let (_dir, path) = write_temp(&wasteland_game1());
+        let mut session = Session::load(&path).unwrap().unwrap();
+
+        // Entity 0 is the party: its fields are the map location, not character fields.
+        let entities = session.entities();
+        assert_eq!(entities[0].index, 0);
+        assert_eq!(entities[0].label, "Party & Location");
+        assert!(session.rows(0).iter().any(|r| r.key == "map"));
+
+        session.set(0, "map", "10").unwrap();
+        session.set(0, "x", "7").unwrap();
+        assert_eq!(session.value(0, "map").as_deref(), Some("10"));
+        assert_eq!(session.value(0, "x").as_deref(), Some("7"));
     }
 }
