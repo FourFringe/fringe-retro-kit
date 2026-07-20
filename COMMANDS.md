@@ -559,8 +559,11 @@ pass a `GAME1` path directly. The seven Ranger slots use `--slot 1`…`7`, and w
 **byte-faithful** — a re-save with no changes reproduces the original file exactly.
 
 **Party (map location):** `map` (current map id — 0 is the SoCal overworld), `x`, `y` (the
-party's tile on that map). Editing these moves the party; in the interactive editor they're
-the **Party & Location** entry. The map browser draws a live marker at this position.
+party's tile on that map). `return_map` / `return_x` / `return_y` are where the party pops back
+to when it leaves the current sub-map. `member1`…`member7` are the marching order — the
+character (1–7) in each party position (0 = empty). Editing `x`/`y`/`map` moves the party; in
+the interactive editor these are the **Party & Location** entry, and the map browser draws a
+live marker at this position.
 
 **Per character (`--slot`):** `name` (≤ 13 chars), `gender` (Male, Female), `nationality`
 (US, Russian, Mexican, Indian, Chinese), `rank`, `strength` / `iq` / `luck` / `speed` /

@@ -148,11 +148,12 @@ fn read_position(game: &str, world: &str, dir: &Path) -> Option<(u32, u32)> {
                 (world == want).then_some((x, y))
             }),
         // The Wasteland save records the current map id; show the marker only when the viewed
-        // world is that map (disk-1 map id `n` is exported as `map{n + 1}`).
+        // world is that map. Worlds are numbered by the game's own map id (0-based), so the
+        // savegame's `map` matches the `map{id}` world directly.
         "wasteland" => wasteland::player_position(dir)
             .ok()
             .flatten()
-            .and_then(|(map, x, y)| (world == format!("map{}", map + 1)).then_some((x, y))),
+            .and_then(|(map, x, y)| (world == format!("map{map}")).then_some((x, y))),
         _ => None,
     }
 }

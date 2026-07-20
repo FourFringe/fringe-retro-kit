@@ -113,7 +113,9 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
                 })
                 .collect();
 
-            index += 1;
+            // Worlds are numbered by the game's own map id: for disk 1 (SoCal) this is the
+            // block index (0-based), which is what the savegame's current-map byte stores, so
+            // the position marker matches. Disk 2's maps continue the count (no marker there).
             let kind = if map.size == 64 { "overworld" } else { "town" };
             worlds.push(tilemap::world(
                 GAME,
@@ -124,6 +126,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
                 Vec::new(),
                 tilemap::render(&grid, map.size, map.size, bank),
             ));
+            index += 1;
         }
     }
 

@@ -122,15 +122,31 @@ const CHARACTER_FIELDS: &[Field] = &[
 
 /// Display section for the party's map location.
 const S_LOCATION: &str = "Location";
+/// Display section for the party's marching order.
+const S_ORDER: &str = "Marching Order";
 
-/// The party/game-state fields, at offsets within the decrypted savegame body (base 0). The
-/// current map id (`0x0A`) and the party's coordinates on it (`0x08`/`0x09`) — editing these
-/// moves the party. (The map id is the map's block index on disk 1; 0 is the SoCal overworld.)
+/// The party/game-state fields, at offsets within the decrypted savegame body (base 0).
+///
+/// The current map id (`0x0A`) and the party's coordinates on it (`0x08`/`0x09`) — editing these
+/// moves the party (the map id is the map's block index on disk 1; 0 is the SoCal overworld). The
+/// return slot (`0x0B`–`0x0D`) is where the party pops back to when it leaves the current sub-map
+/// (only meaningful while inside one). The marching order (`0x01`–`0x07`) lists the character in
+/// each of the seven party positions (`1`–`7`, matching the inspect/edit slots; `0` = empty).
 #[rustfmt::skip]
 const PARTY_FIELDS: &[Field] = &[
-    Field::new("map", "Map", 0x0A, u8m(255)).in_section(S_LOCATION),
-    Field::new("x",   "X",   0x08, u8m(63)).in_section(S_LOCATION),
-    Field::new("y",   "Y",   0x09, u8m(63)).in_section(S_LOCATION),
+    Field::new("map",        "Map",        0x0A, u8m(255)).in_section(S_LOCATION),
+    Field::new("x",          "X",          0x08, u8m(63)).in_section(S_LOCATION),
+    Field::new("y",          "Y",          0x09, u8m(63)).in_section(S_LOCATION),
+    Field::new("return_map", "Return Map", 0x0D, u8m(255)).in_section(S_LOCATION),
+    Field::new("return_x",   "Return X",   0x0B, u8m(63)).in_section(S_LOCATION),
+    Field::new("return_y",   "Return Y",   0x0C, u8m(63)).in_section(S_LOCATION),
+    Field::new("member1", "Position 1", 0x01, u8m(7)).in_section(S_ORDER),
+    Field::new("member2", "Position 2", 0x02, u8m(7)).in_section(S_ORDER),
+    Field::new("member3", "Position 3", 0x03, u8m(7)).in_section(S_ORDER),
+    Field::new("member4", "Position 4", 0x04, u8m(7)).in_section(S_ORDER),
+    Field::new("member5", "Position 5", 0x05, u8m(7)).in_section(S_ORDER),
+    Field::new("member6", "Position 6", 0x06, u8m(7)).in_section(S_ORDER),
+    Field::new("member7", "Position 7", 0x07, u8m(7)).in_section(S_ORDER),
 ];
 
 // --- Skills ---
@@ -385,15 +401,20 @@ impl WastelandSave {
             ));
         }
         let disk = raw[3] - b'0';
-        // The savegame is the block of size 4614 whose decrypted body is a valid party.
+        // The savegame is the (first) 4614-byte block. We prefer one whose decrypted body is a
+        // valid party, but fall back to the first well-sized block so that editing the party
+        // order (which the validity check inspects) can never make the save unloadable.
+        let long_enough = CHARACTER_BASE + CHARACTER_COUNT * RECORD_LEN;
+        let mut fallback: Option<(usize, Vec<u8>)> = None;
         for block in msq_blocks(&raw)? {
             if block.size != SAVEGAME_BLOCK_LEN {
                 continue;
             }
             let body = decrypt(&raw[block.offset..block.offset + block.size])?;
-            if body.len() >= CHARACTER_BASE + CHARACTER_COUNT * RECORD_LEN
-                && is_savegame_body(&body)
-            {
+            if body.len() < long_enough {
+                continue;
+            }
+            if is_savegame_body(&body) {
                 return Ok(Self {
                     raw,
                     body,
@@ -401,6 +422,15 @@ impl WastelandSave {
                     disk,
                 });
             }
+            fallback.get_or_insert((block.offset, body));
+        }
+        if let Some((block_offset, body)) = fallback {
+            return Ok(Self {
+                raw,
+                body,
+                block_offset,
+                disk,
+            });
         }
         Err(Error::Format(
             "no savegame block found in GAME1 (expected a 4614-byte MSQ block)".into(),
@@ -699,8 +729,31 @@ mod tests {
         assert_eq!(save.party_get("x").as_deref(), Some("7"));
         assert_eq!(save.party_get("y").as_deref(), Some("1"));
 
-        // X/Y are clamped to the 0..=63 map range.
+        // Return slot and marching order round-trip too.
+        save.party_set("return_map", "0").unwrap();
+        save.party_set("return_x", "47").unwrap();
+        save.party_set("member1", "3").unwrap();
+        assert_eq!(save.party_get("return_x").as_deref(), Some("47"));
+        assert_eq!(save.party_get("member1").as_deref(), Some("3"));
+
+        // X/Y are clamped to the 0..=63 map range; order positions to 0..=7.
         assert!(save.party_set("x", "200").is_err());
+        assert!(save.party_set("member1", "9").is_err());
+    }
+
+    #[test]
+    fn loads_even_with_an_invalid_party_order() {
+        // Editing the marching order into an invalid permutation (a duplicate) must not make
+        // the save unloadable: from_bytes falls back to the first 4614-byte block.
+        let mut body = vec![0u8; SAVEGAME_BODY_LEN];
+        body[1] = 1;
+        body[2] = 1; // duplicate -> is_savegame_body() would reject this
+        let mut raw = encrypt(&body, 0);
+        raw.extend_from_slice(b"msq0");
+        raw.extend(std::iter::repeat_n(0u8, 32));
+
+        let save = WastelandSave::from_bytes(raw).unwrap();
+        assert_eq!(save.party_get("member1").as_deref(), Some("1"));
     }
 
     #[test]
