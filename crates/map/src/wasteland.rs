@@ -16,7 +16,9 @@
 //!
 //! Tiles come from `ALLHTDS{disk}`, a sequence of Huffman-compressed tilesets. Each 16×16 tile is
 //! stored **vertically XOR-encoded** (each row XORed with the one above) as chunky 4-bit EGA
-//! (two pixels per byte, high nibble first). See [`crate::huffman`]. The format matches Klaus
+//! (two pixels per byte, high nibble first). See [`crate::huffman`]. A map square's tile value
+//! selects the graphic: values `0..10` are the shared **sprites** in `ic0_9.wlf` (planar 4-bit
+//! EGA), and values `10+` index the map's tileset (tile `value - 10`). The format matches Klaus
 //! Reimer's `wlandsuite`; the rolling-XOR cipher is the same one `fringe-retro-core` uses for
 //! Wasteland saves.
 
@@ -34,17 +36,22 @@ const GAME: &str = "wasteland";
 /// One region groups every map so the browser lists them together.
 const GROUP: &str = "wasteland";
 
-/// The two disks' map files, preferred pristine (`MASTER`) then working (`GAME`), with the tileset
-/// file for each. `(preferred_map, fallback_map, tileset_file, disk)`.
-const DISKS: [(&str, &str, &str); 2] = [
-    ("MASTER1", "GAME1", "ALLHTDS1"),
-    ("MASTER2", "GAME2", "ALLHTDS2"),
-];
+/// The two disks' map files, preferred pristine (`MASTER`) then working (`GAME`).
+const MAP_FILES: [(&str, &str); 2] = [("MASTER1", "GAME1"), ("MASTER2", "GAME2")];
+
+/// The two tile-graphics files. A map's tileset id `< 4` selects a tileset from the first;
+/// otherwise `id - 4` selects one from the second (matching `wlandsuite`).
+const HTDS_FILES: [&str; 2] = ["ALLHTDS1", "ALLHTDS2"];
 
 /// Bytes per 16×16, 4-bit tile, and the per-row byte stride used by the vertical-XOR encoding.
 const TILE_BYTES: usize = 128;
 const ROW_BYTES: usize = 8; // 16 pixels / 2 per byte
 const TILE_SIZE: u32 = 16;
+
+/// The shared sprite file (`ic0_9.wlf`): 10 planar-EGA 16×16 sprites, tile values 0-9.
+const SPRITE_FILE: &str = "IC0_9.WLF";
+/// Number of shared sprites (tile values `0..SPRITE_COUNT` come from [`SPRITE_FILE`]).
+const SPRITE_COUNT: usize = 10;
 
 /// The rolling-XOR key increment (matches the Wasteland save cipher).
 const KEY_STEP: u8 = 0x1F;
@@ -57,15 +64,20 @@ const INFO_SKIP: usize = 45;
 pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let dir = data_dir(game_dir);
 
+    // The 10 shared sprites (`ic0_9.wlf`) are tile values 0-9; tileset tiles are values 10+.
+    let sprites = read_sprites(&dir.join(SPRITE_FILE))?;
+    // Tileset "banks" from both graphics files: each is the 10 sprites followed by one tileset,
+    // so a raw tile value indexes it directly (0-9 = sprite, 10+ = tileset tile value-10). A map's
+    // tileset id < 4 selects a bank from ALLHTDS1, otherwise id-4 from ALLHTDS2.
+    let banks1 = read_banks(&dir.join(HTDS_FILES[0]), &sprites)?;
+    let banks2 = read_banks(&dir.join(HTDS_FILES[1]), &sprites)?;
+
     let mut worlds = Vec::new();
     let mut index = 0;
-    for (primary, fallback, htds) in DISKS {
-        let map_path = existing(&dir, &[primary, fallback]);
-        let Some(map_path) = map_path else {
+    for (primary, fallback) in MAP_FILES {
+        let Some(map_path) = existing(&dir, &[primary, fallback]) else {
             continue; // this disk isn't present
         };
-        let tilesets =
-            read_tilesets(&dir.join(htds)).with_context(|| format!("reading tilesets {htds}"))?;
         let data =
             std::fs::read(&map_path).with_context(|| format!("reading {}", map_path.display()))?;
 
@@ -73,15 +85,18 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             let Some(map) = parse_map(block) else {
                 continue; // savegame or non-map block
             };
-            let tileset = tilesets
-                .get(map.tileset)
-                .or_else(|| tilesets.first())
-                .filter(|t| !t.is_empty());
-            let Some(tileset) = tileset else { continue };
+            let bank = if map.tileset < 4 {
+                banks1.get(map.tileset)
+            } else {
+                banks2.get(map.tileset - 4)
+            };
+            let Some(bank) = bank.filter(|b| b.len() > sprites.len()) else {
+                continue;
+            };
 
-            // Remap tiles that fall outside this tileset (a few shared NPC/special tiles) to the
+            // Remap tiles that fall outside this bank (a few shared NPC/special tiles) to the
             // map's background tile so nothing renders as garbage.
-            let background = if usize::from(map.background) < tileset.len() {
+            let background = if usize::from(map.background) < bank.len() {
                 map.background
             } else {
                 0
@@ -90,7 +105,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
                 .tiles
                 .iter()
                 .map(|&t| {
-                    if usize::from(t) < tileset.len() {
+                    if usize::from(t) < bank.len() {
                         t
                     } else {
                         background
@@ -107,7 +122,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
                 kind,
                 GROUP,
                 Vec::new(),
-                tilemap::render(&grid, map.size, map.size, tileset),
+                tilemap::render(&grid, map.size, map.size, bank),
             ));
         }
     }
@@ -294,6 +309,60 @@ fn read_tilesets(path: &Path) -> Result<Vec<Vec<RgbImage>>> {
     Ok(tilesets)
 }
 
+/// Read the tilesets from an `ALLHTDS` file (empty if absent) and prefix each with the shared
+/// sprites, so a raw tile value indexes the result directly (`0..10` = sprite, `10+` = tile).
+fn read_banks(path: &Path, sprites: &[RgbImage]) -> Result<Vec<Vec<RgbImage>>> {
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let tilesets = read_tilesets(path)?;
+    Ok(tilesets
+        .iter()
+        .map(|t| sprites.iter().chain(t).cloned().collect())
+        .collect())
+}
+
+/// Decode the shared sprites (`ic0_9.wlf`): [`SPRITE_COUNT`] planar-EGA 16×16 tiles. Padded to
+/// [`SPRITE_COUNT`] if the file is short so tile values keep their `+10` offset.
+fn read_sprites(path: &Path) -> Result<Vec<RgbImage>> {
+    let data = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut sprites: Vec<RgbImage> = data
+        .chunks_exact(TILE_BYTES)
+        .take(SPRITE_COUNT)
+        .map(decode_sprite)
+        .collect();
+    sprites.resize_with(SPRITE_COUNT, || RgbImage::new(TILE_SIZE, TILE_SIZE));
+    Ok(sprites)
+}
+
+/// Decode one 128-byte **planar** EGA sprite: four bit-planes (`bit` 0..3), each `height` rows of
+/// `width / 8` bytes, MSB = leftmost pixel. (Unlike tileset tiles, sprites are planar and are not
+/// vertical-XOR encoded.)
+fn decode_sprite(bytes: &[u8]) -> RgbImage {
+    let mut idx = [[0u8; TILE_SIZE as usize]; TILE_SIZE as usize];
+    let mut pos = 0;
+    for bit in 0..4 {
+        for row in idx.iter_mut() {
+            for byte in 0..(TILE_SIZE as usize / 8) {
+                let b = bytes[pos];
+                pos += 1;
+                for p in 0..8 {
+                    if (b >> (7 - p)) & 1 != 0 {
+                        row[byte * 8 + p] |= 1 << bit;
+                    }
+                }
+            }
+        }
+    }
+    let mut img = RgbImage::new(TILE_SIZE, TILE_SIZE);
+    for (y, row) in idx.iter().enumerate() {
+        for (x, &c) in row.iter().enumerate() {
+            img.put_pixel(x as u32, y as u32, EGA_PALETTE[usize::from(c)]);
+        }
+    }
+    img
+}
+
 /// Split a decompressed tileset into its 16×16 tiles.
 fn decode_tileset(raw: &[u8]) -> Vec<RgbImage> {
     raw.chunks_exact(TILE_BYTES).map(decode_tile).collect()
@@ -379,6 +448,18 @@ mod tests {
         // Pixel (0,0) and (0,1) should be the same colour (high nibble of 0x12 = 1).
         assert_eq!(img.get_pixel(0, 0), img.get_pixel(0, 1));
         assert_eq!(*img.get_pixel(0, 0), EGA_PALETTE[1]);
+    }
+
+    #[test]
+    fn decode_sprite_reads_planar_planes() {
+        // Planar layout: plane 0 first (32 bytes), then planes 1..3. Byte 0 = row 0, cols 0-7,
+        // MSB = leftmost pixel. Setting only plane 0's bit for cols 0 and 2 => colour index 1.
+        let mut bytes = vec![0u8; TILE_BYTES];
+        bytes[0] = 0b1010_0000;
+        let img = decode_sprite(&bytes);
+        assert_eq!(*img.get_pixel(0, 0), EGA_PALETTE[1]);
+        assert_eq!(*img.get_pixel(1, 0), EGA_PALETTE[0]);
+        assert_eq!(*img.get_pixel(2, 0), EGA_PALETTE[1]);
     }
 
     #[test]

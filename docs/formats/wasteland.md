@@ -175,7 +175,20 @@ tail      Huffman-compressed tile map (plain)
    tile** (used to backfill the ~2–3 % of tiles that reference shared graphics outside the
    local tileset).
 4. **Tile map** is a Huffman stream at the block tail (a `u32` LE uncompressed size = `size²`,
-   a `u32` LE unknown, then the bitstream), decoding to `size²` tile indices.
+   a `u32` LE unknown, then the bitstream), decoding to `size²` tile **values**.
+
+### Tile values → graphics
+
+A map square's decoded value is **not** a direct tileset index. Values `0–9` are the ten
+shared **sprites** in `IC0_9.WLF`; values `10+` index the map's tileset as `value − 10`.
+(Getting this wrong shifts every tile by ten and can land on an entirely different-looking
+tileset region — e.g. Highpool rendering as water instead of grass.)
+
+### Sprites (`IC0_9.WLF`)
+
+Ten 16×16 sprites, 128 bytes each (1280 total), in **planar** 4-bit EGA: four bit-planes,
+each `height` rows of `width/8` bytes, MSB = leftmost pixel. (Planar — unlike the *chunky*
+tileset tiles below — and not vertical-XOR encoded.)
 
 ### Huffman bitstream
 
@@ -187,20 +200,21 @@ Decoding walks from the root (`0` = left, `1` = right) until a leaf.
 
 A sequence of compressed-MSQ blocks: `[size:u32 LE]["msq" + raw-disk byte][Huffman]`. Each
 decompresses to `size / 128` tiles. `ALLHTDS1` holds four tilesets of 66, 141, 163 and 107
-tiles.
+tiles. The `Info` tileset byte selects one: `< 4` → `ALLHTDS1[id]`, else `ALLHTDS2[id − 4]`.
 
 ### Tile pixels
 
 Each 16×16 tile is 128 bytes. First undo a **vertical XOR** (each 8-byte row XORed with the
 row above: `b[i] ^= b[i-8]` for `i` in `8..128`), then read **chunky 4-bit EGA** — two pixels
 per byte, high nibble = left pixel — through the standard 16-colour EGA palette. (Unlike the
-Ultima tiles, this is *chunky*, not planar.)
+Ultima tiles and the sprites above, this is *chunky*, not planar.)
 
 ## References
 
 - [kayahr/wlandsuite](https://github.com/kayahr/wlandsuite) — Klaus Reimer's Wasteland
   Suite (Java, MIT-licensed). Source of the MSQ cipher and block structure; see
   `RotatingXorInputStream` / `RotatingXorOutputStream`. The map/tileset codecs (`GameMap`,
-  `TileMap`, `Htds`, `HuffmanInputStream`) drove the renderer above.
+  `TileMap`, `Htds`, `Sprite`, `HuffmanInputStream`) and the `MapSquare` tile-value rule
+  drove the renderer above.
 - [kayahr/wastelib](https://github.com/kayahr/wastelib) — Reimer's newer TypeScript
   Wasteland library.
