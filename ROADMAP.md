@@ -398,8 +398,17 @@ reached.
       confirmed absent from `ULTIMAII.EXE` and the town-file headers), so links would need a
       hand-authored mapping. Optional follow-up: in-map "back to overworld" links (browser back
       already works).
-- [ ] **Dual position markers** (current location + return / entry point) where a game records
-      both, matching Wasteland's overworld + sub-map markers.
+- [x] **Dual position markers** — when the party is inside a location, the "you are here" marker
+      shows on that location's sub-map (the current tile) *and* on the parent overworld at its
+      entrance (the tile you step back out onto), matching Wasteland. Done for **Ultima V**: the
+      save's location code (`0x2ED`) maps to the Party-Location table (the `LOCATIONS` array), the
+      overworld entrance is the `DATA.OVL` coordinate table, and the current sub-map is resolved by
+      floor. Verified end-to-end against a real in-`Iolo's Hut` save (markers on `iolo-s-hut` at the
+      party tile *and* on Britannia at the entrance, absent from the Underworld and other towns).
+      Nothing more is needed for the other games: **Ultima III and IV don't let you save inside a
+      town, castle or dungeon** (confirmed in-game), so their party position is always on their
+      single overworld — the marker already shown — and Ultima I/II likewise only save on the
+      overworld. Ultima V is the only game with a genuine dual case, and it's covered.
 - [ ] **Ultima VI world map** — reverse-engineer the LZW-compressed, object-based map with the
       codec workbench so Ultima VI joins the map browser (today only its character stats are read).
 - [ ] **Confirm tentative fields** across the Ultimas with `schema find` / `schema diff`

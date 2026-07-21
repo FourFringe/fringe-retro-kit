@@ -120,7 +120,9 @@ fn supports_position(game: &str, world: &str) -> bool {
         "ultima2" => matches!(world, "mapx20" | "mapx30" | "mapx40"),
         "ultima3" => world == "sosaria",
         "ultima4" => world == "britannia",
-        "ultima5" => matches!(world, "britannia" | "underworld"),
+        // The party can be on either overworld or inside any top-down location; the marker
+        // resolves per world in `read_position`, so allow it on every Ultima V world.
+        "ultima5" => true,
         // The party can be on any Wasteland map; the marker only shows on the one it's on.
         "wasteland" => world.starts_with("map"),
         _ => false,
@@ -138,17 +140,9 @@ fn read_position(game: &str, world: &str, dir: &Path, map_id: Option<u32>) -> Op
         "ultima2" => ultima2::player_position(dir).ok().flatten(),
         "ultima3" => ultima3::player_position(dir).ok().flatten(),
         "ultima4" => ultima4::player_position(dir).ok().flatten(),
-        "ultima5" => ultima5::player_position(dir)
-            .ok()
-            .flatten()
-            .and_then(|(underworld, x, y)| {
-                let want = if underworld {
-                    "underworld"
-                } else {
-                    "britannia"
-                };
-                (world == want).then_some((x, y))
-            }),
+        // Ultima V resolves both the overworld entrance and the current sub-map tile per world
+        // (the party can be inside a town/castle/keep), so it does its own world matching.
+        "ultima5" => ultima5::marker_position(dir, world).ok().flatten(),
         // The Wasteland save records the engine's current map id, which is not the block index.
         // Show the marker where the viewed world's own `map_id` matches: on the party's current
         // map, or \u2014 when the party is inside a town \u2014 on the parent map it was entered from, at

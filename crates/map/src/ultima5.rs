@@ -162,29 +162,131 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     Ok(worlds)
 }
 
-/// The party's world position from `SAVED.GAM`, or `None` if the party isn't on a world map. The
-/// bool is `true` for the Underworld. Location `0x2ED` is `0` on the world map; the Z-coordinate
-/// `0x2EF` is `0` on the surface and `0xFF` in the Underworld (`1`–`7` inside a dungeon); X/Y are
-/// at `0x2F0`/`0x2F1`.
-pub fn player_position(game_dir: &Path) -> Result<Option<(bool, u32, u32)>> {
+/// Where the party is, from `SAVED.GAM`: the location code `0x2ED`, the Z/floor `0x2EF`, and the
+/// tile `0x2F0`/`0x2F1`. Location `0` is a world map (Z `0` = surface, `0xFF` = Underworld, `1`–`7`
+/// = a dungeon, which has no top-down map); `1..=32` is a top-down location — `index = code - 1`
+/// into [`LOCATIONS`] (Party-Location order) — with the party on floor Z. Codes `33`–`40` are the
+/// first-person dungeons.
+#[derive(Debug, PartialEq)]
+enum PartyPos {
+    World {
+        underworld: bool,
+        x: u32,
+        y: u32,
+    },
+    Location {
+        index: usize,
+        floor: u32,
+        x: u32,
+        y: u32,
+    },
+}
+
+/// Read the party position from `SAVED.GAM`, or `None` when there's no save or the party is
+/// somewhere without a rendered map (a dungeon).
+fn read_party_pos(game_dir: &Path) -> Result<Option<PartyPos>> {
     let path = game_dir.join(SAVE_FILE);
     if !path.exists() {
         return Ok(None);
     }
     let data = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-    if data.len() < 0x2F2 || data[0x2ED] != 0 {
+    if data.len() < 0x2F2 {
         return Ok(None);
     }
-    let underworld = match data[0x2EF] {
-        0 => false,
-        0xFF => true,
-        _ => return Ok(None), // inside a dungeon; X/Y are local
+    let (loc, z) = (data[0x2ED], data[0x2EF]);
+    let (x, y) = (u32::from(data[0x2F0]), u32::from(data[0x2F1]));
+    Ok(match loc {
+        0 => match z {
+            0 => Some(PartyPos::World {
+                underworld: false,
+                x,
+                y,
+            }),
+            0xFF => Some(PartyPos::World {
+                underworld: true,
+                x,
+                y,
+            }),
+            _ => None, // inside a dungeon; X/Y are local and there's no top-down map
+        },
+        1..=32 => Some(PartyPos::Location {
+            index: usize::from(loc) - 1,
+            floor: u32::from(z),
+            x,
+            y,
+        }),
+        _ => None, // dungeon-entrance codes; no top-down map
+    })
+}
+
+/// The bundle slug of top-down location `index`'s floor `floor` (0-based), matching the ids
+/// [`location_worlds`] assigns: a single-floor place is `slug(name)`, a multi-floor one is
+/// `slug(name)-l{floor+1}`. `None` if the floor wasn't exported.
+fn location_floor_slug(data: &[u8], index: usize, floor: u32) -> Option<String> {
+    let name = LOCATIONS.get(index)?.0;
+    let fi = index / LOCS_PER_FILE;
+    let loc = index % LOCS_PER_FILE;
+    let start_off = *START_OFFS.get(fi)?;
+    let starts = data.get(start_off..start_off + LOCS_PER_FILE)?;
+    let first = usize::from(starts[loc]);
+    let end = starts
+        .get(loc + 1)
+        .map_or(MAPS_PER_FILE, |&s| usize::from(s));
+    let floors = end.checked_sub(first).filter(|&f| f > 0)?;
+    if floor as usize >= floors {
+        return None;
+    }
+    Some(if floors > 1 {
+        format!("{}-l{}", slug(name), floor + 1)
+    } else {
+        slug(name)
+    })
+}
+
+/// The party's "you are here" marker for the world identified by `world_slug`, in **tile**
+/// coordinates, or `None` if the marker doesn't belong on that world.
+///
+/// This gives the dual marker: when the party is inside a top-down location, the marker shows on
+/// that location's own sub-map (the party's current tile) **and** on the parent overworld at the
+/// location's entrance (the tile the party will step back out onto). On a world map it's the
+/// single position, on the surface or Underworld as appropriate.
+pub fn marker_position(game_dir: &Path, world_slug: &str) -> Result<Option<(u32, u32)>> {
+    let Some(pos) = read_party_pos(game_dir)? else {
+        return Ok(None);
     };
-    Ok(Some((
-        underworld,
-        u32::from(data[0x2F0]),
-        u32::from(data[0x2F1]),
-    )))
+    match pos {
+        PartyPos::World { underworld, x, y } => {
+            let want = if underworld {
+                "underworld"
+            } else {
+                "britannia"
+            };
+            Ok((world_slug == want).then_some((x, y)))
+        }
+        PartyPos::Location { index, floor, x, y } => {
+            let data = std::fs::read(game_dir.join(DATA_FILE))
+                .with_context(|| format!("reading {DATA_FILE}"))?;
+            // On the location's own sub-map, mark the party's current tile.
+            if location_floor_slug(&data, index, floor).as_deref() == Some(world_slug) {
+                return Ok(Some((x, y)));
+            }
+            // Otherwise, mark the entrance on the parent overworld (surface or Underworld).
+            let (Some(&ex), Some(&ey)) = (data.get(LOC_X_OFF + index), data.get(LOC_Y_OFF + index))
+            else {
+                return Ok(None);
+            };
+            let britannia = read_britannia(game_dir, &data)?;
+            let on_underworld = britannia
+                .get(usize::from(ey) * WORLD_W + usize::from(ex))
+                .is_some_and(|&t| t == WATER_TILE);
+            let overworld = if on_underworld {
+                "underworld"
+            } else {
+                "britannia"
+            };
+            Ok((world_slug == overworld).then_some((u32::from(ex), u32::from(ey))))
+        }
+    }
 }
 
 /// Decode `TILES.16` (LZW-compressed) into its 512 tiles.
@@ -496,5 +598,70 @@ mod tests {
             .unwrap()
             .target
             .is_none());
+    }
+
+    #[test]
+    fn read_party_pos_decodes_world_and_location() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |save: &[u8]| std::fs::write(dir.path().join(SAVE_FILE), save).unwrap();
+        let mut save = vec![0u8; 0x2F2];
+
+        // Location 0, Z 0 → the Britannia surface at (10, 20).
+        save[0x2ED] = 0;
+        save[0x2EF] = 0;
+        save[0x2F0] = 10;
+        save[0x2F1] = 20;
+        write(&save);
+        assert_eq!(
+            read_party_pos(dir.path()).unwrap(),
+            Some(PartyPos::World {
+                underworld: false,
+                x: 10,
+                y: 20
+            })
+        );
+
+        // Location 13 (Iolo's Hut = LOCATIONS[12]), Z 0, tile (15, 15) — the real save's state.
+        save[0x2ED] = 13;
+        save[0x2F0] = 15;
+        save[0x2F1] = 15;
+        write(&save);
+        assert_eq!(
+            read_party_pos(dir.path()).unwrap(),
+            Some(PartyPos::Location {
+                index: 12,
+                floor: 0,
+                x: 15,
+                y: 15
+            })
+        );
+
+        // Location 0, Z 3 → inside a dungeon: no top-down map.
+        save[0x2ED] = 0;
+        save[0x2EF] = 3;
+        write(&save);
+        assert_eq!(read_party_pos(dir.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn location_floor_slug_maps_floors() {
+        // A DATA.OVL whose TOWNE.DAT first-map-index array makes location 0 single-floor and
+        // location 1 three floors ([1, 4)).
+        let mut data = vec![0u8; START_OFFS[3] + LOCS_PER_FILE];
+        let s0 = START_OFFS[0];
+        data[s0..s0 + LOCS_PER_FILE].copy_from_slice(&[0, 1, 4, 5, 6, 7, 8, 9]);
+
+        // index 0 = Moonglow, single floor → the bare slug.
+        assert_eq!(
+            location_floor_slug(&data, 0, 0).as_deref(),
+            Some("moonglow")
+        );
+        // index 1 = Britain, floor 2 (0-based) → the `-l3` sub-map.
+        assert_eq!(
+            location_floor_slug(&data, 1, 2).as_deref(),
+            Some("britain-l3")
+        );
+        // A floor past the location's floor count isn't a real sub-map.
+        assert_eq!(location_floor_slug(&data, 0, 1), None);
     }
 }
