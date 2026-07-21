@@ -549,6 +549,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "fringe-retro-kit"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "fringe-retro-core",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "fringe-retro-map"
 version = "0.5.0"
 dependencies = [

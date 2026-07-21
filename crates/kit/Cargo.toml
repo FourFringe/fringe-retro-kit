@@ -1,0 +1,24 @@
+[package]
+name = "fringe-retro-kit"
+description = "Reverse-engineering kit tools for Fringe Retro Kit: a codec workbench and format spelunking utilities."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fringe-retro-kit"
+path = "src/main.rs"
+
+[dependencies]
+fringe-retro-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
