@@ -22,6 +22,7 @@
 //! Tiles: `TILES.16` — 512 tiles of 16×16, 4-bit EGA graphics (two pixels per byte, high nibble
 //! first), **LZW-compressed** with the Ultima 6-style codec (see [`crate::lzw`]).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{ensure, Context, Result};
@@ -134,7 +135,8 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
 
     let britannia = read_britannia(game_dir, &data)?;
     let underworld = read_underworld(game_dir)?;
-    let (brit_pois, under_pois) = location_pois(&data, &britannia);
+    let (loc_worlds, targets) = location_worlds(game_dir, &data, &tiles)?;
+    let (brit_pois, under_pois) = location_pois(&data, &britannia, &targets);
 
     let mut worlds = vec![
         tilemap::world(
@@ -156,7 +158,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             tilemap::render(&underworld, WORLD_W, WORLD_H, &tiles),
         ),
     ];
-    worlds.extend(location_worlds(game_dir, &data, &tiles)?);
+    worlds.extend(loc_worlds);
     Ok(worlds)
 }
 
@@ -297,7 +299,11 @@ fn is_chunk_layout(window: &[u8], chunk_count: usize) -> bool {
 /// Overworld points of interest from the `DATA.OVL` location table, split into the two worlds. A
 /// location's `(x, y)` is looked up on Britannia; if that tile is open water it belongs to the
 /// Underworld instead (only Doom does). Returns `(britannia, underworld)`.
-fn location_pois(data: &[u8], britannia: &[u8]) -> (Vec<Poi>, Vec<Poi>) {
+fn location_pois(
+    data: &[u8],
+    britannia: &[u8],
+    targets: &HashMap<&str, String>,
+) -> (Vec<Poi>, Vec<Poi>) {
     let mut brit = Vec::new();
     let mut under = Vec::new();
     if data.len() < LOC_X_OFF + LOC_COUNT || data.len() < LOC_Y_OFF + LOC_COUNT {
@@ -306,7 +312,9 @@ fn location_pois(data: &[u8], britannia: &[u8]) -> (Vec<Poi>, Vec<Poi>) {
     for (i, (name, kind)) in LOCATIONS.iter().enumerate() {
         let x = data[LOC_X_OFF + i];
         let y = data[LOC_Y_OFF + i];
-        let marker = tilemap::poi(u32::from(x), u32::from(y), kind, name);
+        let mut marker = tilemap::poi(u32::from(x), u32::from(y), kind, name);
+        // Link to the location's entrance floor, when it has a top-down map (dungeons don't).
+        marker.target = targets.get(name).cloned();
         if britannia[usize::from(y) * WORLD_W + usize::from(x)] == WATER_TILE {
             under.push(marker);
         } else {
@@ -319,8 +327,13 @@ fn location_pois(data: &[u8], britannia: &[u8]) -> (Vec<Poi>, Vec<Poi>) {
 /// Build a [`World`] for every floor of every town, dwelling, castle and keep. Each location file
 /// holds 16 floors; the `DATA.OVL` first-map-index array partitions them among the file's eight
 /// locations, so a location's floors are `[start[i], start[i + 1])`.
-fn location_worlds(game_dir: &Path, data: &[u8], tiles: &[RgbImage]) -> Result<Vec<World>> {
+fn location_worlds(
+    game_dir: &Path,
+    data: &[u8],
+    tiles: &[RgbImage],
+) -> Result<(Vec<World>, HashMap<&'static str, String>)> {
     let mut worlds = Vec::new();
+    let mut targets: HashMap<&'static str, String> = HashMap::new();
     for (fi, file) in LOC_FILES.iter().enumerate() {
         let path = game_dir.join(file);
         if !path.exists() {
@@ -342,6 +355,13 @@ fn location_worlds(game_dir: &Path, data: &[u8], tiles: &[RgbImage]) -> Result<V
                 continue; // malformed range; skip this location
             }
             let floors = end - first;
+            // The overworld POI links here — the ground floor (`-l1` when the place has levels).
+            let entrance = if floors > 1 {
+                format!("{}-l1", slug(name))
+            } else {
+                slug(name)
+            };
+            targets.insert(name, format!("/{GAME}/{entrance}"));
             for floor in 0..floors {
                 let map = &bytes[(first + floor) * LOC_MAP_BYTES..][..LOC_MAP_BYTES];
                 let (id, title) = if floors > 1 {
@@ -364,7 +384,7 @@ fn location_worlds(game_dir: &Path, data: &[u8], tiles: &[RgbImage]) -> Result<V
             }
         }
     }
-    Ok(worlds)
+    Ok((worlds, targets))
 }
 
 /// A URL-safe slug of a location name (lowercase, non-alphanumeric runs collapsed to `-`).
@@ -454,9 +474,27 @@ mod tests {
         let mut britannia = vec![5u8; WORLD_W * WORLD_H]; // all land
                                                           // Put the last location's tile (x = LOC_COUNT-1, y = 0) on deep water → Underworld.
         britannia[LOC_COUNT - 1] = WATER_TILE;
-        let (brit, under) = location_pois(&data, &britannia);
+        let targets: HashMap<&str, String> = [("Moonglow", "/ultima5/moonglow".to_string())]
+            .into_iter()
+            .collect();
+        let (brit, under) = location_pois(&data, &britannia, &targets);
         assert_eq!(brit.len(), LOC_COUNT - 1);
         assert_eq!(under.len(), 1);
         assert_eq!(under[0].label, LOCATIONS[LOC_COUNT - 1].0);
+        // The linked location carries its entrance target; unlinked ones don't.
+        assert_eq!(
+            brit.iter()
+                .find(|p| p.label == "Moonglow")
+                .unwrap()
+                .target
+                .as_deref(),
+            Some("/ultima5/moonglow")
+        );
+        assert!(brit
+            .iter()
+            .find(|p| p.label == "Britain")
+            .unwrap()
+            .target
+            .is_none());
     }
 }

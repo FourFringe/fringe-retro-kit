@@ -147,6 +147,22 @@ const TOWNS: &[(&str, &str, &str)] = &[
     ("DEN.ULT", "Buccaneer's Den", "village"),
 ];
 
+/// The bundle world id a town `.ULT` filename maps to, e.g. `BRITAIN.ULT` → `britain`.
+fn town_slug(file: &str) -> String {
+    file.trim_end_matches(".ULT").to_ascii_lowercase()
+}
+
+/// The bundle path of the sub-map an overworld location opens, matched by name against [`TOWNS`]
+/// and only when that map actually ships in this install. Dungeons, shrines and the Abyss have no
+/// top-down map and get no target.
+fn town_target(game_dir: &Path, label: &str) -> Option<String> {
+    TOWNS
+        .iter()
+        .find(|(_, title, _)| *title == label)
+        .filter(|(file, _, _)| game_dir.join(file).exists())
+        .map(|(file, _, _)| format!("/{GAME}/{}", town_slug(file)))
+}
+
 /// Render Ultima IV into its worlds: the Britannia overworld plus each named town and castle.
 pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let tileset = std::fs::read(game_dir.join(TILESET_FILE))
@@ -179,7 +195,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             path.display(),
             data.len()
         );
-        let world_id = file.trim_end_matches(".ULT").to_ascii_lowercase();
+        let world_id = town_slug(file);
         worlds.push(tilemap::world(
             GAME,
             &world_id,
@@ -309,7 +325,9 @@ fn named_pois(game_dir: &Path, grid: &[u8]) -> Option<Vec<Poi>> {
             continue;
         }
         if let Some(display) = display_kind(kind) {
-            pois.push(tilemap::poi(u32::from(x), u32::from(y), display, label));
+            let mut poi = tilemap::poi(u32::from(x), u32::from(y), display, label);
+            poi.target = town_target(game_dir, label);
+            pois.push(poi);
         }
     }
     Some(pois)
@@ -449,5 +467,28 @@ mod tests {
             .any(|p| p.label == "The Abyss" && p.kind == "dungeon"));
         assert!(pois.iter().any(|p| p.label == "Shrine of Humility"));
         assert!(!pois.iter().any(|p| p.label == "Shrine of Spirituality"));
+    }
+
+    #[test]
+    fn town_targets_link_named_locations_to_their_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        // Only these maps ship in this "install".
+        std::fs::write(dir.path().join("BRITAIN.ULT"), []).unwrap();
+        std::fs::write(dir.path().join("LCB_1.ULT"), []).unwrap();
+
+        // A town whose map ships links to its bundle.
+        assert_eq!(
+            town_target(dir.path(), "Britain").as_deref(),
+            Some("/ultima4/britain")
+        );
+        // The castle's overworld entrance points at its ground floor (LCB_1).
+        assert_eq!(
+            town_target(dir.path(), "Lord British's Castle").as_deref(),
+            Some("/ultima4/lcb_1")
+        );
+        // A dungeon has no top-down map, so no target.
+        assert_eq!(town_target(dir.path(), "Deceit"), None);
+        // A town whose file is absent isn't linked (no dead links).
+        assert_eq!(town_target(dir.path(), "Yew"), None);
     }
 }

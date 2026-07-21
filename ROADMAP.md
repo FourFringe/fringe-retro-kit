@@ -388,9 +388,16 @@ Now that the workbench exists, circle back and use it to sharpen the games we al
 (mostly the Ultimas), bringing their map browser and field coverage up to the parity Wasteland
 reached.
 
-- [ ] **Clickable POI navigation in the map browser** for the Ultimas — click an overworld
-      town / castle / dungeon to jump into its baked sub-map (and link back out), as Wasteland's
-      map already does.
+- [x] **Clickable POI navigation in the map browser** for the Ultimas — click an overworld
+      town / castle / dungeon to jump into its baked sub-map, as Wasteland's map already does.
+      Done for **Ultima III, IV, and V**: each overworld location POI now carries a `target` bundle
+      slug (matched to its town/castle map by name; Ultima V links to the entrance floor), verified
+      to have no dead links. **Ultima I** is moot (it exports only the overworld, so its named
+      markers have nothing to open), and **Ultima II** isn't feasible automatically: its overworld
+      markers are anonymous, tile-scanned types and there is *no* overworld→map table (already
+      confirmed absent from `ULTIMAII.EXE` and the town-file headers), so links would need a
+      hand-authored mapping. Optional follow-up: in-map "back to overworld" links (browser back
+      already works).
 - [ ] **Dual position markers** (current location + return / entry point) where a game records
       both, matching Wasteland's overworld + sub-map markers.
 - [ ] **Ultima VI world map** — reverse-engineer the LZW-compressed, object-based map with the

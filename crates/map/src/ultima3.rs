@@ -98,6 +98,21 @@ const TOWNS: &[(&str, &str, &str)] = &[
     ("AMBROSIA.ULT", "Ambrosia", "town"),
 ];
 
+/// The bundle world id a town `.ULT` filename maps to, e.g. `BRITISH.ULT` → `british`.
+fn town_slug(file: &str) -> String {
+    file.trim_end_matches(".ULT").to_ascii_lowercase()
+}
+
+/// The bundle path of the sub-map an overworld location opens, matched by name against [`TOWNS`]
+/// and only when that map ships in this install. Dungeons have no top-down map and get no target.
+fn town_target(game_dir: &Path, label: &str) -> Option<String> {
+    TOWNS
+        .iter()
+        .find(|(_, title, _)| *title == label)
+        .filter(|(file, _, _)| game_dir.join(file).exists())
+        .map(|(file, _, _)| format!("/{GAME}/{}", town_slug(file)))
+}
+
 /// Render Ultima III into its worlds: the Sosaria overworld plus each named town and castle.
 pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let tiles = read_tileset(game_dir)?;
@@ -122,7 +137,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             continue; // Not every install ships every map; skip missing ones.
         }
         let grid = read_grid(&path)?;
-        let world_id = file.trim_end_matches(".ULT").to_ascii_lowercase();
+        let world_id = town_slug(file);
         worlds.push(tilemap::world(
             GAME,
             &world_id,
@@ -182,7 +197,9 @@ fn named_pois(game_dir: &Path, grid: &[u8]) -> Option<Vec<Poi>> {
         .map(|(i, (label, kind))| {
             let x = u32::from(exe[start + 2 * i]);
             let y = u32::from(exe[start + 2 * i + 1]);
-            tilemap::poi(x, y, kind, label)
+            let mut poi = tilemap::poi(x, y, kind, label);
+            poi.target = town_target(game_dir, label);
+            poi
         })
         .collect();
     Some(pois)
@@ -325,5 +342,25 @@ mod tests {
         }
         let start = find_location_table(&exe, &grid).expect("table located");
         assert_eq!(start, 0);
+    }
+
+    #[test]
+    fn town_targets_link_named_locations_to_their_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("BRITISH.ULT"), []).unwrap();
+        std::fs::write(dir.path().join("LCB.ULT"), []).unwrap();
+
+        // A town whose map ships links to its bundle (note the file/slug differs from the name).
+        assert_eq!(
+            town_target(dir.path(), "Britain").as_deref(),
+            Some("/ultima3/british")
+        );
+        assert_eq!(
+            town_target(dir.path(), "Lord British's Castle").as_deref(),
+            Some("/ultima3/lcb")
+        );
+        // Dungeons have no top-down map, and absent maps aren't linked.
+        assert_eq!(town_target(dir.path(), "Dungeon"), None);
+        assert_eq!(town_target(dir.path(), "Yew"), None);
     }
 }
