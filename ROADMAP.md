@@ -18,16 +18,19 @@ Games are auto-detected (GOG + Steam on macOS), CI runs on macOS/Ubuntu/Windows,
 tagged releases publish macOS, Linux, and Windows binaries (Homebrew tap + `curl | sh`
 installer).
 
-Most recently: Ultima VI (party stats in the uncompressed `OBJLIST`), Wasteland character
-sheets + skills (byte-faithful MSQ writes), GOG/Steam detection with `detect --all`, and
-per-game save-directory resolution from a natural top-level `save_dir`.
+Most recently: the **`fringe-retro-kit` reverse-engineering workbench** (Phase 9) — a codec
+lab, string ripper, schema explorer, live byte logger, and container carver — plus the map
+browser reaching Ultima II–V and Wasteland, and Wasteland save-editing (character sheets,
+skills, items, party location, cash).
 
-**Next up:** the **map browser (Phase 8)** is the active track — zoomable, real-graphics world
-maps baked from your own game install, **starting with Ultima I** and following the games in
-play order. Behind it sit optional, non-blocking tracks: **Phase 7 (Additional Games)**,
-**Phase 9 (Kit Tools)** — CLI reverse-engineering helpers — and **Phase 10 (Engine
-Enhancements)**. The parsing engine, distribution (Homebrew tap, `curl | sh` installer,
-cross-platform binaries), and save diff / comparison are all done (see below).
+**Next up:** the `fringe-retro-kit` workbench is the headline of **v0.6.0**. With it in hand,
+the near-term focus shifts to **using the kit to sharpen the Ultimas** (Phase 9's
+Ultima-improvements track below) — clickable map POIs, confirming tentative fields, and
+reverse-engineering Ultima VI's compressed world map — alongside finishing the **map browser
+(Phase 8)** for the remaining games. Optional, non-blocking tracks remain: **Phase 7
+(Additional Games)** and **Phase 10 (Engine Enhancements)**. The parsing engine, distribution
+(Homebrew tap, `curl | sh` installer, cross-platform binaries), and save diff / comparison are
+all done (see below).
 
 ---
 
@@ -324,7 +327,13 @@ none in the viewer):
 - [x] Extend to **Ultima II**: overworlds + town/castle interiors (CGA tiles from `ULTIMAII.EXE`),
       towns named from their painted map labels, typed location POIs (village/town/tower/castle/
       dungeon), and the party position on the Earth overworlds
-- [ ] Extend to Ultima III and beyond, in play order
+- [x] Extend to **Ultima III, IV, and V**: overworlds plus towns, villages, castles, dwellings and
+      keeps (one map per floor), with typed/named POIs and live party position, following play order
+- [x] Extend to **Wasteland**: the desert overworld plus every town and building (42 maps from the
+      pristine `MASTER1`/`MASTER2` disks), with **clickable overworld↔sub-map POI navigation** and
+      **dual position markers** (current map + return point)
+- [ ] Extend to **Ultima VI**: needs the LZW map decoder (a codec-workbench target); its character
+      stats are already read, but the compressed, object-based world map is not yet baked
 
 For **Ultima I**, town/castle interiors aren't worth exporting (no standalone layout files — they
 live in the executable) and its dungeons are first-person and procedurally generated, so the
@@ -339,45 +348,63 @@ is where the **Phase 9 codec workbench** first gets pulled in.
 
 ## Phase 9 — Kit Tools (CLI dev tools)
 
-The rest of the "kit": focused **researcher/dev-facing** binaries that share `crates/core`
+**Status: the five tools are built** — the `fringe-retro-kit` binary is the headline of
+**v0.6.0**. Focused **researcher/dev-facing** commands that share `crates/core`
 (`fringe-retro-core`) but carry complexity we deliberately keep out of the polished
-`fringe-retro` app. These are our own reverse-engineering accelerators for **save formats** (the
-map browser is Phase 8) — the kind of binary spelunking done when mapping a new game.
+`fringe-retro` app: our reverse-engineering accelerators for **save formats** (the map browser
+is Phase 8). The reusable algorithms live in `crates/core` (`codec`, `scan`, `diff`); the kit
+is a thin CLI over them. Full reference: [docs/commands/fringe-retro-kit.md](docs/commands/fringe-retro-kit.md).
 
-**Design rule:** build them **CLI-first with plain-text / `--json` output** so they're
-scriptable, diffable, and usable in automated / AI-assisted sessions. A TUI, if any, is a thin
-shell over that text-capable core — never the only interface.
+**Design rule:** built **CLI-first with plain-text / `--json` output** so they're scriptable,
+diffable, and usable in automated / AI-assisted sessions.
 
-- **Schema explorer / spelunker** — packages the manual RE workflow into repeatable commands,
-  and becomes the authoring front-end for the Phase 10 data-driven schema files (it emits what
-  the main tool consumes). Core primitives:
-  - **Value finder** — locate a known value (e.g. `gold = 12450`) across encodings
-    (u16 LE/BE, u24, BCD, ASCII) → candidate offsets.
-  - **Guided diff** — "save A = before, save B = after I raised STR 15→30" → highlight the
-    changed bytes and infer the encoding from the delta (builds on core's byte `diff`).
-  - **Hypothesis overlay** — render a tentative `Field` table over a buffer live, tuning
-    offsets until values read sensibly.
-  - **Stride/record detector** — autocorrelation to find repeating record sizes (rosters,
-    party arrays).
-  - **Schema export** — dump a confirmed layout in the eventual schema format.
-- **Codec workbench / cipher lab** — decrypt/decompress a blob, dump plaintext, re-encrypt,
-  and verify a byte-for-byte round-trip; plus a **checksum solver** that tries candidate
-  algorithms against known-good blocks (the carry-fold-vs-negated-sum detective work from
-  Wasteland, automated). Reusable for MSQ, U6 LZW, Daggerfall RLE, Fallout, etc. (First earns
-  its keep decoding Ultima VI's compressed map in Phase 8.)
-- **Live watch / logger** — a research-grade `watch`: monitor a save while playing and log
-  timestamped byte deltas, to correlate in-game actions with byte changes. Raw and
-  session-oriented, vs. the main tool's player-facing semantic `watch`/`diff`.
-- **String ripper** — extract embedded text under multiple encodings (ASCIIZ, packed 5-bit,
-  …) to find name/item/spell tables and dialogue — often the fastest way to anchor in an
-  unknown file.
-- **Archive / container extractor** — list/extract game container files (`.DAT`, GOB, Unity
-  assetbundles) for formats where the save isn't a bare file (e.g. Bard's Tale remaster).
+- [x] **Codec workbench** (`codec`) — `decode` (rolling-XOR cipher, Wasteland Huffman, EXEPACK),
+      `roundtrip` (verify a symmetric codec byte-for-byte), and a **checksum solver** (`checksum`)
+      that tries candidate algorithms against a known value (the carry-fold-vs-negated-sum detective
+      work from Wasteland, automated). Codecs live in `core::codec`, shared with the games.
+- [x] **String ripper** (`strings`) — `ascii` (printable runs with offsets) and `five-bit`
+      (Wasteland's 5-bit packed strings) to find name/item/spell tables and dialogue.
+- [x] **Schema explorer** (`schema`) — the mechanical RE loop as repeatable commands:
+  - [x] **Value finder** (`find`) — locate a known value across widths/endianness (byte/u16/u24/u32,
+        LE/BE) → candidate offsets.
+  - [x] **Guided diff** (`diff`) — "save A = before, save B = after I raised STR 15→30" → the changed
+        byte runs (builds on core's byte `diff`).
+  - [x] **Stride detector** (`stride`) — the gaps between repeated values, to reveal record sizes
+        (rosters, party arrays).
+  - [ ] **Hypothesis overlay** — render a tentative `Field` table over a buffer live, tuning offsets
+        until values read sensibly (deferred).
+  - [ ] **Schema export** — dump a confirmed layout in a schema file format (deferred; blocked on the
+        Phase 10 data-driven-schema decision).
+- [x] **Live watch / logger** (`watch`) — poll a save while playing and log timestamped byte deltas
+      (text or streamable JSONL), to correlate in-game actions with byte changes.
+- [x] **Archive / container carver** (`carve`) — split a container into its member blocks at a magic
+      signature (e.g. Wasteland's back-to-back `msq` blocks), with an optional Wasteland **MSQ
+      decrypt** (`--decrypt`) and **savegame extraction** (`--savegame-only`, which finds and decrypts
+      the party/character block among the map blocks).
 
-Sequencing (earn each abstraction, same discipline as Phase 3): schema explorer first (it
-multiplies every future game), then the codec workbench when an encrypted/compressed format
-forces it (including Ultima VI's map in Phase 8). The string ripper and archive extractor can
-start as explorer subcommands and graduate to their own binaries if they grow.
+### Applying the kit — Ultima improvements
+
+Now that the workbench exists, circle back and use it to sharpen the games we already support
+(mostly the Ultimas), bringing their map browser and field coverage up to the parity Wasteland
+reached.
+
+- [ ] **Clickable POI navigation in the map browser** for the Ultimas — click an overworld
+      town / castle / dungeon to jump into its baked sub-map (and link back out), as Wasteland's
+      map already does.
+- [ ] **Dual position markers** (current location + return / entry point) where a game records
+      both, matching Wasteland's overworld + sub-map markers.
+- [ ] **Ultima VI world map** — reverse-engineer the LZW-compressed, object-based map with the
+      codec workbench so Ultima VI joins the map browser (today only its character stats are read).
+- [ ] **Confirm tentative fields** across the Ultimas with `schema find` / `schema diff`
+      (before/after in-game edits), promoting `tentative: true` fields to confirmed.
+- [ ] **Ultima VI objects / inventory / spells** — use the schema explorer + string ripper to map
+      more of the object system beyond party stats and names.
+- [ ] **Audit POI / location tables** with the string ripper, confirming every town, castle, and
+      dungeon is correctly named and typed across games.
+
+Sequencing note (kept from the original plan): each tool earned its abstraction as a real
+format forced it — the codec workbench for Wasteland's cipher/checksum and EXEPACK, the string
+ripper and carver for Wasteland's `msq` containers and packed strings.
 
 ---
 
@@ -395,8 +422,12 @@ collected here so they don't get lost inside earlier completed phases.
 - [ ] **Reusable codec pipeline.** Factor the per-game container logic (currently inlined —
       e.g. Wasteland's MSQ decrypt/encrypt + block checksum) into a `Transform` pipeline in
       front of the schema, with a symmetric write path, so a second MSQ-family game reuses it.
-- [ ] **Pluggable string codecs** beyond ASCIIZ/BCD, if a future game needs one (e.g. a packed
-      5-bit table).
+      *Groundwork landed in Phase 9:* the shared algorithms (rolling-XOR cipher, Wasteland Huffman,
+      EXEPACK, checksums) now live in `crates/core/src/codec/` and are used by both the games and the
+      kit; the remaining work is composing them into a declarative pipeline.
+- [ ] **Pluggable string codecs** beyond ASCIIZ/BCD, if a future game needs one. *Partially done:*
+      the packed 5-bit decoder now lives in `core::codec::strings5` (used by the map browser and the
+      kit's string ripper); exposing it as a schema `FieldKind` is the remaining step.
 
 **Open decision — schema / config format (do NOT lock yet).** The abstraction is now proven as
 a Rust type; the remaining question is whether the field schema graduates to a hand-writable

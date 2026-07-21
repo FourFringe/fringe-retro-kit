@@ -42,15 +42,22 @@ easy packaging, and long-term maintainability.
 
 ### Project structure — Cargo workspace
 
-Two crates (a *crate* is Rust's unit of compilation — a library or binary package):
+Four crates (a *crate* is Rust's unit of compilation — a library or binary package):
 
-- **`crates/core`** — library crate (`fringe-retro-core`): all parsing, editing, and
-  backup logic. Unit-testable without any UI.
-- **`crates/cli`** — binary crate (`fringe-retro`): a thin command-line wrapper over the
-  core.
+- **`crates/core`** — library crate (`fringe-retro-core`): all parsing, editing, backup, and
+  the reusable codec/scan primitives. Unit-testable without any UI.
+- **`crates/cli`** — binary crate (`fringe-retro`): the player-facing command-line tool and
+  TUI, a thin wrapper over the core.
+- **`crates/map`** — binary crate (`fringe-retro-map`): the world-map browser (offline tile
+  baker + local server).
+- **`crates/kit`** — binary crate (`fringe-retro-kit`): the reverse-engineering workbench
+  (codec lab, string ripper, schema explorer, live logger, container carver).
 
-Rationale: precise unit testing of the risky logic, a permanent headless CLI, and future
-reuse of the same core by a TUI (or GUI).
+The two auxiliary binaries (`map`, `kit`) share `crates/core` but deliberately keep their
+complexity — proprietary map decoding, byte-level spelunking — out of the polished editor.
+
+Rationale: precise unit testing of the risky logic, a permanent headless CLI, and reuse of
+the same core across the TUI, the map browser, and the kit.
 
 ### Interface — CLI first, then TUI
 
@@ -183,8 +190,11 @@ container/crypto concerns that data can't express.
 all editable via both the CLI and the TUI. The field-schema engine
 (`crates/core/src/schema.rs`) has been extracted and the Ultimas run on it; Wasteland adds
 an MSQ codec (decrypt + re-encrypt with the game's own checksum), and Ultima VI reads party
-stats from the uncompressed `OBJLIST`. The full `Transform`-pipeline codec layer and
-user-authored schema files remain the destination, not yet where we are.
+stats from the uncompressed `OBJLIST`. The reusable codec pieces have begun to consolidate:
+`crates/core/src/codec/` now holds the shared cipher, decompressors, checksums, and string
+codecs (used by both the games and the `fringe-retro-kit` workbench), and
+`crates/core/src/scan.rs` the byte-scanning primitives. The full `Transform`-pipeline codec
+layer and user-authored schema files remain the destination, not yet where we are.
 
 ---
 

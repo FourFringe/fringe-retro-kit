@@ -18,13 +18,14 @@ demands it (e.g. Wasteland's encryption).
 
 ## Features
 
-- Native Rust application; single binary
+- Native Rust; three focused binaries — the save editor, the map browser, and the RE kit
 - A command-line interface **and** an interactive terminal UI (Ratatui)
 - Automatic game discovery (GOG + Steam on macOS) plus a simple game library manifest
 - Inspect and edit character sheets field-by-field; the TUI adds a section-grouped editor
 - Safe editing with automatic backups (unknown bytes preserved; writes are byte-faithful)
 - A curated Save Library alongside automatic backup retention
 - A local **world-map browser** (`fringe-retro-map`): bake a game's world maps into web tiles and explore them in your browser, with your party's live position (Ultima I–V)
+- A **reverse-engineering workbench** (`fringe-retro-kit`): CLI tools — codec/cipher lab, string ripper, schema explorer, live byte logger, and container carver — for mapping new save formats
 - Cross-platform: fully tested on macOS; Linux and Windows binaries published as built-but-untested
 - Data-driven game definitions planned (reusable parsers + per-game schema data; simple formats become user-authorable)
 - Community-friendly, MIT-licensed architecture
@@ -62,13 +63,15 @@ curl -fsSL https://raw.githubusercontent.com/FourFringe/fringe-retro-kit/main/pa
 
 **Windows:** download the `.zip` for `x86_64-pc-windows-msvc` from the
 [latest release](https://github.com/FourFringe/fringe-retro-kit/releases/latest), extract it,
-and put `fringe-retro.exe` and `fringe-retro-map.exe` somewhere on your `PATH`.
+and put `fringe-retro.exe`, `fringe-retro-map.exe`, and `fringe-retro-kit.exe` somewhere on your
+`PATH`.
 
 **From source** (any platform with a Rust toolchain):
 
 ```sh
 cargo install --path crates/cli   # fringe-retro (save-file tools)
 cargo install --path crates/map   # fringe-retro-map (world-map browser)
+cargo install --path crates/kit   # fringe-retro-kit (reverse-engineering workbench)
 ```
 
 ---
@@ -95,7 +98,32 @@ play. Everything runs locally — no internet required, and no game assets are c
 redistributed.
 
 ---
+## Kit tools
 
+**`fringe-retro-kit`** is the project's reverse-engineering workbench — the low-level tools used
+to *understand* a save format in the first place, kept separate from the polished editor. It
+shares `crates/core`, so a codec proven here is the same one the player-facing tools use. Every
+command is CLI-first with a `--json` mode, so the workflow is scriptable and repeatable.
+
+```sh
+# Unpack a packed executable, then rip its strings to anchor yourself:
+fringe-retro-kit codec decode WL.EXE --codec exepack --out wl.bin
+fringe-retro-kit strings ascii wl.bin --min 5
+
+# Carve a container into blocks (decrypting Wasteland's savegame block):
+fringe-retro-kit carve GAME1 --savegame-only --out ./blocks
+
+# Pin a known value to an offset, then watch bytes change live as you play:
+fringe-retro-kit schema find blocks/GAME1_0000.bin --value 500 --width u24
+fringe-retro-kit watch GAME1 --json
+```
+
+The five tool groups are the **codec workbench** (`codec`), the **string ripper** (`strings`),
+the **schema explorer** (`schema`), the **live logger** (`watch`), and the **container carver**
+(`carve`). See the [`fringe-retro-kit` command reference](docs/commands/fringe-retro-kit.md) for
+the full details.
+
+---
 ## Planned Game Support
 
 Implemented:
@@ -149,7 +177,10 @@ It exists solely to help users inspect, preserve, and edit their own save files.
 
 ## Documentation
 
-- [COMMANDS.md](COMMANDS.md) — the command reference (what the tool can do today)
+- [COMMANDS.md](COMMANDS.md) — the command reference hub, with a per-binary page for
+  [`fringe-retro`](docs/commands/fringe-retro.md),
+  [`fringe-retro-map`](docs/commands/fringe-retro-map.md), and
+  [`fringe-retro-kit`](docs/commands/fringe-retro-kit.md)
 - [docs/formats/](docs/formats/README.md) — byte-level file-format documentation: character
   saves, world maps, and tile graphics (incl. original Ultima II research)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — decisions we've committed to
