@@ -16,6 +16,7 @@
 
 use std::path::Path;
 
+use crate::codec;
 use crate::schema::{self, Endian, Field, FieldKind, Variants};
 use crate::{Error, Result};
 
@@ -328,22 +329,21 @@ pub fn decrypt(block: &[u8]) -> Result<Vec<u8>> {
             "not an MSQ block (missing 'msq' header)".into(),
         ));
     }
-    let mut key = block[4] ^ block[5];
-    let mut out = Vec::with_capacity(block.len() - BLOCK_PREFIX_LEN);
-    for &cipher in &block[BLOCK_PREFIX_LEN..] {
-        out.push(cipher ^ key);
-        key = key.wrapping_add(KEY_STEP);
-    }
-    Ok(out)
+    let seed = block[4] ^ block[5];
+    Ok(codec::xor::rolling(
+        &block[BLOCK_PREFIX_LEN..],
+        seed,
+        KEY_STEP,
+    ))
 }
 
 /// Encrypt a decrypted MSQ block `body` for the given `disk` (0 or 1), producing a full
 /// block (`msqN` header, the two checksum-seed bytes, then the ciphertext).
 ///
-/// The two seed bytes store the block checksum (see [`block_checksum`]); the initial key is
-/// `seed_lo ^ seed_hi`, matching [`decrypt`].
+/// The two seed bytes store the block checksum ([`codec::checksum::wasteland_msq`]); the initial
+/// rolling-XOR key is `seed_lo ^ seed_hi`, matching [`decrypt`].
 pub fn encrypt(body: &[u8], disk: u8) -> Vec<u8> {
-    let checksum = block_checksum(body);
+    let checksum = codec::checksum::wasteland_msq(body);
     let seed_lo = (checksum & 0xFF) as u8;
     let seed_hi = (checksum >> 8) as u8;
 
@@ -352,31 +352,8 @@ pub fn encrypt(body: &[u8], disk: u8) -> Vec<u8> {
     out.push(b'0' + disk);
     out.push(seed_lo);
     out.push(seed_hi);
-
-    let mut key = seed_lo ^ seed_hi;
-    for &plain in body {
-        out.push(plain ^ key);
-        key = key.wrapping_add(KEY_STEP);
-    }
+    out.extend(codec::xor::rolling(body, seed_lo ^ seed_hi, KEY_STEP));
     out
-}
-
-/// Wasteland's block checksum, stored (little-endian) as the two seed bytes.
-///
-/// Bytes are summed into a 16-bit accumulator; on each 16-bit overflow the carry is folded
-/// back as `+0x100` (an artifact of the original game's byte-wise add-with-carry). The seed
-/// is the two's-complement negation, so that a reader subtracting each byte from zero ends
-/// back at the stored value. (`wlandsuite` uses a plain negated sum and is therefore *not*
-/// byte-faithful; this reproduces the original game's saves exactly.)
-fn block_checksum(body: &[u8]) -> u16 {
-    let mut acc: u32 = 0;
-    for &b in body {
-        acc += b as u32;
-        if acc > 0xFFFF {
-            acc = (acc & 0xFFFF) + 0x100;
-        }
-    }
-    (0u32.wrapping_sub(acc) & 0xFFFF) as u16
 }
 
 fn character_base(index: usize) -> usize {
@@ -835,14 +812,6 @@ mod tests {
         assert_eq!(&block[0..4], b"msq0");
         assert_eq!(block.len(), SAVEGAME_BLOCK_LEN);
         assert_eq!(decrypt(&block).unwrap(), body);
-    }
-
-    #[test]
-    fn block_checksum_matches_the_game() {
-        // No 16-bit overflow: a plain negated sum. sum(1,2,3)=6 -> -6.
-        assert_eq!(block_checksum(&[1, 2, 3]), 0xFFFA);
-        // Overflows 16 bits, exercising the carry fold (golden value from a real GAME1).
-        assert_eq!(block_checksum(&[0xFF; 300]), 0xD42C);
     }
 
     /// Build a synthetic GAME1 with one occupied character in slot 0.

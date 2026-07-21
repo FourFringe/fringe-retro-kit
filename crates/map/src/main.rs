@@ -7,7 +7,6 @@ mod bundle;
 mod cga;
 mod config;
 mod ega;
-mod huffman;
 mod lzw;
 mod serve;
 mod tilemap;

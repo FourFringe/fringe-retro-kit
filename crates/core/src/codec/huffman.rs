@@ -1,14 +1,13 @@
-//! Wasteland's Huffman decompression, used by both its map tile-maps and its `ALLHTDS` tile
-//! graphics. Distinct from the Ultima 6-style LZW in [`crate::lzw`].
+//! Wasteland's Huffman decompression, used by its map tile-maps and its `ALLHTDS` tile graphics.
 //!
 //! The compressed stream is a serialized Huffman tree followed by the coded symbols, read
 //! **MSB-first**. A tree node is one bit: `0` = internal (then the left subtree, one discarded
 //! separator bit, then the right subtree), `1` = leaf (then an 8-bit payload byte). Decoding walks
-//! the tree from the root — `0` left, `1` right — until a leaf. The number of output bytes is known
-//! from context (the caller passes `count`); the stream itself carries no length. This mirrors
+//! the tree from the root — `0` left, `1` right — until a leaf. The output length is known from
+//! context (the caller passes `count`); the stream carries no length. Mirrors
 //! `HuffmanTree`/`HuffmanInputStream` in Klaus Reimer's `wlandsuite`.
 
-use anyhow::{ensure, Result};
+use crate::{Error, Result};
 
 /// An MSB-first bit reader over a byte slice.
 struct BitReader<'a> {
@@ -26,7 +25,9 @@ impl<'a> BitReader<'a> {
 
     fn bit(&mut self) -> Result<u8> {
         let byte = self.pos / 8;
-        ensure!(byte < self.data.len(), "Huffman stream ran out of bits");
+        if byte >= self.data.len() {
+            return Err(Error::Format("Huffman stream ran out of bits".into()));
+        }
         let b = (self.data[byte] >> (7 - (self.pos % 8))) & 1;
         self.pos += 1;
         Ok(b)
@@ -64,7 +65,9 @@ fn load_node(bits: &mut BitReader) -> Result<Node> {
 /// `data`. Returns the decompressed bytes and the byte offset just past the consumed input (so a
 /// caller reading a sequence of blocks can continue from there).
 pub fn decompress(data: &[u8], start: usize, count: usize) -> Result<(Vec<u8>, usize)> {
-    ensure!(start < data.len(), "Huffman start offset out of range");
+    if start >= data.len() {
+        return Err(Error::Format("Huffman start offset out of range".into()));
+    }
     let mut bits = BitReader::new(data, start);
     let root = load_node(&mut bits)?;
     let mut out = Vec::with_capacity(count);

@@ -5,6 +5,7 @@
 //! build on the same engine.
 
 pub mod backup;
+pub mod codec;
 pub mod diff;
 pub mod games;
 pub mod save;

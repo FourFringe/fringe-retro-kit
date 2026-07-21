@@ -30,8 +30,8 @@ use image::RgbImage;
 
 use crate::bundle::World;
 use crate::ega::EGA_PALETTE;
-use crate::huffman;
 use crate::tilemap;
+use fringe_retro_core::codec::{huffman, xor};
 
 const GAME: &str = "wasteland";
 /// One region groups every map so the browser lists them together.
@@ -402,17 +402,9 @@ fn parse_map(block: &[u8]) -> Option<Map> {
 }
 
 /// Decrypt the first `n` bytes of a block body's ciphertext (which begins after the two seed
-/// bytes) with the rolling-XOR cipher.
+/// bytes) with the shared rolling-XOR cipher (seed = `body[0] ^ body[1]`).
 fn rolling_xor(body: &[u8], n: usize) -> Vec<u8> {
-    let mut key = body[0] ^ body[1];
-    body[2..2 + n]
-        .iter()
-        .map(|&c| {
-            let plain = c ^ key;
-            key = key.wrapping_add(KEY_STEP);
-            plain
-        })
-        .collect()
+    xor::rolling(&body[2..2 + n], body[0] ^ body[1], KEY_STEP)
 }
 
 /// Determine a map's edge length (64 or 32) from its decrypted bytes, or `None` if neither fits.
