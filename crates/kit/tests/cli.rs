@@ -250,3 +250,104 @@ fn carve_extracts_blocks_to_files() {
         assert!(bytes.starts_with(b"msq"));
     }
 }
+
+#[test]
+fn carve_decrypt_undoes_the_msq_cipher() {
+    // A minimal MSQ block: "msq0" header, seed bytes 00 00 (so the initial rolling-XOR key is 0),
+    // then the ciphertext of "HI" (0x48 unchanged, 0x49 ^ 0x1f = 0x56).
+    let f = file_with(b"msq0\x00\x00\x48\x56");
+    let dir = tempfile::tempdir().unwrap();
+    kit()
+        .args(["carve"])
+        .arg(f.path())
+        // --magic defaults to msq under --decrypt.
+        .args(["--decrypt", "--out"])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[MSQ decrypt]"))
+        .stdout(predicate::str::contains("-> decrypted 00000002"));
+
+    // The single extracted block holds the decrypted body "HI".
+    let entries: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(std::fs::read(entries[0].path()).unwrap(), b"HI");
+}
+
+#[test]
+fn carve_decrypt_rejects_non_msq_magic() {
+    let f = file_with(b"fooBAR");
+    kit()
+        .args(["carve"])
+        .arg(f.path())
+        .args(["--magic", "foo", "--decrypt"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("MSQ"));
+}
+
+/// Build a valid Wasteland savegame MSQ block: `msq0` + seed `00 00`, then the rolling-XOR
+/// ciphertext of a 0x1200-byte body carrying a valid party order (1..=7) at bytes 1..8.
+fn savegame_block() -> Vec<u8> {
+    let mut body = vec![0u8; 0x1200];
+    for i in 0..7 {
+        body[1 + i] = (i + 1) as u8;
+    }
+    let mut key = 0u8;
+    let cipher: Vec<u8> = body
+        .iter()
+        .map(|&b| {
+            let c = b ^ key;
+            key = key.wrapping_add(0x1f);
+            c
+        })
+        .collect();
+    let mut block = b"msq0\x00\x00".to_vec();
+    block.extend(cipher);
+    block
+}
+
+#[test]
+fn carve_marks_the_savegame_block() {
+    // A savegame block followed by a small non-savegame block.
+    let mut data = savegame_block();
+    data.extend_from_slice(b"msq0\x00\x00\x48\x56");
+    let f = file_with(&data);
+    kit()
+        .args(["carve"])
+        .arg(f.path())
+        .arg("--decrypt")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 block(s)"))
+        .stdout(predicate::str::contains("<= savegame"));
+}
+
+#[test]
+fn carve_savegame_only_isolates_the_party_block() {
+    let mut data = savegame_block();
+    data.extend_from_slice(b"msq0\x00\x00\x48\x56");
+    let f = file_with(&data);
+    let dir = tempfile::tempdir().unwrap();
+    kit()
+        .args(["carve"])
+        .arg(f.path())
+        .args(["--savegame-only", "--out"])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 block(s)"));
+
+    // Exactly the savegame block is written; its decrypted body carries the party order.
+    let entries: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 1);
+    let body = std::fs::read(entries[0].path()).unwrap();
+    assert_eq!(body.len(), 0x1200);
+    assert_eq!(&body[1..8], &[1, 2, 3, 4, 5, 6, 7]);
+}

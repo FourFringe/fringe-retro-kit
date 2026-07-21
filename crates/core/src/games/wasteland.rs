@@ -450,6 +450,16 @@ fn is_savegame_body(body: &[u8]) -> bool {
     true
 }
 
+/// Whether `block` (a raw MSQ block, `msqN` header included) is the Wasteland *savegame* block:
+/// the fixed-size block whose decrypted body holds a valid party marching order. Lets a caller
+/// pick the savegame out of a `GAME1` file's many similarly-headed map blocks.
+pub fn is_savegame_block(block: &[u8]) -> bool {
+    block.len() == SAVEGAME_BLOCK_LEN
+        && decrypt(block)
+            .map(|body| is_savegame_body(&body))
+            .unwrap_or(false)
+}
+
 /// A parsed Wasteland `GAME1` save.
 #[derive(Clone)]
 pub struct WastelandSave {
@@ -812,6 +822,23 @@ mod tests {
         assert_eq!(&block[0..4], b"msq0");
         assert_eq!(block.len(), SAVEGAME_BLOCK_LEN);
         assert_eq!(decrypt(&block).unwrap(), body);
+    }
+
+    #[test]
+    fn identifies_the_savegame_block() {
+        // Right length, with a valid party order (1..=7) in the header -> savegame.
+        let mut body = vec![0u8; SAVEGAME_BODY_LEN];
+        for i in 0..7 {
+            body[1 + i] = (i + 1) as u8;
+        }
+        assert!(is_savegame_block(&encrypt(&body, 0)));
+        // Right length but an invalid party order (all 9s) -> not the savegame.
+        assert!(!is_savegame_block(&encrypt(
+            &vec![9u8; SAVEGAME_BODY_LEN],
+            0
+        )));
+        // Wrong size -> not the savegame.
+        assert!(!is_savegame_block(b"msq0\x00\x00rest"));
     }
 
     /// Build a synthetic GAME1 with one occupied character in slot 0.
