@@ -9,6 +9,7 @@ pub mod codec;
 pub mod diff;
 pub mod games;
 pub mod save;
+pub mod scan;
 pub mod schema;
 
 use thiserror::Error;

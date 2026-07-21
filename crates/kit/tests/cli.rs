@@ -120,3 +120,46 @@ fn ascii_ripper_emits_json_with_absolute_offsets() {
         .stdout(predicate::str::contains("\"offset\": 4"))
         .stdout(predicate::str::contains("\"text\": \"ROM\""));
 }
+
+#[test]
+fn schema_find_locates_a_value_in_both_orders() {
+    // 500 = 0x01f4: little-endian "f4 01" at offset 2, big-endian "01 f4" at offset 6.
+    let f = file_with(b"\xAA\xBB\xf4\x01\xCC\xDD\x01\xf4");
+    kit()
+        .args(["schema", "find"])
+        .arg(f.path())
+        .args(["--value", "500", "--width", "u16", "--endian", "both"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("as u16 le"))
+        .stdout(predicate::str::contains("  00000002"))
+        .stdout(predicate::str::contains("as u16 be"))
+        .stdout(predicate::str::contains("  00000006"));
+}
+
+#[test]
+fn schema_diff_reports_changed_runs() {
+    let a = file_with(b"ABCDEFGH");
+    let b = file_with(b"ABxyEFGH");
+    kit()
+        .args(["schema", "diff"])
+        .arg(a.path())
+        .arg(b.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("00000002  43 44 -> 78 79"))
+        .stdout(predicate::str::contains("1 run(s), 2 byte(s) changed"));
+}
+
+#[test]
+fn schema_stride_surfaces_the_record_spacing() {
+    let f = file_with(b"\x00XX\x00YY\x00ZZ\x00");
+    kit()
+        .args(["schema", "stride"])
+        .arg(f.path())
+        .args(["--value", "0", "--width", "byte"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("likely stride"))
+        .stdout(predicate::str::contains("3 (0x3) x3"));
+}

@@ -2,9 +2,10 @@
 //!
 //! This binary is kept separate from the player-facing `fringe-retro` (save editor) and
 //! `fringe-retro-map` (map browser) tools: it holds the workbench used to *understand* a
-//! format in the first place. The tools so far are the codec workbench (`codec`) and the
-//! string ripper (`strings`).
+//! format in the first place. The tools so far are the codec workbench (`codec`), the
+//! string ripper (`strings`), and the schema explorer (`schema`).
 
+mod explorer;
 mod ripper;
 mod util;
 mod workbench;
@@ -34,11 +35,17 @@ enum Command {
         #[command(subcommand)]
         command: ripper::Command,
     },
+    /// Schema explorer: find values, diff saves, and detect record strides.
+    Schema {
+        #[command(subcommand)]
+        command: explorer::Command,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Codec { command } => workbench::run(command),
         Command::Strings { command } => ripper::run(command),
+        Command::Schema { command } => explorer::run(command),
     }
 }
