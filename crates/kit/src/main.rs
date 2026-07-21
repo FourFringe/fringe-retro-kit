@@ -3,8 +3,10 @@
 //! This binary is kept separate from the player-facing `fringe-retro` (save editor) and
 //! `fringe-retro-map` (map browser) tools: it holds the workbench used to *understand* a
 //! format in the first place. The tools so far are the codec workbench (`codec`), the
-//! string ripper (`strings`), the schema explorer (`schema`), and the live watch/logger (`watch`).
+//! string ripper (`strings`), the schema explorer (`schema`), the live watch/logger (`watch`),
+//! and the archive extractor (`carve`).
 
+mod carver;
 mod explorer;
 mod ripper;
 mod util;
@@ -43,6 +45,8 @@ enum Command {
     },
     /// Live watch/logger: poll a save file and log which bytes change as the game runs.
     Watch(watchdog::WatchArgs),
+    /// Archive extractor: carve a container into its member blocks by a magic signature.
+    Carve(carver::CarveArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -51,5 +55,6 @@ fn main() -> anyhow::Result<()> {
         Command::Strings { command } => ripper::run(command),
         Command::Schema { command } => explorer::run(command),
         Command::Watch(args) => watchdog::run(args),
+        Command::Carve(args) => carver::run(args),
     }
 }

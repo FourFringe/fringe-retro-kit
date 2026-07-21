@@ -30,6 +30,38 @@ pub fn gap_histogram(offsets: &[usize]) -> Vec<(usize, usize)> {
     histogram
 }
 
+/// One carved segment of a container: where it starts, how long it is, and whether it begins with
+/// the magic signature (the leading preamble before the first magic does not).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Segment {
+    pub offset: usize,
+    pub len: usize,
+    pub has_magic: bool,
+}
+
+/// Split `data` into segments delimited by each occurrence of `magic`. Every magic starts a new
+/// segment running up to the next magic (or end of data); any bytes before the first magic form a
+/// leading preamble segment (`has_magic = false`). An empty `magic`, or data with no match, yields
+/// a single whole-buffer segment. Empty segments are omitted.
+pub fn carve(data: &[u8], magic: &[u8]) -> Vec<Segment> {
+    let mut bounds: Vec<usize> = std::iter::once(0).chain(find_bytes(data, magic)).collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+
+    let mut segments = Vec::new();
+    for (i, &start) in bounds.iter().enumerate() {
+        let end = bounds.get(i + 1).copied().unwrap_or(data.len());
+        if end > start {
+            segments.push(Segment {
+                offset: start,
+                len: end - start,
+                has_magic: !magic.is_empty() && data[start..].starts_with(magic),
+            });
+        }
+    }
+    segments
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,5 +87,59 @@ mod tests {
         // Gaps: 2,2,4,4 (equal counts) -> smaller gap first.
         let offsets = [0usize, 2, 4, 8, 12];
         assert_eq!(gap_histogram(&offsets), vec![(2, 2), (4, 2)]);
+    }
+
+    #[test]
+    fn carve_splits_at_each_magic() {
+        // Two "msq" blocks back to back.
+        let data = b"msqABmsqCDE";
+        assert_eq!(
+            carve(data, b"msq"),
+            vec![
+                Segment {
+                    offset: 0,
+                    len: 5,
+                    has_magic: true,
+                },
+                Segment {
+                    offset: 5,
+                    len: 6,
+                    has_magic: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn carve_keeps_a_leading_preamble() {
+        // Junk before the first magic becomes a preamble segment.
+        let data = b"XXmsqAB";
+        assert_eq!(
+            carve(data, b"msq"),
+            vec![
+                Segment {
+                    offset: 0,
+                    len: 2,
+                    has_magic: false,
+                },
+                Segment {
+                    offset: 2,
+                    len: 5,
+                    has_magic: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn carve_without_a_match_yields_one_segment() {
+        assert_eq!(
+            carve(b"hello", b"zzz"),
+            vec![Segment {
+                offset: 0,
+                len: 5,
+                has_magic: false,
+            }]
+        );
     }
 }

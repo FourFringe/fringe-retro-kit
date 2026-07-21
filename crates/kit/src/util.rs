@@ -29,6 +29,33 @@ pub fn usize_arg(s: &str) -> Result<usize, String> {
     usize::try_from(v).map_err(|_| format!("'{s}' is too large"))
 }
 
+/// A clap value parser for a byte string: literal ASCII (e.g. `msq`) or `0x`-prefixed hex pairs
+/// (e.g. `0x6d7371`). Used for signatures/magic numbers.
+pub fn bytes_arg(s: &str) -> Result<Vec<u8>, String> {
+    match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(hex) => {
+            if hex.is_empty() || hex.len() % 2 != 0 {
+                return Err(format!(
+                    "hex magic '{s}' must have an even, non-zero number of digits"
+                ));
+            }
+            (0..hex.len())
+                .step_by(2)
+                .map(|i| {
+                    u8::from_str_radix(&hex[i..i + 2], 16)
+                        .map_err(|_| format!("'{s}' contains a non-hex digit"))
+                })
+                .collect()
+        }
+        None => {
+            if s.is_empty() {
+                return Err("magic must not be empty".to_string());
+            }
+            Ok(s.as_bytes().to_vec())
+        }
+    }
+}
+
 /// Format `data` as a canonical hex dump: `offset  16 hex bytes  |ascii|`.
 pub fn hexdump(data: &[u8]) -> String {
     let mut out = String::new();
@@ -82,5 +109,14 @@ mod tests {
         let dump = hexdump(b"AB\x01");
         assert!(dump.starts_with("00000000  41 42 01"));
         assert!(dump.trim_end().ends_with("|AB.|"));
+    }
+
+    #[test]
+    fn parses_magic_as_ascii_or_hex() {
+        assert_eq!(bytes_arg("msq").unwrap(), b"msq");
+        assert_eq!(bytes_arg("0x6d7371").unwrap(), b"msq");
+        assert!(bytes_arg("0x6d737").is_err()); // odd length
+        assert!(bytes_arg("0xzz").is_err()); // non-hex
+        assert!(bytes_arg("").is_err()); // empty
     }
 }

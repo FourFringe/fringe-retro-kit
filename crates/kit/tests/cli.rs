@@ -204,3 +204,49 @@ fn watch_errors_on_missing_file() {
         .failure()
         .stderr(predicate::str::contains("reading"));
 }
+
+#[test]
+fn carve_lists_blocks_by_magic() {
+    // Two "msq" blocks back to back.
+    let f = file_with(b"msq0AAAAmsq1BBBB");
+    kit()
+        .args(["carve"])
+        .arg(f.path())
+        .args(["--magic", "msq"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 block(s)"))
+        .stdout(predicate::str::contains(
+            "#0000  offset 00000000  len 00000008",
+        ))
+        .stdout(predicate::str::contains(
+            "#0001  offset 00000008  len 00000008",
+        ))
+        .stdout(predicate::str::contains("dry run"));
+}
+
+#[test]
+fn carve_extracts_blocks_to_files() {
+    let f = file_with(b"msq0AAAAmsq1BBBB");
+    let dir = tempfile::tempdir().unwrap();
+    kit()
+        .args(["carve"])
+        .arg(f.path())
+        // Hex magic form, exercising the 0x parser.
+        .args(["--magic", "0x6d7371", "--out"])
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("wrote 2 file(s)"));
+
+    let entries: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 2);
+    // Each carved block begins with the magic.
+    for entry in entries {
+        let bytes = std::fs::read(entry.path()).unwrap();
+        assert!(bytes.starts_with(b"msq"));
+    }
+}
