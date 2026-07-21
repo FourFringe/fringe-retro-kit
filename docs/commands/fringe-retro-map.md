@@ -12,7 +12,8 @@ game-agnostic. It reads the same `config.toml` as `fringe-retro`
 plus a `[map]` `export_dir` where baked tiles are written.
 
 Currently supported: **Ultima I**, **Ultima II**, **Ultima III**, **Ultima IV**, **Ultima V**,
-and **Wasteland**. More worlds and games are planned; see [ROADMAP.md](../../ROADMAP.md), Phase 8.
+**Ultima VI**, and **Wasteland**. More worlds and games are planned; see
+[ROADMAP.md](../../ROADMAP.md), Phase 8.
 
 Legend: ✅ implemented · 🔷 planned (not yet available)
 
@@ -54,7 +55,7 @@ fringe-retro-map export [--game <id>] [--input <dir>] [--out <root>] [--png <fil
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--game` | `ultima1` | Which game to export (`ultima1`–`ultima5`, `wasteland`). |
+| `--game` | `ultima1` | Which game to export (`ultima1`–`ultima6`, `wasteland`). |
 | `--input` | the game's `save_dir` from `config.toml` | Directory holding the game's data (e.g. `MAP.BIN`). |
 | `--out`, `-o` | `[map] export_dir` from `config.toml` | Export root; the bundle lands in `<out>/<game>/<world>/`. |
 | `--png <file>` | — | Also write the first world's flat composite image (handy for debugging). |
@@ -67,6 +68,9 @@ What each game bakes:
 - **Ultima IV** — the 256×256 Britannia overworld plus its towns, villages and castles.
 - **Ultima V** — the 256×256 Britannia surface and the Underworld, plus every town, dwelling,
   castle and keep (one map per floor).
+- **Ultima VI** — the seamless 1024×1024 Britannia overworld plus its five top-down dungeon
+  levels (rendered at an 8-px tile edge to keep the composite tractable). Object/POI overlays are
+  not baked yet.
 - **Wasteland** — all 42 maps (the desert overworld plus every town and building) from the
   pristine `MASTER1`/`MASTER2` disks, with clickable overworld↔sub-map navigation.
 

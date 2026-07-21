@@ -332,8 +332,11 @@ none in the viewer):
 - [x] Extend to **Wasteland**: the desert overworld plus every town and building (42 maps from the
       pristine `MASTER1`/`MASTER2` disks), with **clickable overworld↔sub-map POI navigation** and
       **dual position markers** (current map + return point)
-- [ ] Extend to **Ultima VI**: needs the LZW map decoder (a codec-workbench target); its character
-      stats are already read, but the compressed, object-based world map is not yet baked
+- [x] Extend to **Ultima VI**: reverse-engineered the LZW-compressed, chunk/super-chunk `MAP` +
+      `CHUNKS` layout and the VGA tile graphics (`MAPTILES.VGA`/`TILEINDX.VGA`/`MASKTYPE.VGA`/`U6PAL`)
+      so the 1024×1024 **Britannia** overworld and its five top-down **dungeon levels** now bake
+      (rendered at an 8-px tile edge to keep the composite tractable; verified against the real game
+      files). Object/POI overlays remain a follow-up (see Phase 9).
 
 For **Ultima I**, town/castle interiors aren't worth exporting (no standalone layout files — they
 live in the executable) and its dungeons are first-person and procedurally generated, so the
@@ -409,8 +412,10 @@ reached.
       town, castle or dungeon** (confirmed in-game), so their party position is always on their
       single overworld — the marker already shown — and Ultima I/II likewise only save on the
       overworld. Ultima V is the only game with a genuine dual case, and it's covered.
-- [ ] **Ultima VI world map** — reverse-engineer the LZW-compressed, object-based map with the
-      codec workbench so Ultima VI joins the map browser (today only its character stats are read).
+- [x] **Ultima VI world map** — reverse-engineered the LZW-compressed, chunk/super-chunk map and
+      the VGA tile graphics, so **Britannia** and its five top-down **dungeon levels** now bake into
+      the map browser (verified against the real game files; rendered at an 8-px tile edge).
+      Follow-ups: object overlays (towns / NPCs from `lzobjblk`) and named POIs.
 - [ ] **Confirm tentative fields** across the Ultimas with `schema find` / `schema diff`
       (before/after in-game edits), promoting `tentative: true` fields to confirmed.
 - [ ] **Ultima VI objects / inventory / spells** — use the schema explorer + string ripper to map

@@ -16,11 +16,13 @@ pub const TILE_SIZE: u32 = 16;
 
 /// Composite a `w`×`h` grid of tile indices (row-major) into a full-resolution image, looking each
 /// index up in `tiles`. Out-of-range indices fall back to tile 0, so a short tileset can't panic
-/// the render.
+/// the render. The tile edge is taken from the tileset itself (16 px for most games; Ultima VI
+/// renders its huge 1024×1024 world at a smaller edge to keep the composite tractable).
 ///
 /// Panics if `tiles` is empty; callers ensure at least one tile was decoded.
 pub fn render(grid: &[u8], w: usize, h: usize, tiles: &[RgbImage]) -> RgbImage {
-    let mut image = RgbImage::new(w as u32 * TILE_SIZE, h as u32 * TILE_SIZE);
+    let ts = tiles[0].width();
+    let mut image = RgbImage::new(w as u32 * ts, h as u32 * ts);
     for ty in 0..h {
         for tx in 0..w {
             let index = grid[ty * w + tx] as usize;
@@ -28,8 +30,8 @@ pub fn render(grid: &[u8], w: usize, h: usize, tiles: &[RgbImage]) -> RgbImage {
             image::imageops::replace(
                 &mut image,
                 tile,
-                (tx as u32 * TILE_SIZE) as i64,
-                (ty as u32 * TILE_SIZE) as i64,
+                (tx as u32 * ts) as i64,
+                (ty as u32 * ts) as i64,
             );
         }
     }
