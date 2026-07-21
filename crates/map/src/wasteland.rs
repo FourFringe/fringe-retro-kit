@@ -31,7 +31,7 @@ use image::RgbImage;
 use crate::bundle::World;
 use crate::ega::EGA_PALETTE;
 use crate::tilemap;
-use fringe_retro_core::codec::{huffman, xor};
+use fringe_retro_core::codec::{huffman, strings5, xor};
 
 const GAME: &str = "wasteland";
 /// One region groups every map so the browser lists them together.
@@ -438,43 +438,6 @@ fn find_tilemap_offset(size: usize, full: &[u8]) -> Option<usize> {
     })
 }
 
-/// A least-significant-bit-first bit reader over the map body, matching `wlandsuite`'s
-/// `BitInputStream` in reverse mode (used for the 5-bit packed strings).
-struct StrBits<'a> {
-    data: &'a [u8],
-    pos: usize,
-    cur: u8,
-    bit: u8,
-}
-
-impl<'a> StrBits<'a> {
-    fn new(data: &'a [u8], pos: usize) -> Self {
-        StrBits {
-            data,
-            pos,
-            cur: 0,
-            bit: 7,
-        }
-    }
-
-    /// Read one bit, LSB-first within each byte.
-    fn read_bit(&mut self) -> u8 {
-        if self.bit > 6 {
-            self.cur = self.data.get(self.pos).copied().unwrap_or(0);
-            self.pos += 1;
-            self.bit = 0;
-        } else {
-            self.bit += 1;
-        }
-        (self.cur >> self.bit) & 1
-    }
-
-    /// Read a 5-bit value, LSB-first.
-    fn read5(&mut self) -> u8 {
-        (0..5).fold(0u8, |v, i| v | (self.read_bit() << i))
-    }
-}
-
 /// Decode a map's strings (the messages shown on that map). Layout: a 60-byte character table,
 /// a word offset table (`first_word / 2` entries), then string groups of four. Each string is a
 /// stream of 5-bit indices into the char table; `0x1F` selects the table's high half for the next
@@ -506,39 +469,12 @@ fn decode_strings(full: &[u8], start: usize, end: usize) -> Vec<String> {
         offsets.push(off);
         prev = off;
     }
+    // Bound the reader at the tile map so a run-away string stops instead of scanning the map.
+    let bounded = full.get(..end).unwrap_or(full);
     for off in offsets {
-        let mut bits = StrBits::new(full, base + off);
+        let mut reader = strings5::BitReader::new(bounded, base + off);
         for _ in 0..4 {
-            let (mut upper, mut high) = (false, false);
-            let mut s = String::new();
-            loop {
-                if bits.pos > end {
-                    break;
-                }
-                match bits.read5() {
-                    0x1F => high = true,
-                    0x1E => upper = true,
-                    index => {
-                        let Some(&ch) =
-                            char_table.get(usize::from(index) + usize::from(high) * 0x1E)
-                        else {
-                            break;
-                        };
-                        if ch == 0 {
-                            break;
-                        }
-                        let c = ch as char;
-                        if upper {
-                            s.extend(c.to_uppercase());
-                        } else {
-                            s.push(c);
-                        }
-                        upper = false;
-                        high = false;
-                    }
-                }
-            }
-            out.push(s);
+            out.push(strings5::decode_string(char_table, &mut reader));
         }
     }
     out
@@ -880,14 +816,6 @@ mod tests {
         assert_eq!(*img.get_pixel(0, 0), EGA_PALETTE[1]);
         assert_eq!(*img.get_pixel(1, 0), EGA_PALETTE[0]);
         assert_eq!(*img.get_pixel(2, 0), EGA_PALETTE[1]);
-    }
-
-    #[test]
-    fn strbits_reads_five_bits_lsb_first() {
-        // 0x15 = 0b10101; read5 accumulates bits LSB-first, reproducing the low five bits.
-        let data = [0x15];
-        let mut bits = StrBits::new(&data, 0);
-        assert_eq!(bits.read5(), 0x15 & 0x1F);
     }
 
     #[test]

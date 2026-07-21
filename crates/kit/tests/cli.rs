@@ -92,3 +92,31 @@ fn decode_emits_json() {
         .stdout(predicate::str::contains("\"output_len\": 2"))
         .stdout(predicate::str::contains("\"hex\": \"6869\""));
 }
+
+#[test]
+fn ascii_ripper_lists_printable_runs_with_offsets() {
+    let f = file_with(b"\x00\x01ALLPICS1\x00hi\x00WORLD!");
+    kit()
+        .args(["strings", "ascii"])
+        .arg(f.path())
+        .args(["--min", "3"])
+        .assert()
+        .success()
+        // "hi" is too short for --min 3 and is dropped.
+        .stdout(predicate::str::contains("00000002  ALLPICS1"))
+        .stdout(predicate::str::contains("WORLD!"))
+        .stdout(predicate::str::contains("hi").not());
+}
+
+#[test]
+fn ascii_ripper_emits_json_with_absolute_offsets() {
+    let f = file_with(b"\x00\x00\x00\x00ROM");
+    kit()
+        .args(["strings", "ascii"])
+        .arg(f.path())
+        .args(["--min", "3", "--offset", "2", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"offset\": 4"))
+        .stdout(predicate::str::contains("\"text\": \"ROM\""));
+}

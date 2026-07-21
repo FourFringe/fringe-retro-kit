@@ -2,8 +2,10 @@
 //!
 //! This binary is kept separate from the player-facing `fringe-retro` (save editor) and
 //! `fringe-retro-map` (map browser) tools: it holds the workbench used to *understand* a
-//! format in the first place. The first tool is the codec workbench (`codec`).
+//! format in the first place. The tools so far are the codec workbench (`codec`) and the
+//! string ripper (`strings`).
 
+mod ripper;
 mod util;
 mod workbench;
 
@@ -27,10 +29,16 @@ enum Command {
         #[command(subcommand)]
         command: workbench::Command,
     },
+    /// String ripper: extract ASCII or Wasteland 5-bit packed strings.
+    Strings {
+        #[command(subcommand)]
+        command: ripper::Command,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Codec { command } => workbench::run(command),
+        Command::Strings { command } => ripper::run(command),
     }
 }
