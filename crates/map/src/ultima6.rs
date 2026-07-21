@@ -20,10 +20,11 @@
 //! Format reference: the Ultima Codex "Ultima VI internal formats" page, cross-checked against the
 //! shipped files (`MAPTILES.VGA` decompresses to 117 408 bytes; `U6PAL` colours are 0–63).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{ensure, Context, Result};
-use image::{imageops::FilterType, Rgb, RgbImage};
+use image::{imageops::FilterType, Rgb, RgbImage, Rgba, RgbaImage};
 
 use crate::bundle::World;
 use crate::{lzw, tilemap};
@@ -37,6 +38,17 @@ const MAPTILES_FILE: &str = "MAPTILES.VGA";
 const TILEINDX_FILE: &str = "TILEINDX.VGA";
 const MASKTYPE_FILE: &str = "MASKTYPE.VGA";
 const PALETTE_FILE: &str = "U6PAL";
+const OBJTILES_FILE: &str = "OBJTILES.VGA";
+const BASETILE_FILE: &str = "BASETILE";
+const OBJBLK_FILE: &str = "LZOBJBLK";
+const DNGBLK_FILE: &str = "LZDNGBLK";
+const TILEFLAG_FILE: &str = "TILEFLAG";
+
+/// `TILEFLAG` is a series of per-tile arrays; the second ("flags 2") starts here, one byte per
+/// tile. Bit 7 marks a double-width tile, bit 6 a double-height one.
+const TILEFLAG_FLAGS2_OFFSET: usize = 0x800;
+const FLAG2_DOUBLE_WIDTH: u8 = 0x80;
+const FLAG2_DOUBLE_HEIGHT: u8 = 0x40;
 
 /// Britannia is 1024×1024 tiles.
 const WORLD_TILES: usize = 1024;
@@ -51,6 +63,8 @@ const SC_PER_EDGE: usize = 8;
 const SC_BYTES: usize = 8 * 16 * 3;
 /// Chunk map-tile indices are bytes, so only the first 256 map tiles are ever referenced.
 const MAP_TILE_COUNT: usize = 256;
+/// Total tiles in the concatenated map + object tile set.
+const TILE_COUNT: usize = 2048;
 /// Native tile edge, in pixels.
 const NATIVE_PX: u32 = 16;
 /// Rendered tile edge. Britannia at native 16 px would be a 16 384² image (~0.8 GB); halving it to
@@ -71,9 +85,12 @@ const DUNGEON_LEVELS: usize = 5;
 
 /// Render Ultima VI into its worlds: the Britannia overworld plus the five dungeon levels.
 pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
-    let tiles = decode_map_tiles(game_dir)?;
+    let tiles = Tiles::load(game_dir)?;
+    let terrain = decode_map_tiles(&tiles);
     let map = read(game_dir, MAP_FILE)?;
     let chunks = read(game_dir, CHUNKS_FILE)?;
+    let basetile = read(game_dir, BASETILE_FILE)?;
+    let tileflag = read(game_dir, TILEFLAG_FILE)?;
     ensure!(
         map.len() >= BRITANNIA_BYTES + DUNGEON_LEVELS * DUNGEON_BYTES,
         "{MAP_FILE} is {} bytes; expected at least {}",
@@ -84,10 +101,16 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
 
     let mut worlds = Vec::with_capacity(1 + DUNGEON_LEVELS);
 
-    // The seamless Britannia overworld.
+    // The seamless Britannia overworld, with its surface objects overlaid.
     let britannia = expand_grid(&chunks, WORLD_TILES, |cx, cy| {
         britannia_chunk_index(&map, cx, cy)
     });
+    let mut image = tilemap::render(&britannia, WORLD_TILES, WORLD_TILES, &terrain);
+    let surface = parse_objects(
+        &lzw::decompress(&read(game_dir, OBJBLK_FILE)?)
+            .with_context(|| format!("decompressing {OBJBLK_FILE}"))?,
+    );
+    composite_objects(&mut image, &surface, &basetile, &tileflag, &tiles);
     worlds.push(tilemap::world(
         GAME,
         "britannia",
@@ -95,15 +118,25 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         "overworld",
         "britannia",
         vec![],
-        tilemap::render(&britannia, WORLD_TILES, WORLD_TILES, &tiles),
+        image,
     ));
 
-    // The five underground dungeon levels.
+    // The five underground dungeon levels, each with its own objects: `LZDNGBLK` block i holds
+    // level i + 1's objects, in level-local coordinates.
+    let dungeon_objects = parse_object_blocks(
+        &lzw::decompress(&read(game_dir, DNGBLK_FILE)?)
+            .with_context(|| format!("decompressing {DNGBLK_FILE}"))?,
+        DUNGEON_LEVELS,
+    );
     for level in 0..DUNGEON_LEVELS {
         let base = BRITANNIA_BYTES + level * DUNGEON_BYTES;
         let grid = expand_grid(&chunks, DUNGEON_TILES, |cx, cy| {
             chunk_at(&map, base, DUNGEON_U24_PER_ROW, cx, cy)
         });
+        let mut image = tilemap::render(&grid, DUNGEON_TILES, DUNGEON_TILES, &terrain);
+        if let Some(objects) = dungeon_objects.get(level) {
+            composite_objects(&mut image, objects, &basetile, &tileflag, &tiles);
+        }
         worlds.push(tilemap::world(
             GAME,
             &format!("dungeon-{}", level + 1),
@@ -111,7 +144,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             "dungeon",
             "britannia",
             vec![],
-            tilemap::render(&grid, DUNGEON_TILES, DUNGEON_TILES, &tiles),
+            image,
         ));
     }
     Ok(worlds)
@@ -139,57 +172,98 @@ fn scale6(v: u8) -> u8 {
     (v << 2) | (v >> 4)
 }
 
-/// Decode the 256 referenced map tiles, each down-scaled to [`TILE_PX`].
-fn decode_map_tiles(game_dir: &Path) -> Result<Vec<RgbImage>> {
-    let palette = read_palette(game_dir)?;
-    let pixels = lzw::decompress(&read(game_dir, MAPTILES_FILE)?)
-        .with_context(|| format!("decompressing {MAPTILES_FILE}"))?;
-    let mask = lzw::decompress(&read(game_dir, MASKTYPE_FILE)?)
-        .with_context(|| format!("decompressing {MASKTYPE_FILE}"))?;
-    let index = read(game_dir, TILEINDX_FILE)?;
-    ensure!(
-        index.len() >= MAP_TILE_COUNT * 2,
-        "{TILEINDX_FILE} is too short ({} bytes)",
-        index.len()
-    );
-
-    let mut tiles = Vec::with_capacity(MAP_TILE_COUNT);
-    for t in 0..MAP_TILE_COUNT {
-        let offset = usize::from(u16::from_le_bytes([index[t * 2], index[t * 2 + 1]])) * 16;
-        let storage = mask.get(t).copied().unwrap_or(0);
-        let native = decode_tile(&pixels, offset, storage, &palette);
-        tiles.push(imageops_resize(&native, TILE_PX));
-    }
-    Ok(tiles)
+/// The decoded tile graphics: the concatenated `MAPTILES.VGA` + `OBJTILES.VGA` pixel data, each
+/// tile's byte offset (`TILEINDX.VGA`) and storage kind (`MASKTYPE.VGA`), and the palette. Any of
+/// the 2048 tiles decodes on demand — terrain uses the opaque map tiles, objects the transparent
+/// object tiles.
+struct Tiles {
+    pixels: Vec<u8>,
+    index: Vec<u8>,
+    mask: Vec<u8>,
+    palette: [Rgb<u8>; 256],
 }
 
-/// Decode one 16×16 map tile at `offset` in the decompressed `MAPTILES.VGA` data, honouring its
-/// storage `kind` (0 = opaque, 5 = transparent, 10 = span-compressed). Transparent pixels (value
-/// 255 in the transparent/compressed kinds) are painted black, since a base-terrain tile has no
-/// layer showing through beneath it.
-fn decode_tile(data: &[u8], offset: usize, kind: u8, palette: &[Rgb<u8>; 256]) -> RgbImage {
-    // 256 palette indices; 255 marks a transparent pixel in the non-opaque kinds.
-    let mut px = [255u8; NATIVE_PX as usize * NATIVE_PX as usize];
-    match kind {
-        10 => decode_compressed(data, offset, &mut px),
-        // Opaque and transparent are both a raw 16×16 block of palette indices.
-        _ => {
-            if let Some(raw) = data.get(offset..offset + px.len()) {
-                px.copy_from_slice(raw);
-            }
-        }
+impl Tiles {
+    fn load(game_dir: &Path) -> Result<Self> {
+        let palette = read_palette(game_dir)?;
+        // Map tiles are LZW-compressed; the object tiles are stored and logically concatenated
+        // after them, so a single offset table indexes one continuous buffer.
+        let mut pixels = lzw::decompress(&read(game_dir, MAPTILES_FILE)?)
+            .with_context(|| format!("decompressing {MAPTILES_FILE}"))?;
+        pixels.extend(read(game_dir, OBJTILES_FILE)?);
+        let mask = lzw::decompress(&read(game_dir, MASKTYPE_FILE)?)
+            .with_context(|| format!("decompressing {MASKTYPE_FILE}"))?;
+        let index = read(game_dir, TILEINDX_FILE)?;
+        ensure!(
+            index.len() >= TILE_COUNT * 2,
+            "{TILEINDX_FILE} is too short ({} bytes)",
+            index.len()
+        );
+        Ok(Tiles {
+            pixels,
+            index,
+            mask,
+            palette,
+        })
     }
 
-    let mut img = RgbImage::new(NATIVE_PX, NATIVE_PX);
-    for (i, &idx) in px.iter().enumerate() {
-        let color = if idx == 255 && kind != 0 {
-            Rgb([0, 0, 0]) // transparent → black under the base map
-        } else {
-            palette[idx as usize]
-        };
-        img.put_pixel(i as u32 % NATIVE_PX, i as u32 / NATIVE_PX, color);
+    /// Decode tile `t` into its 256 palette indices plus its storage kind (255 marks a transparent
+    /// pixel in the non-opaque kinds).
+    fn indices(&self, t: usize) -> ([u8; NATIVE_PX as usize * NATIVE_PX as usize], u8) {
+        let offset = usize::from(u16::from_le_bytes([
+            self.index[t * 2],
+            self.index[t * 2 + 1],
+        ])) * 16;
+        let kind = self.mask.get(t).copied().unwrap_or(0);
+        let mut px = [255u8; NATIVE_PX as usize * NATIVE_PX as usize];
+        match kind {
+            10 => decode_compressed(&self.pixels, offset, &mut px),
+            _ => {
+                if let Some(raw) = self.pixels.get(offset..offset + px.len()) {
+                    px.copy_from_slice(raw);
+                }
+            }
+        }
+        (px, kind)
     }
-    img
+
+    /// A terrain tile as opaque RGB (transparent pixels → black, since the base map has nothing
+    /// beneath), down-scaled to [`TILE_PX`].
+    fn terrain(&self, t: usize) -> RgbImage {
+        let (px, kind) = self.indices(t);
+        let mut img = RgbImage::new(NATIVE_PX, NATIVE_PX);
+        for (i, &idx) in px.iter().enumerate() {
+            let color = if idx == 255 && kind != 0 {
+                Rgb([0, 0, 0])
+            } else {
+                self.palette[idx as usize]
+            };
+            img.put_pixel(i as u32 % NATIVE_PX, i as u32 / NATIVE_PX, color);
+        }
+        imageops_resize(&img, TILE_PX)
+    }
+
+    /// An object tile as RGBA (transparent pixels → alpha 0), down-scaled to [`TILE_PX`] by nearest
+    /// sampling so its hard edges survive.
+    fn object(&self, t: usize) -> RgbaImage {
+        let (px, kind) = self.indices(t);
+        let mut img = RgbaImage::new(NATIVE_PX, NATIVE_PX);
+        for (i, &idx) in px.iter().enumerate() {
+            let color = if idx == 255 && kind != 0 {
+                Rgba([0, 0, 0, 0])
+            } else {
+                let c = self.palette[idx as usize];
+                Rgba([c[0], c[1], c[2], 255])
+            };
+            img.put_pixel(i as u32 % NATIVE_PX, i as u32 / NATIVE_PX, color);
+        }
+        image::imageops::resize(&img, TILE_PX, TILE_PX, FilterType::Nearest)
+    }
+}
+
+/// Decode the 256 referenced map tiles for terrain, each down-scaled to [`TILE_PX`].
+fn decode_map_tiles(tiles: &Tiles) -> Vec<RgbImage> {
+    (0..MAP_TILE_COUNT).map(|t| tiles.terrain(t)).collect()
 }
 
 /// Span-decode a compressed (`kind` 10) tile into `px` (initialised to transparent). Each span is
@@ -228,6 +302,149 @@ fn imageops_resize(tile: &RgbImage, size: u32) -> RgbImage {
         tile.clone()
     } else {
         image::imageops::resize(tile, size, size, FilterType::Triangle)
+    }
+}
+
+/// One placed object from `LZOBJBLK`: its global tile position, layer, and type/frame.
+struct Object {
+    x: u16,
+    y: u16,
+    z: u8,
+    obj_type: u16,
+    frame: u8,
+}
+
+/// Decode the 8-byte object at `data[p..]`: `(status, uint24 position, uint16 typeAndFrame,
+/// quantity, quality)`. Position packs x (10 bits), y (10 bits), z (4 bits); typeAndFrame packs
+/// the object type (10 bits) and frame (6 bits).
+fn object_at(data: &[u8], p: usize) -> Option<Object> {
+    let o = data.get(p..p + 8)?;
+    let position = usize::from(o[1]) | usize::from(o[2]) << 8 | usize::from(o[3]) << 16;
+    let taf = u16::from_le_bytes([o[4], o[5]]);
+    Some(Object {
+        x: (position & 0x3FF) as u16,
+        y: ((position >> 10) & 0x3FF) as u16,
+        z: ((position >> 20) & 0xF) as u8,
+        obj_type: taf & 0x3FF,
+        frame: ((taf >> 10) & 0x3F) as u8,
+    })
+}
+
+/// Parse the decompressed `LZOBJBLK` (surface): a sequence of super-chunk blocks, each a `uint16`
+/// object count followed by that many 8-byte objects. Surface positions are global tile
+/// coordinates, so the block grouping doesn't affect placement — all objects are returned flat.
+fn parse_objects(data: &[u8]) -> Vec<Object> {
+    let mut objects = Vec::new();
+    let mut p = 0;
+    while p + 2 <= data.len() {
+        let count = usize::from(u16::from_le_bytes([data[p], data[p + 1]]));
+        p += 2;
+        for _ in 0..count {
+            let Some(o) = object_at(data, p) else {
+                return objects;
+            };
+            objects.push(o);
+            p += 8;
+        }
+    }
+    objects
+}
+
+/// Parse the first `max_blocks` object blocks separately. Used for `LZDNGBLK`, where block *i*
+/// holds dungeon level *i*'s objects in level-local coordinates.
+fn parse_object_blocks(data: &[u8], max_blocks: usize) -> Vec<Vec<Object>> {
+    let mut blocks = Vec::new();
+    let mut p = 0;
+    while blocks.len() < max_blocks && p + 2 <= data.len() {
+        let count = usize::from(u16::from_le_bytes([data[p], data[p + 1]]));
+        p += 2;
+        let mut objects = Vec::with_capacity(count);
+        for _ in 0..count {
+            let Some(o) = object_at(data, p) else {
+                break;
+            };
+            objects.push(o);
+            p += 8;
+        }
+        blocks.push(objects);
+    }
+    blocks
+}
+
+/// The tiles making up one object, as `(tile index, cell dx, cell dy)` offsets from the anchor.
+/// Most objects are a single tile at `(0, 0)`. Double-width and double-height objects extend one
+/// cell **left** and/or **up** from the anchor, using consecutive tiles *below* the base index:
+/// the base tile is the bottom-right, `tile - 1` its left/lower neighbour, and a 2×2 object fills
+/// out with `tile - 2` (top-right) and `tile - 3` (top-left). The flag lives on the base tile in
+/// `TILEFLAG`'s "flags 2" array.
+fn multi_tile_parts(tile: usize, tileflag: &[u8]) -> Vec<(usize, i32, i32)> {
+    let flags2 = tileflag
+        .get(TILEFLAG_FLAGS2_OFFSET + tile)
+        .copied()
+        .unwrap_or(0);
+    let wide = flags2 & FLAG2_DOUBLE_WIDTH != 0;
+    let tall = flags2 & FLAG2_DOUBLE_HEIGHT != 0;
+    let mut parts = vec![(tile, 0, 0)];
+    // Extra tiles come from lower indices, so guard against underflow near tile 0.
+    match (wide, tall) {
+        (true, true) if tile >= 3 => parts.extend([
+            (tile - 1, -1, 0),  // bottom-left
+            (tile - 2, 0, -1),  // top-right
+            (tile - 3, -1, -1), // top-left
+        ]),
+        (true, false) if tile >= 1 => parts.push((tile - 1, -1, 0)), // left half
+        (false, true) if tile >= 1 => parts.push((tile - 1, 0, -1)), // upper half
+        _ => {}
+    }
+    parts
+}
+
+/// Overlay `objects` onto the rendered terrain `image`, lowest layer first. Each object's base tile
+/// is `BASETILE[type] + frame`; its transparent pixels let the terrain show through. Double-width
+/// and double-height objects (per `TILEFLAG`) additionally draw their left/upper tiles so trees,
+/// ships, statues and large furniture render whole rather than as a single corner.
+fn composite_objects(
+    image: &mut RgbImage,
+    objects: &[Object],
+    basetile: &[u8],
+    tileflag: &[u8],
+    tiles: &Tiles,
+) {
+    let mut order: Vec<&Object> = objects.iter().collect();
+    order.sort_by_key(|o| o.z);
+    let mut cache: HashMap<usize, RgbaImage> = HashMap::new();
+    for o in order {
+        let ty = usize::from(o.obj_type);
+        if ty == 0 || basetile.len() < ty * 2 + 2 {
+            continue; // type 0 is "nothing"
+        }
+        let base = usize::from(u16::from_le_bytes([basetile[ty * 2], basetile[ty * 2 + 1]]));
+        let tile = base + usize::from(o.frame);
+        if tile >= TILE_COUNT {
+            continue;
+        }
+        for (part, cell_dx, cell_dy) in multi_tile_parts(tile, tileflag) {
+            let sprite = cache.entry(part).or_insert_with(|| tiles.object(part));
+            let cell_x = i32::from(o.x) + cell_dx;
+            let cell_y = i32::from(o.y) + cell_dy;
+            if cell_x < 0 || cell_y < 0 {
+                continue;
+            }
+            let dx = cell_x as u32 * TILE_PX;
+            let dy = cell_y as u32 * TILE_PX;
+            for py in 0..TILE_PX {
+                for px in 0..TILE_PX {
+                    let pixel = sprite.get_pixel(px, py);
+                    if pixel[3] == 0 {
+                        continue; // transparent → keep the terrain underneath
+                    }
+                    let (ix, iy) = (dx + px, dy + py);
+                    if ix < image.width() && iy < image.height() {
+                        image.put_pixel(ix, iy, Rgb([pixel[0], pixel[1], pixel[2]]));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -323,17 +540,74 @@ mod tests {
     }
 
     #[test]
-    fn decodes_an_opaque_tile() {
+    fn parses_objects_from_a_block() {
+        // A one-object block: object at (x=300, y=500, z=1), type 0x2A, frame 3.
+        let position = 300usize | (500 << 10) | (1 << 20);
+        let taf: u16 = 0x2A | (3 << 10);
+        let mut data = vec![1u8, 0]; // count = 1
+        data.push(0xAB); // status
+        data.push((position & 0xFF) as u8);
+        data.push(((position >> 8) & 0xFF) as u8);
+        data.push(((position >> 16) & 0xFF) as u8);
+        data.extend_from_slice(&taf.to_le_bytes());
+        data.push(5); // quantity
+        data.push(6); // quality
+        let objects = parse_objects(&data);
+        assert_eq!(objects.len(), 1);
+        let o = &objects[0];
+        assert_eq!((o.x, o.y, o.z), (300, 500, 1));
+        assert_eq!((o.obj_type, o.frame), (0x2A, 3));
+    }
+
+    #[test]
+    fn decodes_tile_indices_and_object_transparency() {
+        // Tile 0 stored transparent (kind 5): pixel (0,0) is transparent (255), (1,0) is index 3.
+        let mut pixels = vec![255u8; 256];
+        pixels[1] = 3;
         let palette = std::array::from_fn(|i| Rgb([i as u8, 0, 0]));
-        // A 256-byte opaque tile: pixel (x,y) = x (so column index becomes the red channel).
-        let mut data = vec![0u8; 256];
-        for y in 0..16 {
-            for x in 0..16 {
-                data[y * 16 + x] = x as u8;
-            }
-        }
-        let tile = decode_tile(&data, 0, 0, &palette);
-        assert_eq!(*tile.get_pixel(5, 3), Rgb([5, 0, 0]));
-        assert_eq!(*tile.get_pixel(15, 0), Rgb([15, 0, 0]));
+        let tiles = Tiles {
+            pixels,
+            index: vec![0u8, 0], // tile 0 offset 0
+            mask: vec![5u8],     // transparent storage
+            palette,
+        };
+        let (px, kind) = tiles.indices(0);
+        assert_eq!(kind, 5);
+        assert_eq!(px[0], 255); // transparent marker survives
+        assert_eq!(px[1], 3);
+        // As an object tile, the transparent pixel gets alpha 0; the opaque one keeps its colour.
+        let obj = tiles.object(0);
+        assert_eq!(obj.get_pixel(0, 0)[3], 0);
+    }
+
+    #[test]
+    fn multi_tile_parts_expand_left_and_up() {
+        let mut tileflag = vec![0u8; TILEFLAG_FLAGS2_OFFSET + TILE_COUNT];
+        let single = 100;
+        let wide = 200;
+        let tall = 201;
+        let quad = 202;
+        tileflag[TILEFLAG_FLAGS2_OFFSET + wide] = FLAG2_DOUBLE_WIDTH;
+        tileflag[TILEFLAG_FLAGS2_OFFSET + tall] = FLAG2_DOUBLE_HEIGHT;
+        tileflag[TILEFLAG_FLAGS2_OFFSET + quad] = FLAG2_DOUBLE_WIDTH | FLAG2_DOUBLE_HEIGHT;
+
+        assert_eq!(multi_tile_parts(single, &tileflag), vec![(single, 0, 0)]);
+        assert_eq!(
+            multi_tile_parts(wide, &tileflag),
+            vec![(wide, 0, 0), (wide - 1, -1, 0)]
+        );
+        assert_eq!(
+            multi_tile_parts(tall, &tileflag),
+            vec![(tall, 0, 0), (tall - 1, 0, -1)]
+        );
+        assert_eq!(
+            multi_tile_parts(quad, &tileflag),
+            vec![
+                (quad, 0, 0),
+                (quad - 1, -1, 0),
+                (quad - 2, 0, -1),
+                (quad - 3, -1, -1),
+            ]
+        );
     }
 }

@@ -334,9 +334,13 @@ none in the viewer):
       **dual position markers** (current map + return point)
 - [x] Extend to **Ultima VI**: reverse-engineered the LZW-compressed, chunk/super-chunk `MAP` +
       `CHUNKS` layout and the VGA tile graphics (`MAPTILES.VGA`/`TILEINDX.VGA`/`MASKTYPE.VGA`/`U6PAL`)
-      so the 1024×1024 **Britannia** overworld and its five top-down **dungeon levels** now bake
-      (rendered at an 8-px tile edge to keep the composite tractable; verified against the real game
-      files). Object/POI overlays remain a follow-up (see Phase 9).
+      so the 1024×1024 **Britannia** overworld and its five top-down **dungeon levels** now bake,
+      with **objects** overlaid on every map: the surface's buildings, furniture, NPCs and signs
+      from `LZOBJBLK`, and each dungeon level's chests, ladders, torches and creatures from
+      `LZDNGBLK` (block *i* holds level *i*'s objects in level-local coordinates). Multi-tile
+      objects (trees, ships, statues, large furniture) render whole via their `TILEFLAG`
+      double-width / double-height flags. Objects render at an 8-px tile edge to keep the composite
+      tractable; verified against the real game files. Named POIs remain a follow-up (see Phase 9).
 
 For **Ultima I**, town/castle interiors aren't worth exporting (no standalone layout files — they
 live in the executable) and its dungeons are first-person and procedurally generated, so the
@@ -414,8 +418,12 @@ reached.
       overworld. Ultima V is the only game with a genuine dual case, and it's covered.
 - [x] **Ultima VI world map** — reverse-engineered the LZW-compressed, chunk/super-chunk map and
       the VGA tile graphics, so **Britannia** and its five top-down **dungeon levels** now bake into
-      the map browser (verified against the real game files; rendered at an 8-px tile edge).
-      Follow-ups: object overlays (towns / NPCs from `lzobjblk`) and named POIs.
+      the map browser, with **object overlays** on every map: the surface's buildings / furniture /
+      NPCs / signs from `LZOBJBLK` and each dungeon level's chests / ladders / torches / creatures
+      from `LZDNGBLK` (block *i* → level *i*, level-local coordinates), composited via the
+      `BASETILE` type→tile table and `OBJTILES.VGA` (verified against the real game files; rendered
+      at an 8-px tile edge). Follow-ups: named POIs (U6 has no location table — would need a curated
+      coordinate table or sign-text RE), and multi-tile objects.
 - [ ] **Confirm tentative fields** across the Ultimas with `schema find` / `schema diff`
       (before/after in-game edits), promoting `tentative: true` fields to confirmed.
 - [ ] **Ultima VI objects / inventory / spells** — use the schema explorer + string ripper to map

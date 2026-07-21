@@ -68,9 +68,11 @@ What each game bakes:
 - **Ultima IV** — the 256×256 Britannia overworld plus its towns, villages and castles.
 - **Ultima V** — the 256×256 Britannia surface and the Underworld, plus every town, dwelling,
   castle and keep (one map per floor).
-- **Ultima VI** — the seamless 1024×1024 Britannia overworld plus its five top-down dungeon
-  levels (rendered at an 8-px tile edge to keep the composite tractable). Object/POI overlays are
-  not baked yet.
+- **Ultima VI** — the seamless 1024×1024 Britannia overworld (with its buildings, furniture, NPCs
+  and signs overlaid) plus its five top-down dungeon levels (each with its own chests, ladders,
+  torches and creatures overlaid). Multi-tile objects (trees, ships, statues, large furniture)
+  render whole; everything is rendered at an 8-px tile edge to keep the composite tractable.
+  Named POIs are not baked yet.
 - **Wasteland** — all 42 maps (the desert overworld plus every town and building) from the
   pristine `MASTER1`/`MASTER2` disks, with clickable overworld↔sub-map navigation.
 
