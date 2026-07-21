@@ -3,11 +3,12 @@
 //! This binary is kept separate from the player-facing `fringe-retro` (save editor) and
 //! `fringe-retro-map` (map browser) tools: it holds the workbench used to *understand* a
 //! format in the first place. The tools so far are the codec workbench (`codec`), the
-//! string ripper (`strings`), and the schema explorer (`schema`).
+//! string ripper (`strings`), the schema explorer (`schema`), and the live watch/logger (`watch`).
 
 mod explorer;
 mod ripper;
 mod util;
+mod watchdog;
 mod workbench;
 
 use clap::{Parser, Subcommand};
@@ -40,6 +41,8 @@ enum Command {
         #[command(subcommand)]
         command: explorer::Command,
     },
+    /// Live watch/logger: poll a save file and log which bytes change as the game runs.
+    Watch(watchdog::WatchArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -47,5 +50,6 @@ fn main() -> anyhow::Result<()> {
         Command::Codec { command } => workbench::run(command),
         Command::Strings { command } => ripper::run(command),
         Command::Schema { command } => explorer::run(command),
+        Command::Watch(args) => watchdog::run(args),
     }
 }

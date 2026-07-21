@@ -163,3 +163,44 @@ fn schema_stride_surfaces_the_record_spacing() {
         .stdout(predicate::str::contains("likely stride"))
         .stdout(predicate::str::contains("3 (0x3) x3"));
 }
+
+#[test]
+fn watch_logs_a_change_then_exits() {
+    use std::time::Duration;
+
+    let f = file_with(b"AAAAAAAA");
+    let path = f.path().to_path_buf();
+    // Rewrite the file shortly after the watcher starts polling.
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        std::fs::write(&path, b"AXXAAAAA").unwrap();
+    });
+
+    kit()
+        .args(["watch"])
+        .arg(f.path())
+        // `--timeout-ms` bounds the run so the test can never hang if the change is missed.
+        .args([
+            "--interval",
+            "20",
+            "--exit-after",
+            "1",
+            "--timeout-ms",
+            "10000",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 run(s)"))
+        .stdout(predicate::str::contains("00000001  41 41 -> 58 58"));
+
+    writer.join().unwrap();
+}
+
+#[test]
+fn watch_errors_on_missing_file() {
+    kit()
+        .args(["watch", "/no/such/fringe/file.sav"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("reading"));
+}
