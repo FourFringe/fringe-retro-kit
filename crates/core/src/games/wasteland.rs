@@ -536,6 +536,23 @@ impl WastelandSave {
         Self::from_bytes(std::fs::read(path)?)
     }
 
+    /// A minimal, structurally valid in-memory save for **dry-running edits** (template
+    /// validation) — not a real save. All seven character slots are occupied and each carries a
+    /// full item list, so character-field, skill, and item/ammo edits all validate against it.
+    pub fn scratch() -> Self {
+        let mut body = vec![0u8; SAVEGAME_BODY_LEN];
+        for c in 0..CHARACTER_COUNT {
+            // A distinct 1..7 marching-order byte so the block validates as a savegame.
+            body[1 + c] = (c + 1) as u8;
+            let base = CHARACTER_BASE + c * RECORD_LEN;
+            body[base] = b'X'; // non-zero name => occupied slot
+            for s in 0..ITEM_SLOTS {
+                body[base + ITEM_BASE + s * 2] = 1; // any valid id => a full item list
+            }
+        }
+        Self::from_bytes(encrypt(&body, 0)).expect("scratch is a valid savegame block")
+    }
+
     /// Re-encrypt the savegame block and write the whole `GAME1` to `path` atomically.
     /// Only the savegame block changes; all other blocks are preserved byte-for-byte.
     /// Callers are responsible for backups.
@@ -936,6 +953,19 @@ mod tests {
         // Unknown ids are rejected.
         assert!(save.item_add(0, 200, 0).is_err());
         assert!(save.item_add(0, 0, 0).is_err());
+    }
+
+    #[test]
+    fn scratch_validates_character_and_item_edits() {
+        // The scratch save is what template validation dry-runs against: every character is
+        // occupied and carries a full item list, so character, skill, and ammo edits all apply.
+        let mut s = WastelandSave::scratch();
+        assert_eq!(s.occupied_characters().len(), CHARACTER_COUNT);
+        assert!(s.character_set(0, "con", "50").is_ok());
+        assert!(s.skill_set(0, "medic", 3).is_ok());
+        assert!(s.item_set_load(0, 1, 30).is_ok());
+        // Works for the last character and last item slot too (any entity/slot a template hits).
+        assert!(s.item_set_load(CHARACTER_COUNT - 1, ITEM_SLOTS, 5).is_ok());
     }
 
     #[test]

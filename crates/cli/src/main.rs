@@ -641,15 +641,25 @@ fn print_templates(set: &TemplateSet) {
     }
 }
 
-/// Validate a template by dry-running its edits against an empty scratch save.
+/// Validate a template by dry-running its edits against a scratch save.
 fn validate_template(t: &Template) -> std::result::Result<(), String> {
     let Some(kind) = GameKind::from_id(&t.game) else {
         return Err(format!("unknown game '{}'", t.game));
     };
-    let Some(mut scratch) = edit::Session::scratch(kind) else {
+    if edit::Session::scratch(kind).is_none() {
         return Err(format!("game '{}' is not editable", t.game));
+    }
+    // A template targets either the party (entity 0) or a character (entity 1, e.g. Wasteland,
+    // whose entity 0 is the party). Accept whichever validates; each attempt needs a fresh
+    // scratch because `apply` mutates it on a partial failure.
+    let dry_run = |entity| {
+        edit::Session::scratch(kind)
+            .expect("scratch")
+            .apply(entity, &t.fields)
     };
-    scratch.apply(0, &t.fields).map_err(|e| e.to_string())
+    dry_run(0)
+        .or_else(|_| dry_run(1))
+        .map_err(|e| e.to_string())
 }
 
 /// Convert a 1-based character slot into a 0-based roster index.

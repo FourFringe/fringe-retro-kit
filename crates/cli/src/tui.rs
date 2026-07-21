@@ -3219,7 +3219,7 @@ mod tests {
         }
         let written = std::fs::read_to_string(&templates_path).unwrap();
         assert!(written.contains("name = \"Rich\""));
-        assert!(written.contains("gold = 777"));
+        assert!(written.contains("\"gold\" = 777"));
         assert!(!app.templates.for_game("ultima1").is_empty());
 
         std::env::remove_var("FRINGE_RETRO_TEMPLATES");

@@ -172,7 +172,7 @@ impl Session {
             GameKind::Ultima6 => {
                 Loaded::Ultima6(Ultima6Save::from_bytes(vec![0u8; ultima6::OBJLIST_LEN]).ok()?)
             }
-            GameKind::Wasteland => return None,
+            GameKind::Wasteland => Loaded::Wasteland(WastelandSave::scratch()),
         };
         Some(Session {
             path: PathBuf::new(),

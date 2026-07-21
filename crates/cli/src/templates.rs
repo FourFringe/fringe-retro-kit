@@ -136,7 +136,9 @@ pub fn append_template(
     block.push_str(&format!("name = {}\n", toml_string(name)));
     let pairs: Vec<String> = fields
         .iter()
-        .map(|(k, v)| format!("{k} = {}", toml_scalar(v)))
+        // Quote every key: field keys can contain characters that aren't valid in a TOML bare
+        // key (a colon in `ammo:1`, a space in `Alarm Disarm`), which would corrupt the file.
+        .map(|(k, v)| format!("{} = {}", toml_string(k), toml_scalar(v)))
         .collect();
     block.push_str(&format!("fields = {{ {} }}\n", pairs.join(", ")));
 
@@ -255,12 +257,39 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         // The hand-authored comment is preserved.
         assert!(text.contains("# my templates"));
-        // Numeric values are bare; string values are quoted.
-        assert!(text.contains("gold = 500"));
-        assert!(text.contains("name = \"Enki\""));
+        // Keys are quoted; numeric values are bare, string values quoted.
+        assert!(text.contains("\"gold\" = 500"));
+        assert!(text.contains("\"name\" = \"Enki\""));
 
         // Both blocks parse back into templates.
         let raw: TemplatesFile = toml::from_str(&text).unwrap();
         assert_eq!(raw.template.len(), 2);
+    }
+
+    #[test]
+    fn append_quotes_keys_with_special_characters() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("templates.toml");
+        // A colon (`ammo:1`) or space (`Alarm Disarm`) isn't valid in a TOML bare key, so the
+        // key must be quoted or the whole file fails to parse (the "none found" bug).
+        append_template(
+            &path,
+            "wasteland",
+            "Reload",
+            &[
+                ("con".into(), "95".into()),
+                ("ammo:1".into(), "50".into()),
+                ("Alarm Disarm".into(), "3".into()),
+            ],
+        )
+        .unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"ammo:1\" = 50"));
+        assert!(text.contains("\"Alarm Disarm\" = 3"));
+        // It parses back with every field intact.
+        let raw: TemplatesFile = toml::from_str(&text).unwrap();
+        assert_eq!(raw.template.len(), 1);
+        assert_eq!(raw.template[0].fields.len(), 3);
     }
 }
