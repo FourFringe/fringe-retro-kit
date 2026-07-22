@@ -67,7 +67,8 @@ What each game bakes:
 - **Ultima III** — Sosaria plus its named towns and castles.
 - **Ultima IV** — the 256×256 Britannia overworld plus its towns, villages and castles.
 - **Ultima V** — the 256×256 Britannia surface and the Underworld, plus every town, dwelling,
-  castle and keep (one map per floor).
+  castle and keep (one map per floor). Named location markers and the seven virtue shrines are
+  shown on the surface.
 - **Ultima VI** — the seamless 1024×1024 Britannia overworld (with its buildings, furniture, NPCs
   and signs overlaid) plus its five top-down dungeon levels (each with its own chests, ladders,
   torches and creatures overlaid). Multi-tile objects (trees, ships, statues, large furniture)

@@ -437,9 +437,10 @@ reached.
       each surface cave-mouth object carries a `quality` byte that indexes the dungeon-name table in
       `GAME.EXE`, giving an exact position and name, and every dungeon's top level is packed into the
       shared `dungeon-1` map, so each marker links there.
-- [ ] **Shrine POIs across the earlier Ultimas** — Ultima IV already marks its shrines from the
-      `AVATAR.EXE` table; audit Ultima V (and III where applicable) and add shrine markers wherever
-      the game data locates them, matching U6.
+- [x] **Shrine POIs across the earlier Ultimas** — Ultima IV already marks its shrines from the
+      `AVATAR.EXE` table; **Ultima V** now marks its seven surface shrines too, located by scanning
+      the Britannia grid for the shrine tile (index 25) and named via Ultima IV (positions match
+      exactly). Ultima I–III predate the virtues, so they have no shrines.
 - [ ] **Curated named POIs for Ultima II** — the same hand-authored approach fits U2 (its overworld
       markers are anonymous and it has no name/link table), and because U2 *does* export each town
       as its own sub-map, the labels could even be **clickable** (name + target).

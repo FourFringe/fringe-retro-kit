@@ -126,6 +126,23 @@ const LOCATIONS: [(&str, &str); LOC_COUNT] = [
     ("Doom", "dungeon"),
 ];
 
+/// The overworld tile that marks a Shrine of the Virtues.
+const SHRINE_TILE: u8 = 25;
+
+/// The Shrines of the Virtues by overworld tile position, `(name, x, y)`. Ultima V draws a shrine
+/// tile ([`SHRINE_TILE`]) at each but stores no name for them, so the names come from
+/// cross-referencing Ultima IV's shrine table (Britannia's geography is shared, and the tile
+/// positions match it exactly). Seven virtues have a surface shrine; Spirituality's is the Codex.
+const SHRINES: [(&str, u8, u8); 7] = [
+    ("Shrine of Justice", 73, 11),
+    ("Shrine of Sacrifice", 205, 45),
+    ("Shrine of Honesty", 233, 66),
+    ("Shrine of Compassion", 128, 92),
+    ("Shrine of Honor", 81, 207),
+    ("Shrine of Humility", 231, 216),
+    ("Shrine of Valor", 36, 229),
+];
+
 /// Render Ultima V into its worlds: the Britannia surface, the Underworld, and every town,
 /// dwelling, castle and keep (one map per floor).
 pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
@@ -136,7 +153,8 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let britannia = read_britannia(game_dir, &data)?;
     let underworld = read_underworld(game_dir)?;
     let (loc_worlds, targets) = location_worlds(game_dir, &data, &tiles)?;
-    let (brit_pois, under_pois) = location_pois(&data, &britannia, &targets);
+    let (mut brit_pois, under_pois) = location_pois(&data, &britannia, &targets);
+    brit_pois.extend(shrine_pois(&britannia));
 
     let mut worlds = vec![
         tilemap::world(
@@ -426,6 +444,19 @@ fn location_pois(
     (brit, under)
 }
 
+/// Shrine markers for the Britannia surface: each [`SHRINES`] entry is emitted only when the grid
+/// actually carries a [`SHRINE_TILE`] at its coordinate, so a differing build never gets a dead
+/// marker. Shrines are label-only (there is no shrine sub-map to open).
+fn shrine_pois(britannia: &[u8]) -> Vec<Poi> {
+    SHRINES
+        .iter()
+        .filter(|&&(_, x, y)| {
+            britannia.get(usize::from(y) * WORLD_W + usize::from(x)) == Some(&SHRINE_TILE)
+        })
+        .map(|&(name, x, y)| tilemap::poi(u32::from(x), u32::from(y), "shrine", name))
+        .collect()
+}
+
 /// Build a [`World`] for every floor of every town, dwelling, castle and keep. Each location file
 /// holds 16 floors; the `DATA.OVL` first-map-index array partitions them among the file's eight
 /// locations, so a location's floors are `[start[i], start[i + 1])`.
@@ -556,6 +587,27 @@ mod tests {
     #[test]
     fn location_table_matches_count() {
         assert_eq!(LOCATIONS.len(), LOC_COUNT);
+    }
+
+    #[test]
+    fn shrine_pois_land_on_shrine_tiles() {
+        // A grid with a shrine tile at Honesty's coordinate and open water elsewhere yields exactly
+        // that one shrine marker, centred on its tile.
+        let mut grid = vec![WATER_TILE; WORLD_W * WORLD_H];
+        let (_, x, y) = SHRINES[2];
+        grid[usize::from(y) * WORLD_W + usize::from(x)] = SHRINE_TILE;
+        let pois = shrine_pois(&grid);
+        assert_eq!(pois.len(), 1);
+        assert_eq!(pois[0].label, "Shrine of Honesty");
+        assert_eq!(pois[0].kind, "shrine");
+        assert!(pois[0].target.is_none());
+        assert_eq!(
+            (pois[0].px, pois[0].py),
+            (
+                u32::from(x) * TILE_SIZE + TILE_SIZE / 2,
+                u32::from(y) * TILE_SIZE + TILE_SIZE / 2
+            )
+        );
     }
 
     #[test]
