@@ -13,7 +13,8 @@ plus a `[map]` `export_dir` where baked tiles are written.
 
 Currently supported: **Ultima I**, **Ultima II**, **Ultima III**, **Ultima IV**, **Ultima V**,
 **Ultima VI**, and **Wasteland**. More worlds and games are planned; see
-[ROADMAP.md](../../ROADMAP.md), Phase 8.
+[ROADMAP.md](../../ROADMAP.md); the original design lives in
+[ROADMAP-history.md](../../ROADMAP-history.md) under Phase 8.
 
 Legend: ✅ implemented · 🔷 planned (not yet available)
 

@@ -1,0 +1,544 @@
+# Fringe Retro Kit — Roadmap history (Phases 1–10, archived)
+
+> **This is the archived, phase-by-phase development history** that carried the project from
+> nothing to v0.6.0 — seven games, with a save editor, a map browser, and a reverse-engineering
+> workbench. The linear "Phases" model retired here; planning has moved to a release-based
+> [ROADMAP.md](ROADMAP.md) (shipped releases as a changelog, then forward release plans). This
+> document is kept verbatim for the detailed per-format, per-game reverse-engineering record it
+> captures.
+
+Conservative by design: solve one problem well before expanding.
+
+---
+
+## Current status & near-term plan
+
+Phases 1–6 are complete. **Seven games** — Ultima I–VI and Wasteland — are
+readable and editable through both the CLI and the interactive TUI: a section-grouped
+editor with an enum picker, automatic backups + on-demand snapshots, a curated Save
+Library, character templates (with in-app capture), and a per-game save-file chooser.
+Games are auto-detected (GOG + Steam on macOS), CI runs on macOS/Ubuntu/Windows, and
+tagged releases publish macOS, Linux, and Windows binaries (Homebrew tap + `curl | sh`
+installer).
+
+Most recently: the **`fringe-retro-kit` reverse-engineering workbench** (Phase 9) — a codec
+lab, string ripper, schema explorer, live byte logger, and container carver — plus the map
+browser reaching Ultima II–V and Wasteland, and Wasteland save-editing (character sheets,
+skills, items, party location, cash).
+
+**Next up:** the `fringe-retro-kit` workbench is the headline of **v0.6.0**. With it in hand,
+the near-term focus shifts to **using the kit to sharpen the Ultimas** (Phase 9's
+Ultima-improvements track below) — clickable map POIs, confirming tentative fields, and
+reverse-engineering Ultima VI's compressed world map — alongside finishing the **map browser
+(Phase 8)** for the remaining games. Optional, non-blocking tracks remain: **Phase 7
+(Additional Games)** and **Phase 10 (Engine Enhancements)**. The parsing engine, distribution
+(Homebrew tap, `curl | sh` installer, cross-platform binaries), and save diff / comparison are
+all done (see below).
+
+---
+
+## Save diff / comparison ✅
+
+`fringe-retro diff <a> [<b>]` shows what changed between two saves in **game terms** (fields,
+not raw bytes), e.g. `Avatar strength 15 → 30`, `Party karma 75 → 99`. With one argument it
+compares a save against its most recent automatic backup.
+
+- Built on the editor's field model (`Session` entities + rows), so every supported game gets
+  it for free; dynamic fields (Wasteland skills) diff correctly, including newly-learned ones.
+- Falls back to a byte-range diff when the two files aren't the same known game.
+- In the TUI: the backup browser's preview leads with a "changes since this backup" diff above
+  the backup's full contents, and the restore confirmation previews "restoring will change …"
+  before you commit.
+- Save Library snapshot previews likewise lead with a per-file diff against the current save
+  (all of a snapshot's files — e.g. Ultima III's `ROSTER.ULT` and `PARTY.ULT`) above the full
+  contents, reusing the same preview pane (no extra UI).
+
+---
+
+## Phase 1 — Foundation + Hardcoded Ultima I MVP
+
+Detailed plan: **[PHASE-1-ULTIMA-I.md](PHASE-1-ULTIMA-I.md)**.
+
+- [x] Cargo workspace (`crates/core` library + `crates/cli` binary)
+- [x] Error handling (`thiserror` + `anyhow`)
+- [x] Parse `PLAYER*.U1` (fixed offsets; hand-rolled little-endian reads — `binrw` proved unnecessary for this simple layout)
+- [x] Inspect / display fields (read-only CLI: `inspect` / `get` / `dump`)
+- [x] Edit values, validated (`set`)
+- [x] Save changes (atomic write; unknown bytes preserved)
+- [x] Automatic timestamped backups (`backup` / `backups` / `restore`)
+- [x] Default save path via `config.toml` (`save_dir`) + env override
+- [x] In-game validation — an edited save loads correctly in Ultima I (no checksum)
+
+**Status: complete** — the first major milestone is met.
+
+---
+
+## Phase 2 — Game Library Manifest & Identifiers
+
+**Status: complete.** Users describe **which games they own, on which platform, and where**,
+then refer to games by short identifiers instead of raw file paths.
+
+- [x] App-level config (TOML) listing enabled games, each with: identifier (e.g. `ultima1`),
+      platform (GOG / Steam / DOSBox / manual), install path, and save location
+- [x] Resolve `fringe-retro inspect ultima1` (identifier → game + save path) instead of a path
+- [x] Enable/disable owned games (don't surface Wasteland options if you don't own it)
+- [x] Optional Save Library location (local or cloud-synced) — see Phase 5
+- [x] Generalizes a single-game `config.toml` (`save_dir`) into a multi-game manifest, with
+      per-game save-directory resolution (e.g. Ultima VI's `SAVEGAME`, Wasteland's slot)
+
+This is deliberately **game-agnostic**: it manages a player's library and never touches
+save-file parsing. Automatic platform *detection* (auto-filling these paths) is deferred to
+Phase 6; the manifest is the manual foundation it will later populate.
+
+---
+
+## Phase 3 — Parsing Engines & Per-Game Schemas
+
+**Status: complete.** Extracted only *after* several games were hardcoded, so the abstraction
+was earned. The hand-mapped games showed that parsing splits into two layers, and the
+architecture follows that seam (see [ARCHITECTURE.md](ARCHITECTURE.md)):
+
+- **Codec / container layer (Rust code).** Encryption, checksums, block scanning,
+  save-as-directory, exotic string encodings — small, per-*family* code (e.g. Wasteland's MSQ
+  cipher). Today this is inlined in each game module; factoring it into a reusable pipeline is
+  a future refinement (see Phase 10).
+- **Field-schema layer (data).** Fixed-offset fields over a plaintext buffer: integers
+  (LE/BE), scaled ints, BCD, enums (numeric or ASCII-letter), bitfields, booleans, names, and
+  record arrays. The Ultimas are essentially 100% this layer.
+
+Delivered:
+
+- [x] Generic field-schema engine ([crates/core/src/schema.rs](crates/core/src/schema.rs)):
+      `Field` + `FieldKind` (Name, Int LE/BE, Scaled, Bcd, Byte, Bool, Enum, Letter, Bitfield)
+      over a `&[u8]` buffer at a base offset, preserving unknown bytes by construction and
+      validating on write
+- [x] A record model that covers a single record (Ultima I/II), an array of records (Ultima
+      III's roster), a header-plus-members file (Ultima III's party), and column-array stats
+      (Ultima VI's `OBJLIST`) with the same primitives
+- [x] **All seven games run on the engine** — Ultima I–VI and Wasteland express their save
+      layout as `Field` tables; Wasteland layers its MSQ decrypt/encrypt + block checksum in
+      front of the schema
+- [x] String handling as schema field kinds (null-terminated ASCII names, BCD digits)
+
+Remaining engine work — data-driven/user-authorable schemas, a reusable codec pipeline, and
+the schema-file-format decision — has moved to **Phase 10 (Engine Enhancements)**. Known byte
+layouts for implemented games live in [docs/formats/](docs/formats/README.md).
+
+---
+
+## Phase 4 — Save Browser & Inspector (TUI)
+
+The TUI (Ratatui + Crossterm) becomes the primary interface here. Launched by running
+`fringe-retro` with no command.
+
+- [x] Game / save browsing (games list) and per-character drill-down (Ultima III roster slots & party members)
+- [x] Inspector: read-only view of known fields (scrollable, paged; shares formatting with `inspect`)
+- [x] Auto-generated editors driven by the field schema (text / enum / boolean fields) — batch edits in memory, validated on commit, one backup + write on save, with an unsaved-changes guard
+- [x] Backup browser — list a save's backups with a decoded preview, restore with confirmation (auto safety backup, no-op when already identical); snapshot the current save on demand
+- [x] Character templates — apply saved sets of field values to a character (`templates.toml`), validated up front and applied as ordinary in-memory edits; capture new templates from a character in the editor
+
+Illustrative mockups (not final):
+
+```
+Browser                         Inspector
+
+Games                           Strength         42
+▶ Ultima I                      Agility          35
+                                Gold         12,450
+Character                       Food          9,999
+▶ Lord British                  Transport     Aircar
+
+Current Save
+player0.u1                      Editors
+                                  Strength     [ 42 ]
+Backups                           Transport    < Aircar >
+2026-07-06 14:22                  Time Machine [✓]
+2026-07-06 14:05
+```
+
+---
+
+## Phase 5 — Save Management
+
+Detailed plan: **[PHASE-5-SAVE-LIBRARY.md](PHASE-5-SAVE-LIBRARY.md)**.
+
+### Automatic backups
+
+- [x] Browse backups (TUI backup browser)
+- [x] Restore backups (CLI + TUI)
+- [x] Configurable retention (`[backups] keep` / `max_age_days`; `backups --prune`)
+
+### Save Library
+
+The user's permanent, curated collection — distinct from automatic backups, and intended
+to become the central hub for managing a player's game history. The application handles
+copying files between the library and the active save directory automatically; users
+should never manipulate save files in a file manager.
+
+- [x] Configurable location — local **or** cloud-synced (Dropbox, Google Drive, OneDrive,
+      iCloud Drive); treated as ordinary storage, no assumptions about sync software
+- [x] Named snapshots with notes and metadata (created date, "last updated" from file times)
+- [x] Browse archived saves by game (CLI `library list`)
+- [x] Restore into the active game, with overwrite protection (CLI `library restore`)
+- [x] Duplicate / rename / delete (CLI `library duplicate` / `rename` / `delete`)
+
+Example workflow and configurable locations:
+
+```
+Ultima I  ›  Lord British  ›  Library
+
+    New Character
+    Before Time Machine
+    Entering Dungeon
+    Endgame
+
+Actions: View · Edit · Restore · Duplicate · Rename · Delete
+
+Library location examples:
+    ~/Documents/Fringe Retro Kit/
+    ~/Dropbox/Retro Saves/
+    D:\Games\Retro Saves\
+```
+
+---
+
+## Phase 6 — Platform Integration
+
+- [x] GOG (macOS) + Steam (macOS) detection + `detect --write` to append found games to the
+      config, or `[detect] auto` to fold them in at runtime · Windows/Linux deferred (need
+      machines to test on) · manual path override still works
+- [x] `detect --all` also lists recognized-but-unsupported games (Ultima VI, Bard's Tale
+      Trilogy, Magic Carpet 1/2) in a separate section, pointing at the issue tracker for
+      feature requests · display-only (never written to config / auto-detected)
+- [x] Windows & Linux support (builds published as built-but-untested binaries; still no
+      machines to exercise them against real saves — please report issues)
+- [x] GitHub Actions CI: fmt + clippy + test matrix across macOS / Ubuntu / Windows
+- [x] Release automation: tag-triggered builds for **macOS** (Apple Silicon + Intel),
+      **Linux** (x86_64), and **Windows** (x86_64) → GitHub Releases with tarballs/zips +
+      SHA-256 checksums. Only macOS is tested against real save files; Linux/Windows are
+      built-but-untested (see the README caveat).
+- [x] **Homebrew tap** (`FourFringe/homebrew-tap`): a binary formula installs the pre-built
+      release binary (`brew install FourFringe/tap/fringe-retro`); the release workflow
+      renders `packaging/homebrew/fringe-retro.rb` with the new version + checksums and pushes
+      it to the tap (needs a `HOMEBREW_TAP_TOKEN` secret).
+- [x] **`curl | sh` install script** ([packaging/install.sh](packaging/install.sh)): downloads
+      the latest macOS/Linux release binary, verifies its SHA-256, and installs to `~/.local/bin`.
+- [x] Publish Windows/Linux binaries (built-but-untested; caveat in the README)
+
+---
+
+## Phase 7 — Additional Games
+
+Only after the architecture has proven itself. Byte layouts we've mapped so far live in
+[docs/formats/](docs/formats/README.md).
+
+**Selection heuristic:** prefer games that (a) the maintainers legally own and can test, and
+(b) have an actively-maintained **open-source engine reimplementation** — that makes the
+save format effectively a published, tested spec.
+
+Grouped by codec complexity (which parsing engine each needs):
+
+- **Done / in progress:** Ultima I ✅, Ultima II ✅, Ultima III ✅, Ultima IV ✅, Ultima V ✅,
+  Ultima VI ✅ (party stats + names in `OBJLIST`, byte-faithful; map objects / inventory /
+  spells not yet exposed), Wasteland ✅ (MSQ cipher + block scan + character sheets +
+  skills, byte-faithful writes; items not yet exposed).
+- **Easy extensions — same family as the Ultimas:** Ultima VI (`Nuvie`) ✅ — character stats
+  are flat arrays in the uncompressed `OBJLIST` (done). The object-based, LZW-compressed map
+  data (party-as-objects across ~70 files) remains unhandled, but isn't needed for editing
+  character sheets.
+- **Candidates (owned & installed, to investigate after Wasteland):**
+  - **Magic Carpet 1 & 2** (Bullfrog, DOS via GOG/DOSBox). Saves live inside the game
+    directory — `…\SAVE` for Magic Carpet, `…\GAME\NETHERW\SAVE` for Magic Carpet 2.
+    **No published byte-level save-format spec found** (PCGamingWiki documents only the
+    locations, and there's no known open-source reimplementation) — a from-scratch
+    reverse-engineering target, and these are action games so the "save" is world/mission
+    state, not a character sheet.
+  - **Bard's Tale Trilogy** remaster (Krome / inXile, **Unity 2017.4**). Saves live in Unity's
+    persistent-data folder (`%USERPROFILE%\AppData\LocalLow\InXile Entertainment\The Bard's
+    Tale Trilogy\saves`; the macOS equivalent lives under `~/Library`), with **only a single
+    autosave shared across all three games**. Closed-source Unity and **no published format
+    spec** — almost certainly a Unity-serialized blob (binary or JSON) that would need RE.
+    Distinct from the 1985 originals.
+- **Candidates (kept in the list; may never get to them, and that's fine):** SSI Gold Box,
+  Might & Magic 3–5 / World of Xeen (`OpenXeen`), Dungeon Master, Eye of the Beholder,
+  Daggerfall (Daggerfall Unity; introduces RLE decompression), Wizardry, original Bard's Tale.
+- **Deferred — no test machine:** **Fallout 1 & 2** (owned on Steam; big-endian ints,
+  save-as-directory, well RE'd by TeamX / F12se) is Windows-only from this Mac, so it's on
+  hold until a Windows system is available.
+
+---
+
+## Phase 8 — Map Browser
+
+**Goal:** generate zoomable, real-graphics world maps from your **own** game install, so you
+can see the big picture during a playthrough instead of hand-drawing graph-paper maps.
+Delivered as standalone kit binaries (an offline **map exporter** + a small **local server**)
+that share `crates/core`. **Starting with Ultima I**, then following the games in play order.
+
+**Tile strategy — composite into a pyramid, not individual tile files.** Game tiles are tiny
+(Ultima I's are 16×16 px). We do *not* place one PNG per game tile into an HTML/CSS grid (that
+would be thousands of DOM nodes with no real zoom), and we don't hand-pick N×N clusters.
+Instead the exporter paints the **whole world into one large composite image** at true tile
+positions, then slices that into a standard **256×256 web-tile pyramid** with downsampled zoom
+levels. That's exactly what browser map libraries (Leaflet / OpenSeadragon) consume, gives
+smooth zoom/pan, and keeps the viewer dumb. (The "5×5 snapshot" instinct is right in spirit —
+batch tiles for efficiency — but the batch size is driven by the 256 px pyramid tile, not
+chosen by hand.)
+
+**Architecture — bake-then-serve** (all proprietary-format complexity in the offline pass,
+none in the viewer):
+
+- **Offline bake (per game).** The exporter reads the game's art via `crates/core`, decodes the
+  EGA/CGA tileset → RGBA, composites each world, slices a `z/x/y` PNG tile pyramid, and writes a
+  `manifest.json` (world name, dimensions, tile size, zoom levels, optional legend / labels /
+  points of interest). Output is inert PNG + JSON.
+- **Shared export location.** A configured export root (`[map] export_dir` in `config.toml`)
+  collects every game's bundles under `<export_dir>/<game>/<world>/…`. Export whichever games
+  you want; they all land here.
+- **Local web server (primary delivery).** A small `axum` server points at the export root,
+  knows its layout, and **dynamically generates a table of contents across all exported games
+  and every world within each** — no hand-maintained index. Serving over `http://localhost`
+  also sidesteps the `file://` `fetch()` restriction and leaves room for later interactivity
+  (live re-export, overlays, cross-map links). The front-end stays game-agnostic: it renders any
+  bundle from its manifest with Leaflet / OpenSeadragon. No Electron; cross-platform for free.
+- **Multi-world games** export each world (overworld, towns, dungeons) as its own bundle, listed
+  under its game in the generated TOC.
+- Baked art is derived from your **own installed game** (the exporter runs locally); we never
+  ship game graphics.
+
+**Checklist:**
+
+- [x] Map exporter binary (`crates/map`, bin `fringe-retro-map`)
+- [x] EGA tileset decoder → RGBA (Ultima I `EGATILES.BIN`: 16×16, 4 row-interleaved planes)
+- [x] Ultima I overworld: decode the nibble-packed `MAP.BIN` grid (168×156) and composite the
+      full world to one image (verified against the four-continent Sosaria map)
+- [x] Tile-pyramid generator (256×256 `z/x/y` + downsampled zoom levels) + per-world `manifest.json`
+- [x] `[map] export_dir` config; bundles written to `<export_dir>/<game>/<world>/…` (input dir
+      also resolved from each game's `save_dir`; `just map-export` / `map-serve` wrap it)
+- [x] `axum` server (`fringe-retro-map serve`): serves tiles + a dynamically generated
+      cross-game / cross-world TOC
+- [x] Leaflet viewer: zoom / pan, driven by the manifest (verified in-browser); Leaflet is
+      vendored and served locally, so the viewer works offline
+- [x] POI overlay: **named** towns / castles / monuments / dungeons read from the game's own
+      location table in `OUT.EXE` (84 places with authoritative coordinates + names; the table
+      is auto-located by validating positions against the map), baked into the manifest and
+      shown as toggleable, labelled Leaflet markers
+- [x] Player "you are here" marker: the party's `Map X/Y` from the save (`PLAYER1.U1`, via
+      `fringe-retro-core`) served at `/api/position` and shown on the map
+- [x] Live watch: the server watches the save file and pushes position updates over SSE
+      (`/api/position/stream`), so the marker moves the moment you save in-game
+- [x] Extend to **Ultima II**: overworlds + town/castle interiors (CGA tiles from `ULTIMAII.EXE`),
+      towns named from their painted map labels, typed location POIs (village/town/tower/castle/
+      dungeon), and the party position on the Earth overworlds
+- [x] Extend to **Ultima III, IV, and V**: overworlds plus towns, villages, castles, dwellings and
+      keeps (one map per floor), with typed/named POIs and live party position, following play order
+- [x] Extend to **Wasteland**: the desert overworld plus every town and building (42 maps from the
+      pristine `MASTER1`/`MASTER2` disks), with **clickable overworld↔sub-map POI navigation** and
+      **dual position markers** (current map + return point)
+- [x] Extend to **Ultima VI**: reverse-engineered the LZW-compressed, chunk/super-chunk `MAP` +
+      `CHUNKS` layout and the VGA tile graphics (`MAPTILES.VGA`/`TILEINDX.VGA`/`MASKTYPE.VGA`/`U6PAL`)
+      so the 1024×1024 **Britannia** overworld and its five top-down **dungeon levels** now bake,
+      with **objects** overlaid on every map: the surface's buildings, furniture, NPCs and signs
+      from `LZOBJBLK`, and each dungeon level's chests, ladders, torches and creatures from
+      `LZDNGBLK` (block *i* holds level *i*'s objects in level-local coordinates). Multi-tile
+      objects (trees, ships, statues, large furniture) render whole via their `TILEFLAG`
+      double-width / double-height flags. Objects render at an 8-px tile edge to keep the composite
+      tractable; verified against the real game files. **Fifteen named towns and castles** plus the
+      **seven virtue shrines** are labelled, and **all thirteen dungeon entrances** are marked and
+      clickable — read from the game data (each cave-mouth object's `quality` byte indexes the
+      `GAME.EXE` dungeon-name table) and linked to the shared first dungeon level.
+
+For **Ultima I**, town/castle interiors aren't worth exporting (no standalone layout files — they
+live in the executable) and its dungeons are first-person and procedurally generated, so the
+overworld is the whole map. Later games differ: **Ultima II** stores each town as its own map
+file (exported as sub-maps), while its dungeons and towers are first-person and skipped.
+
+The early Ultimas have **uncompressed** map data, so this phase needs no decompression codec.
+When a compressed-map game arrives (Ultima VI's LZW map; later Daggerfall's RLE), that decoder
+is where the **Phase 9 codec workbench** first gets pulled in.
+
+---
+
+## Phase 9 — Kit Tools (CLI dev tools)
+
+**Status: the five tools are built** — the `fringe-retro-kit` binary is the headline of
+**v0.6.0**. Focused **researcher/dev-facing** commands that share `crates/core`
+(`fringe-retro-core`) but carry complexity we deliberately keep out of the polished
+`fringe-retro` app: our reverse-engineering accelerators for **save formats** (the map browser
+is Phase 8). The reusable algorithms live in `crates/core` (`codec`, `scan`, `diff`); the kit
+is a thin CLI over them. Full reference: [docs/commands/fringe-retro-kit.md](docs/commands/fringe-retro-kit.md).
+
+**Design rule:** built **CLI-first with plain-text / `--json` output** so they're scriptable,
+diffable, and usable in automated / AI-assisted sessions.
+
+- [x] **Codec workbench** (`codec`) — `decode` (rolling-XOR cipher, Wasteland Huffman, EXEPACK),
+      `roundtrip` (verify a symmetric codec byte-for-byte), and a **checksum solver** (`checksum`)
+      that tries candidate algorithms against a known value (the carry-fold-vs-negated-sum detective
+      work from Wasteland, automated). Codecs live in `core::codec`, shared with the games.
+- [x] **String ripper** (`strings`) — `ascii` (printable runs with offsets) and `five-bit`
+      (Wasteland's 5-bit packed strings) to find name/item/spell tables and dialogue.
+- [x] **Schema explorer** (`schema`) — the mechanical RE loop as repeatable commands:
+  - [x] **Value finder** (`find`) — locate a known value across widths/endianness (byte/u16/u24/u32,
+        LE/BE) → candidate offsets.
+  - [x] **Guided diff** (`diff`) — "save A = before, save B = after I raised STR 15→30" → the changed
+        byte runs (builds on core's byte `diff`).
+  - [x] **Stride detector** (`stride`) — the gaps between repeated values, to reveal record sizes
+        (rosters, party arrays).
+  - [ ] **Hypothesis overlay** — render a tentative `Field` table over a buffer live, tuning offsets
+        until values read sensibly (deferred).
+  - [ ] **Schema export** — dump a confirmed layout in a schema file format (deferred; blocked on the
+        Phase 10 data-driven-schema decision).
+- [x] **Live watch / logger** (`watch`) — poll a save while playing and log timestamped byte deltas
+      (text or streamable JSONL), to correlate in-game actions with byte changes.
+- [x] **Archive / container carver** (`carve`) — split a container into its member blocks at a magic
+      signature (e.g. Wasteland's back-to-back `msq` blocks), with an optional Wasteland **MSQ
+      decrypt** (`--decrypt`) and **savegame extraction** (`--savegame-only`, which finds and decrypts
+      the party/character block among the map blocks).
+
+### Applying the kit — Ultima improvements
+
+Now that the workbench exists, circle back and use it to sharpen the games we already support
+(mostly the Ultimas), bringing their map browser and field coverage up to the parity Wasteland
+reached.
+
+- [x] **Clickable POI navigation in the map browser** for the Ultimas — click an overworld
+      town / castle / dungeon to jump into its baked sub-map, as Wasteland's map already does.
+      Done for **Ultima III, IV, and V**: each overworld location POI now carries a `target` bundle
+      slug (matched to its town/castle map by name; Ultima V links to the entrance floor), verified
+      to have no dead links. **Ultima I** is moot (it exports only the overworld, so its named
+      markers have nothing to open), and **Ultima II** isn't feasible automatically: its overworld
+      markers are anonymous, tile-scanned types and there is *no* overworld→map table (already
+      confirmed absent from `ULTIMAII.EXE` and the town-file headers), so links would need a
+      hand-authored mapping. Optional follow-up: in-map "back to overworld" links (browser back
+      already works).
+- [x] **Dual position markers** — when the party is inside a location, the "you are here" marker
+      shows on that location's sub-map (the current tile) *and* on the parent overworld at its
+      entrance (the tile you step back out onto), matching Wasteland. Done for **Ultima V**: the
+      save's location code (`0x2ED`) maps to the Party-Location table (the `LOCATIONS` array), the
+      overworld entrance is the `DATA.OVL` coordinate table, and the current sub-map is resolved by
+      floor. Verified end-to-end against a real in-`Iolo's Hut` save (markers on `iolo-s-hut` at the
+      party tile *and* on Britannia at the entrance, absent from the Underworld and other towns).
+      Nothing more is needed for the other games: **Ultima III and IV don't let you save inside a
+      town, castle or dungeon** (confirmed in-game), so their party position is always on their
+      single overworld — the marker already shown — and Ultima I/II likewise only save on the
+      overworld. Ultima V is the only game with a genuine dual case, and it's covered.
+- [x] **Ultima VI world map** — reverse-engineered the LZW-compressed, chunk/super-chunk map and
+      the VGA tile graphics, so **Britannia** and its five top-down **dungeon levels** now bake into
+      the map browser, with **object overlays** on every map: the surface's buildings / furniture /
+      NPCs / signs from `LZOBJBLK` and each dungeon level's chests / ladders / torches / creatures
+      from `LZDNGBLK` (block *i* → level *i*, level-local coordinates), composited via the
+      `BASETILE` type→tile table and `OBJTILES.VGA`, with **multi-tile objects** (trees, ships,
+      statues, large furniture) rendered whole via their `TILEFLAG` double-width/height flags.
+      **Fifteen named towns and castles** are labelled: U6 ships no *town* location table (their
+      names live only in prose), so those coordinates are hand-authored, read off the render and
+      cross-referenced against Ultima IV's location table (Britannia's geography carries across the
+      series). They're label-only — U6's towns are baked inline into the overworld, so there are no
+      separate town maps to open. The **seven Shrines of the Virtues** are also marked (positioned
+      from their stone-circle objects, named via Ultima IV). Finally, **all thirteen dungeon
+      entrances** (the classic seven plus U6's caves — Swamp / Spider / Cyclops / Heftimus Cave,
+      Heroes' Hole, Buccaneer's Cave) are read straight from the game data and are **clickable**:
+      each surface cave-mouth object carries a `quality` byte that indexes the dungeon-name table in
+      `GAME.EXE`, giving an exact position and name, and every dungeon's top level is packed into the
+      shared `dungeon-1` map, so each marker links there.
+- [x] **Shrine POIs across the earlier Ultimas** — Ultima IV already marks its shrines from the
+      `AVATAR.EXE` table; **Ultima V** now marks its seven surface shrines too, located by scanning
+      the Britannia grid for the shrine tile (index 25) and named via Ultima IV (positions match
+      exactly). Ultima I–III predate the virtues, so they have no shrines.
+- [x] **Named, clickable POIs for Ultima II** — U2 ships no overworld→map table, but each region's
+      overworld and its towns share a group and the town map's final digit encodes the landmark kind
+      (village `1`, town `2`, castle `3`), which pins the link without hand-authoring. Overworld
+      village/town/castle markers now carry the town's painted name (when it has one) and link to
+      its sub-map; towers and dungeons (no rendered sub-map) stay generic. This brings U2 up to the
+      clickable-POI parity of Ultima III–V.
+- [x] **Audited POI / location tables** with the kit's string ripper across all seven games —
+      confirmed every town, castle, dungeon and shrine is correctly named and typed. The
+      table-driven games match their own data exactly: Ultima I's names live in `MONDAIN`/`OUT`/
+      `SPACE.EXE`, Ultima III–V read location tables, Ultima VI's dungeons index the `GAME.EXE`
+      name table, and Ultima II reads its painted map labels. The intentionally generic cases are
+      documented and correct — Ultima III's dungeons stay `Dungeon` (first-person, and the
+      coordinate table's dungeon order isn't independently verified), Ultima VI's town names are
+      curated (no in-data town table), and Wasteland's overworld entrances are typed uniformly from
+      their transition text (so a couple, like "the Guardian's Citadel", read as `town`).
+- [ ] **Confirm tentative fields** — *ongoing verification, gated on live play.* Capture
+      before/after saves while playing each Ultima and use `schema find` / `schema diff` to promote
+      `tentative: true` fields to confirmed. It can't complete without in-game editing, so it stays
+      a rolling task rather than a Phase 9 blocker.
+
+Sequencing note (kept from the original plan): each tool earned its abstraction as a real
+format forced it — the codec workbench for Wasteland's cipher/checksum and EXEPACK, the string
+ripper and carver for Wasteland's `msq` containers and packed strings.
+
+### Next save-editor feature (beyond the Phase 9 kit work)
+
+- [ ] **Ultima VI objects / inventory / spells** — extend U6's save editor past party stats and
+      names into the object / inventory / spell system, using the schema explorer + string ripper.
+      This is fresh reverse-engineering (Phase 8-style save-editor coverage), not kit polish or
+      engine infrastructure, so it's tracked as its own feature rather than folded into Phase 9 or
+      the Phase 10 engine work.
+
+---
+
+## Phase 10 — Engine Enhancements
+
+Infrastructure and parsing refinements that the current feature set doesn't need but that
+would pay off as the game roster and supported platforms grow. **None are blocking** — they're
+collected here so they don't get lost inside earlier completed phases.
+
+### Parsing / schema
+
+- [ ] **Data-driven, user-authorable game schemas.** Graduate the in-code `Field` tables to a
+      hand-writable text format so simple fixed-layout games can be added without Rust.
+      Encrypted/compressed games would still ship as official Rust codecs.
+- [ ] **Reusable codec pipeline.** Factor the per-game container logic (currently inlined —
+      e.g. Wasteland's MSQ decrypt/encrypt + block checksum) into a `Transform` pipeline in
+      front of the schema, with a symmetric write path, so a second MSQ-family game reuses it.
+      *Groundwork landed in Phase 9:* the shared algorithms (rolling-XOR cipher, Wasteland Huffman,
+      EXEPACK, checksums) now live in `crates/core/src/codec/` and are used by both the games and the
+      kit; the remaining work is composing them into a declarative pipeline.
+- [ ] **Pluggable string codecs** beyond ASCIIZ/BCD, if a future game needs one. *Partially done:*
+      the packed 5-bit decoder now lives in `core::codec::strings5` (used by the map browser and the
+      kit's string ripper); exposing it as a schema `FieldKind` is the remaining step.
+
+**Open decision — schema / config format (do NOT lock yet).** The abstraction is now proven as
+a Rust type; the remaining question is whether the field schema graduates to a hand-writable
+text format. Leading candidates are **YAML** (friendly for field tables) for game schemas and
+**TOML** (native to Rust) for app settings (the original `serde_yaml` is unmaintained, so a
+maintained fork would be used). A schema might conceptually look like:
+
+```yaml
+game:
+  name: Ultima I
+
+saveFiles:
+  - player*.u1
+
+fields:
+  strength:
+    type: i16le
+    offset: 0x18
+    label: Strength
+
+  transport:
+    type: enum
+    offset: 0x30
+```
+
+### Platform / operations
+
+- [ ] Proper per-OS path handling via the `directories` crate (config / data / cache dirs)
+- [ ] File logging via `tracing` for diagnostics in bug reports (deferred since Phase 1)
+
+---
+
+## Future ideas (not commitments)
+
+- Search, tags, favorites
+- Screenshots, play history
+- Duplicate detection
+- JSON import / export
+- Checksum verification
+- Steam Cloud awareness
+- Batch editing
+- Plugin system
+- Desktop GUI
+- Schema validator
