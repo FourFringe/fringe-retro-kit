@@ -80,6 +80,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
     );
 
     let mut worlds = Vec::with_capacity(names.len());
+    let towns = collect_town_names(game_dir, &names);
     for name in names {
         let data =
             std::fs::read(game_dir.join(&name)).with_context(|| format!("reading map {name}"))?;
@@ -99,7 +100,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         // text is already legible on the map, so markers would just obscure it).
         let is_town = has_dialogue(game_dir, &name);
         let title = if is_town {
-            town_name(&extract_labels(grid))
+            town_display_name(&name.to_ascii_lowercase(), grid)
                 .map(|n| format!("Ultima II — {n}"))
                 .unwrap_or_else(|| format!("Ultima II — Town ({})", name.to_ascii_uppercase()))
         } else {
@@ -109,7 +110,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         let pois = if is_town {
             vec![]
         } else {
-            overworld_pois(grid)
+            overworld_pois(grid, &name, &towns)
         };
 
         let world_id = name.to_ascii_lowercase();
@@ -217,13 +218,50 @@ fn landmark_kind(tile_index: u8) -> Option<&'static str> {
     }
 }
 
-/// Scan an overworld grid for landmark tiles and emit a POI for each, typed by tile.
-///
-/// These are **not** linked to their sub-maps: Ultima II has no overworld→map table (confirmed
-/// absent from both `ULTIMAII.EXE` and the town files' headers), so each marker carries only a
-/// generic type label and acts as a toggleable "locations" overlay. The first column and the
-/// bottom two rows hold border/leftover data rather than real landmarks, so they're skipped.
-fn overworld_pois(grid: &[u8]) -> Vec<Poi> {
+/// The town sub-map digit a linkable overworld landmark opens: villages open sub-map `1`, towns
+/// `2`, castles `3`. Ultima II has no overworld→map table, but a region's overworld and its towns
+/// share a group, and each town map's final digit encodes the landmark kind (confirmed by which
+/// town files a region ships — e.g. a region with a castle but no village has a `…3` town but no
+/// `…1`). Towers and dungeons have no top-down sub-map, so they aren't linked.
+fn kind_sub_map_digit(kind: &str) -> Option<char> {
+    match kind {
+        "village" => Some('1'),
+        "town" => Some('2'),
+        "castle" => Some('3'),
+        _ => None,
+    }
+}
+
+/// Read each town map's painted name, keyed by its world slug (the lowercased map name). The value
+/// is the extracted place name, or `None` when the town paints no name label. Used to name and
+/// link the overworld landmark that opens each town.
+fn collect_town_names(game_dir: &Path, names: &[String]) -> HashMap<String, Option<String>> {
+    let mut towns = HashMap::new();
+    for name in names {
+        if !has_dialogue(game_dir, name) {
+            continue;
+        }
+        let Ok(data) = std::fs::read(game_dir.join(name)) else {
+            continue;
+        };
+        if data.len() < MAP_GRID_LEN {
+            continue;
+        }
+        let grid = &data[data.len() - MAP_GRID_LEN..];
+        let slug = name.to_ascii_lowercase();
+        let display = town_display_name(&slug, grid);
+        towns.insert(slug, display);
+    }
+    towns
+}
+
+/// Scan an overworld grid for landmark tiles and emit a POI for each, typed by tile. Village, town
+/// and castle landmarks are **named and linked** to their town sub-map (see [`kind_sub_map_digit`])
+/// when that town was rendered; towers and dungeons stay generic, unlinked markers. The first
+/// column and the bottom two rows hold border/leftover data rather than real landmarks, so they're
+/// skipped.
+fn overworld_pois(grid: &[u8], name: &str, towns: &HashMap<String, Option<String>>) -> Vec<Poi> {
+    let base = name[..name.len() - 1].to_ascii_lowercase(); // "MAPX20" → "mapx2"
     let mut pois = Vec::new();
     for (i, &byte) in grid.iter().enumerate() {
         let x = (i % MAP_W) as u32;
@@ -231,9 +269,20 @@ fn overworld_pois(grid: &[u8]) -> Vec<Poi> {
         if x == 0 || y as usize >= MAP_H - 2 {
             continue;
         }
-        if let Some(kind) = landmark_kind(byte >> 2) {
-            pois.push(tilemap::poi(x, y, kind, &title_case(kind)));
-        }
+        let Some(kind) = landmark_kind(byte >> 2) else {
+            continue;
+        };
+        // Link to the town sub-map this landmark opens, if that town exists in this region.
+        let slug = kind_sub_map_digit(kind)
+            .map(|d| format!("{base}{d}"))
+            .filter(|slug| towns.contains_key(slug));
+        let label = match &slug {
+            Some(slug) => towns[slug].clone().unwrap_or_else(|| title_case(kind)),
+            None => title_case(kind),
+        };
+        let mut poi = tilemap::poi(x, y, kind, &label);
+        poi.target = slug.map(|slug| format!("/{GAME}/{slug}"));
+        pois.push(poi);
     }
     pois
 }
@@ -393,8 +442,29 @@ fn merge_runs(runs: Vec<Run>) -> Vec<Poi> {
         .collect()
 }
 
+/// Names for towns whose maps paint no readable name label. Ultima II's Lord British's Castle
+/// appears in more than one era and spells its name only inside merged interior signs (`Vault`,
+/// `Lord British`, `Kitchen`), so those maps are named by hand.
+const MANUAL_NAMES: &[(&str, &str)] = &[
+    ("mapx23", "Lord British's Castle"),
+    ("mapx33", "Lord British's Castle"),
+];
+
+/// A town's display name, from its painted labels or the [`MANUAL_NAMES`] override (by world slug,
+/// the lowercased map name) when the map paints no readable name.
+fn town_display_name(slug: &str, grid: &[u8]) -> Option<String> {
+    town_name(&extract_labels(grid)).or_else(|| {
+        MANUAL_NAMES
+            .iter()
+            .find(|&&(s, _)| s == slug)
+            .map(|&(_, n)| n.to_string())
+    })
+}
+
 /// Derive a town's name from its labels: prefer a label naming the settlement itself
-/// (`TOWNE`/`TOWN`/`VILLAGE`), then fall back to a weaker place-type word (`PORT`, `COVE`, …).
+/// (`TOWNE`/`TOWN`/`VILLAGE`), then a weaker place-type word (`PORT`, `COVE`, …), and finally the
+/// label painted centred along the map's bottom edge — Ultima II's convention for a settlement's
+/// own name (e.g. `NEW JESTER`, `COMPUTER CAMP`), used when no keyword identifies it.
 fn town_name(pois: &[Poi]) -> Option<String> {
     const STRONG: [&str; 3] = ["TOWNE", "TOWN", "VILLAGE"];
     const WEAK: [&str; 4] = ["PORT", "COVE", "CASTLE", "KEEP"];
@@ -407,7 +477,16 @@ fn town_name(pois: &[Poi]) -> Option<String> {
     pois.iter()
         .find(|p| contains(p, &STRONG))
         .or_else(|| pois.iter().find(|p| contains(p, &WEAK)))
+        .or_else(|| pois.iter().find(|p| is_bottom_center(p)))
         .map(|p| p.label.clone())
+}
+
+/// Whether a label sits centred along the bottom edge of the map, where Ultima II paints a town's
+/// own name (roughly the middle eight columns, in the bottom rows).
+fn is_bottom_center(p: &Poi) -> bool {
+    let col = p.px / tilemap::TILE_SIZE;
+    let row = p.py / tilemap::TILE_SIZE;
+    (MAP_W as u32 / 2).abs_diff(col) <= 4 && row >= 54
 }
 
 /// Capitalise the first letter of each whitespace-separated word, lowercasing the rest.
@@ -486,7 +565,8 @@ mod tests {
         put(&mut grid, 0, 62, 6); // border artifact — must be skipped
         put(&mut grid, 10, 10, 2); // plain terrain — not a landmark
 
-        let pois = overworld_pois(&grid);
+        // No town registry → every marker stays generic and unlinked.
+        let pois = overworld_pois(&grid, "MAPX20", &HashMap::new());
         let kinds: Vec<&str> = pois.iter().map(|p| p.kind.as_str()).collect();
         assert_eq!(pois.len(), 5);
         for k in ["village", "town", "tower", "castle", "dungeon"] {
@@ -494,8 +574,38 @@ mod tests {
         }
         // The (0,62) artifact and plain terrain produced no POI.
         assert!(pois.iter().all(|p| p.px >= TILE_SIZE));
-        // Labels are the title-cased kind.
+        // Labels are the title-cased kind, and nothing links without a registry.
         assert!(pois.iter().any(|p| p.label == "Town"));
+        assert!(pois.iter().all(|p| p.target.is_none()));
+    }
+
+    #[test]
+    fn overworld_pois_link_landmarks_to_town_sub_maps() {
+        let mut grid = vec![0u8; MAP_GRID_LEN];
+        let put = |g: &mut [u8], x: usize, y: usize, tile: u8| g[y * MAP_W + x] = tile << 2;
+        put(&mut grid, 36, 27, 6); // town  → digit 2 → mapx22
+        put(&mut grid, 38, 44, 5); // village → digit 1 → mapx21 (exists but unnamed)
+        put(&mut grid, 35, 20, 8); // castle → digit 3 → mapx23 (absent → unlinked)
+
+        let towns = HashMap::from([
+            ("mapx22".to_string(), Some("Towne Linda".to_string())),
+            ("mapx21".to_string(), None),
+        ]);
+        let pois = overworld_pois(&grid, "MAPX20", &towns);
+
+        let town = pois.iter().find(|p| p.kind == "town").unwrap();
+        assert_eq!(town.label, "Towne Linda");
+        assert_eq!(town.target.as_deref(), Some("/ultima2/mapx22"));
+
+        // A rendered but unnamed town still links, labelled by kind.
+        let village = pois.iter().find(|p| p.kind == "village").unwrap();
+        assert_eq!(village.label, "Village");
+        assert_eq!(village.target.as_deref(), Some("/ultima2/mapx21"));
+
+        // No town file for the castle digit → stays generic and unlinked.
+        let castle = pois.iter().find(|p| p.kind == "castle").unwrap();
+        assert_eq!(castle.label, "Castle");
+        assert!(castle.target.is_none());
     }
 
     #[test]
@@ -579,5 +689,33 @@ mod tests {
             target: None,
         }];
         assert_eq!(town_name(&none), None);
+    }
+
+    #[test]
+    fn town_name_falls_back_to_bottom_centre_label() {
+        // A town whose name has no keyword: a shop sign up top and the name painted centre-bottom.
+        let mut grid = vec![0u8; MAP_GRID_LEN];
+        paint(&mut grid, 6, 12, "SOFTALK"); // shop, top-left
+        paint(&mut grid, 56, 26, "TOMMERSVILLE"); // town name, bottom-centre (col 26..38)
+        assert_eq!(
+            town_name(&extract_labels(&grid)).as_deref(),
+            Some("Tommersville")
+        );
+
+        // A centred label that isn't near the bottom must not be taken as the name.
+        let mut middle = vec![0u8; MAP_GRID_LEN];
+        paint(&mut middle, 30, 30, "GORKY");
+        assert_eq!(town_name(&extract_labels(&middle)), None);
+    }
+
+    #[test]
+    fn town_display_name_uses_manual_override() {
+        // A castle map whose name isn't cleanly painted still resolves via the override table.
+        let grid = vec![0u8; MAP_GRID_LEN];
+        assert_eq!(
+            town_display_name("mapx33", &grid).as_deref(),
+            Some("Lord British's Castle")
+        );
+        assert_eq!(town_display_name("mapg50", &grid), None);
     }
 }

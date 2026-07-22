@@ -441,9 +441,12 @@ reached.
       `AVATAR.EXE` table; **Ultima V** now marks its seven surface shrines too, located by scanning
       the Britannia grid for the shrine tile (index 25) and named via Ultima IV (positions match
       exactly). Ultima I–III predate the virtues, so they have no shrines.
-- [ ] **Curated named POIs for Ultima II** — the same hand-authored approach fits U2 (its overworld
-      markers are anonymous and it has no name/link table), and because U2 *does* export each town
-      as its own sub-map, the labels could even be **clickable** (name + target).
+- [x] **Named, clickable POIs for Ultima II** — U2 ships no overworld→map table, but each region's
+      overworld and its towns share a group and the town map's final digit encodes the landmark kind
+      (village `1`, town `2`, castle `3`), which pins the link without hand-authoring. Overworld
+      village/town/castle markers now carry the town's painted name (when it has one) and link to
+      its sub-map; towers and dungeons (no rendered sub-map) stay generic. This brings U2 up to the
+      clickable-POI parity of Ultima III–V.
 - [ ] **Confirm tentative fields** across the Ultimas with `schema find` / `schema diff`
       (before/after in-game edits), promoting `tentative: true` fields to confirmed.
 - [ ] **Ultima VI objects / inventory / spells** — use the schema explorer + string ripper to map

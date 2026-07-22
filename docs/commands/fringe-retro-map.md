@@ -63,7 +63,8 @@ fringe-retro-map export [--game <id>] [--input <dir>] [--out <root>] [--png <fil
 What each game bakes:
 
 - **Ultima I** — one overworld (Sosaria).
-- **Ultima II** — every overworld and town (dungeons and other non-tile maps are skipped).
+- **Ultima II** — every overworld and town (dungeons and other non-tile maps are skipped);
+  overworld village/town/castle markers are named and link to their town sub-map.
 - **Ultima III** — Sosaria plus its named towns and castles.
 - **Ultima IV** — the 256×256 Britannia overworld plus its towns, villages and castles.
 - **Ultima V** — the 256×256 Britannia surface and the Underworld, plus every town, dwelling,
