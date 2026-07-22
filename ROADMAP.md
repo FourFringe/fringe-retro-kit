@@ -75,7 +75,10 @@ Ultima IV and V store their first-person dungeons as fixed tile grids (walls, do
 fields) — the same shape as Ultima VI's dungeons, which already render top-down. Reconstruct those
 grids into top-down "graph-paper" maps and slot them into the existing dungeon pipeline.
 
-- [ ] **Ultima V dungeons** (`DUNGEON.DAT`) → top-down per-level maps.
+- [x] **Ultima V dungeons** (`DUNGEON.DAT`) → top-down per-level maps. All eight dungeons × eight
+      levels are baked as synthesised graph-paper maps (walls, corridors, doors, ladders, chests,
+      fountains, traps, energy fields, rooms and secret doors), and each overworld entrance POI now
+      links to its dungeon's first level.
 - [ ] **Ultima IV dungeons** (fixed tile grids, eight dungeons × eight levels) → same.
 - [ ] Stretch: **Ultima III** (2192-byte first-person format), then **Ultima II** (an older
       non-tile format that needs decoding first).
