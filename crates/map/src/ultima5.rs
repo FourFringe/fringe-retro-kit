@@ -17,7 +17,8 @@
 //! each of its eight locations (so multi-floor places like Lord British's Castle can be split into
 //! levels), plus a 40-entry table of every enterable location's overworld `(x, y)` — used both to
 //! place named points of interest and to tell whether a location sits on the surface or in the
-//! Underworld. The eight dungeons are first-person, so they only contribute a marker.
+//! Underworld. The eight dungeons play in first person but store their maze as tile grids in
+//! `DUNGEON.DAT`, reconstructed as top-down "graph-paper" maps (see the Dungeons section below).
 //!
 //! Tiles: `TILES.16` — 512 tiles of 16×16, 4-bit EGA graphics (two pixels per byte, high nibble
 //! first), **LZW-compressed** with the Ultima 6-style codec (see [`crate::lzw`]).
@@ -83,7 +84,8 @@ const GAME: &str = "ultima5";
 /// The 40 enterable locations in Party-Location order — the order of the `DATA.OVL` coordinate and
 /// first-map-index tables: 8 towns, 8 dwellings, 8 castles/villages, 8 keeps, then 8 dungeons. Each
 /// is `(name, kind)`, where `kind` is the marker/badge style. The first 32 have top-down maps (the
-/// four location files, eight each); the eight dungeons are first-person and only get a marker.
+/// four location files, eight each); the eight dungeons are reconstructed from `DUNGEON.DAT` (see
+/// the Dungeons section) and linked from their overworld entrance.
 const LOCATIONS: [(&str, &str); LOC_COUNT] = [
     ("Moonglow", "town"),
     ("Britain", "town"),

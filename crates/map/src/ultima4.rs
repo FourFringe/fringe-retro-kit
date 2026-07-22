@@ -5,8 +5,9 @@
 //! back into a linear grid before rendering.
 //!
 //! Towns, villages and castles are each their own `.ULT` file: a 32×32 tile grid in the first
-//! 1024 bytes (the trailing 256 bytes are NPC data), named by file. Dungeons are first-person
-//! (`.DNG`) and skipped.
+//! 1024 bytes (the trailing 256 bytes are NPC data), named by file. The eight dungeons play in
+//! first person but store their maze as tile grids in `.DNG` files, reconstructed as top-down
+//! "graph-paper" maps (see [`dungeon_worlds`]).
 //!
 //! Tiles: `SHAPES.EGA` — 256 tiles of 16×16 EGA graphics in the same 4-plane, row-interleaved
 //! layout as Ultima I, so the [`crate::ega`] decoder is reused directly — but with a gently

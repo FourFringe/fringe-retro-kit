@@ -1,9 +1,23 @@
 //! Shared top-down rendering for the first-person Ultima dungeons.
 //!
-//! Ultima IV and V (and later III) store their dungeons as tile grids but render them in
-//! first-person, so the games ship no top-down art for the dungeon cells. Each game classifies its
-//! own tile bytes — the encodings differ per game — into a common [`Cell`]; this module synthesises
-//! a small "graph-paper" image for each cell and builds the tile set that `tilemap::render` draws.
+//! Ultima II, III, IV and V play their dungeons in first person, so the games ship no top-down art
+//! for the dungeon cells — but each stores the maze itself as a tile grid. (Ultima I's dungeons are
+//! generated at runtime and have no stored map; Ultima VI's dungeons render through the main object
+//! pipeline.) The per-game byte encodings differ, so each game supplies a classifier that maps its
+//! raw tile bytes into a common [`Cell`]; this module synthesises a small "graph-paper" image for
+//! each cell and builds the 256-entry tile set that `tilemap::render` draws.
+//!
+//! The stored layouts and per-game tile-code tables are documented in each game's
+//! `docs/formats/ultimaN.md`. In brief:
+//!
+//! - **Ultima II**: `MAP[XG]N5` (dungeon) / `MAP[XG]N4` (tower) — sixteen 16×16 levels each.
+//! - **Ultima III**: `*.ULT` (2192 bytes) — eight 16×16 levels + a per-level name table.
+//! - **Ultima IV**: `*.DNG` — a 512-byte level map of eight 8×8 levels (room data follows).
+//! - **Ultima V**: `DUNGEON.DAT` — eight dungeons × eight 8×8 levels.
+//!
+//! The byte encodings are game-specific: high-nibble type codes are common, but the same nibble
+//! means different things per game (e.g. `0x8` is a trap in Ultima IV but a wall in Ultima III),
+//! which is why the classifier lives with each game rather than here.
 
 use image::{Rgb, RgbImage};
 

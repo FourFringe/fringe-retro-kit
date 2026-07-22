@@ -148,7 +148,8 @@ an 8-byte array of each location's **first floor index**, so a location's floors
 | `0x1E3A` | `CASTLE.DAT` | Lord British's & Blackthorn's castles, the Britannys, small towns |
 | `0x1E42` | `KEEP.DAT` | The keeps and abbeys |
 
-The eight dungeons are first-person (`DUNGEON.DAT`) and aren't rendered as top-down maps.
+The eight dungeons play first-person, but their mazes are stored top-down in `DUNGEON.DAT` — see
+[Dungeons](#dungeons-dungeondat) below.
 
 ## Location Coordinates & Names (`DATA.OVL`)
 
@@ -180,3 +181,32 @@ of variable-width codewords packed **LSB-first**. Codewords start at 9 bits and 
 dictionary fills. Two codewords are reserved: `0x100` reinitialises the dictionary (resetting the
 width to 9), and `0x101` ends the stream; new dictionary entries therefore begin at `0x102`. This
 matches the algorithm in Nuvie's `U6Lzw`.
+
+## Dungeons (`DUNGEON.DAT`)
+
+The eight dungeons are played first-person, but `DUNGEON.DAT` stores each maze as a plain tile
+grid: **8 dungeons × 8 levels × 8×8 tiles** = 4096 bytes, one byte per cell, in Party-Location
+dungeon order (Deceit, Despise, Destard, Wrong, Covetous, Shame, Hythloth, Doom). We reconstruct
+each level as a top-down "graph-paper" map and link every overworld entrance to its first level
+(Doom's entrance is on the Underworld).
+
+Each byte's **high nibble** is the cell type; the low nibble is a detail:
+
+| High nibble | Cell |
+| --- | --- |
+| `0x0` | Floor (hallway) |
+| `0x1` | Ladder up |
+| `0x2` | Ladder down |
+| `0x3` | Ladder up & down |
+| `0x4`, `0x7` | Chest (closed / open) |
+| `0x5` | Fountain |
+| `0x6` | Trap / pit / floor hole |
+| `0x8` | Energy field (low bits: `0` sleep, `1` poison, `2` fire, `3` energy) |
+| `0xB` | Wall |
+| `0xC` | Alternate wall (a skeleton in manacles) |
+| `0xD` | Secret door |
+| `0xE` | Door |
+| `0xF` | Room (a separate combat map) |
+
+(`0x9`/`0xA` are unused.) The synthesised top-down images are shared with Ultima III and IV — see
+[`crates/map/src/dungeon.rs`](../../crates/map/src/dungeon.rs).

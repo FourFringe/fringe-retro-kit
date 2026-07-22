@@ -87,10 +87,41 @@ read from `PARTY.ULT` (`0x08`/`0x09`), not from here.
 Each town and castle is its **own named `.ULT` file** — `BRITISH.ULT`, `YEW.ULT`, `MOON.ULT`,
 `LCB.ULT` (Lord British's Castle), `EXODUS.ULT`, and so on — each a 4648-byte file in the
 identical 64×64, `byte >> 2` format as the overworld, so their names come straight from the
-filenames. Dungeons are their own smaller **2192-byte** files (`FIRE.ULT`, `MINE.ULT`,
-`DARDIN.ULT`, `M.ULT`, `P.ULT`, `PERINIAN.ULT`, `TIME.ULT`) — **eight 16×16 tile-grid levels**
-(2048 bytes) followed by a per-level name table — and are reconstructed as top-down graph-paper
-maps. `CNFLCT_*.ULT` are small combat arenas and aren't exported.
+filenames. `CNFLCT_*.ULT` are small combat arenas and aren't exported.
+
+## Dungeon Maps (`*.ULT`)
+
+The seven dungeons are their own smaller **2192-byte** `.ULT` files. Unlike towns, they don't use
+the `>> 2` overworld packing; each is **eight 16×16 tile-grid levels** (2048 bytes) followed by a
+name table: eight little-endian `u16` offsets, then a NUL-terminated **name string per level** (the
+banner the game prints on entering that level — e.g. level 1 of `DARDIN.ULT` is `Dardin's Pit!`).
+We reconstruct each level as a top-down "graph-paper" map.
+
+The seven files, **in `EXODUS.BIN` coordinate-table order** (the same table that names the
+overworld — see below), are `M`, `FIRE`, `TIME`, `P`, `PERINIAN`, `MINE`, `DARDIN`. Five carry
+their canonical names (Dungeon of Fire, Dungeon of Time, Perinian Depths, Mines of Morinia,
+Dardin's Pit); the single-letter `M.ULT` and `P.ULT` are best-effort ("Dungeon of Doom" from its
+`Welcome fools to your doom!!` banner, and "Clues to Follow" — `P` is the endgame-clue dungeon whose
+level names point to inserting the Cards into Exodus and searching the shrines) and are worth
+confirming.
+
+Each byte is a direct tile code (no nibble packing beyond the type):
+
+| Byte | Cell |
+| --- | --- |
+| `0x00` | Floor (corridor) |
+| `0x01`–`0x0F` | Hazard / feature (traps, gremlins, winds, slides) — rendered generically |
+| `0x10` | Ladder up |
+| `0x20` | Ladder down |
+| `0x30` | Ladder up & down |
+| `0x40` | Chest |
+| `0x80` | Wall |
+| `0xA0` | A second wall style (chamber pillars / inscribed walls) |
+| `0xC0` | Secret door — a passage set into a wall |
+
+The low-nibble feature tiles (`0x01`–`0x0F`) are the game's assorted hazards; distinguishing them
+finely is future work. The synthesised top-down images are shared with Ultima IV and V — see
+[`crates/map/src/dungeon.rs`](../../crates/map/src/dungeon.rs).
 
 ## Tile Graphics (`SHAPES.ULT`)
 

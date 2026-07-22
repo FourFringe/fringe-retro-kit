@@ -175,7 +175,40 @@ Each town, village and castle is its own `.ULT` file (1280 bytes): a **32×32** 
 first 1024 bytes, followed by 256 bytes of NPC data. Names come from the filenames — `BRITAIN`,
 `YEW`, `MINOC`, `TRINSIC`, `JHELOM`, `MOONGLOW`, `SKARA`, `MAGINCIA` (towns); `COVE`, `PAWS`,
 `VESPER`, `DEN` (villages); `LCB_1`/`LCB_2`, `EMPATH`, `LYCAEUM`, `SERPENT` (castles/abbeys).
-Dungeons are first-person `.DNG` files with no top-down map and are skipped.
+
+## Dungeon Maps (`*.DNG`)
+
+The eight dungeons — Deceit, Despise, Destard, Wrong, Covetous, Shame, Hythloth and the Abyss — are
+played first-person, but each `*.DNG` file stores the maze as a tile grid. The first **512 bytes**
+are the level map: **eight 8×8 levels**, one byte per cell (room, monster and trigger tables
+follow — the Abyss's file is larger for its extra rooms — and aren't needed for the top-down view).
+We reconstruct each level as a top-down "graph-paper" map and link every overworld entrance to its
+first level.
+
+Each byte's **high nibble** is the cell type; the low nibble is a detail (field kind, room number,
+fountain flavour):
+
+| High nibble | Cell |
+| --- | --- |
+| `0x0` | Floor (corridor) |
+| `0x1` | Ladder up |
+| `0x2` | Ladder down |
+| `0x3` | Ladder up & down |
+| `0x4` | Chest |
+| `0x5` | Ceiling-hole trap |
+| `0x6` | Floor-hole trap |
+| `0x7` | Magic orb |
+| `0x8` | Winds / darkness trap |
+| `0x9` | Fountain |
+| `0xA` | Energy field (low nibble: `0` poison, `1` energy, `2` fire, `3` sleep) |
+| `0xB` | Altar |
+| `0xC` | Door |
+| `0xD` | Room (a separate combat map) |
+| `0xE` | Secret door |
+| `0xF` | Wall |
+
+The synthesised top-down images are shared with Ultima III and V — see
+[`crates/map/src/dungeon.rs`](../../crates/map/src/dungeon.rs).
 
 ## Tile Graphics (`SHAPES.EGA`)
 

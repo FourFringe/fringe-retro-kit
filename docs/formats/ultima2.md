@@ -91,12 +91,28 @@ every town — each a **64 × 64** tile grid, one byte per tile, row-major.
 
 **Dungeons and towers** are entered first-person, but — unlike Ultima I — their layouts **are**
 stored: the `MAP[XG]N5` (dungeon) and `MAP[XG]N4` (tower) map slots hold **sixteen 16×16 tile-grid
-levels** (`16 × 16 × 16 = 4096` bytes, one byte per cell). These use raw dungeon tile codes
-(`0x80` wall, `0x00` floor, `0xC0` door, `0xE0` secret door, `0x40` chest, `0x10`/`0x20`/`0x30`
-ladders), **not** the `>> 2` overworld packing — which is why reading them as overworld tiles
-produced noise. We reconstruct each level as a top-down graph-paper map. Every region with a
-dungeon entrance ships a `…5` file and every tower region a `…4`, so entrances link to their maze
-by the same sub-map-digit convention as towns.
+levels** (`16 × 16 × 16 = 4096` bytes, one byte per cell, in the file's final 4096 bytes). These use
+raw dungeon tile codes, **not** the `>> 2` overworld packing — which is why earlier tooling, reading
+them as overworld tiles, saw only noise. We reconstruct each level as a top-down graph-paper map.
+
+| Byte | Cell |
+| --- | --- |
+| `0x00` | Floor (corridor) |
+| `0x80` | Wall |
+| `0xC0` | Door (set into a wall) |
+| `0xE0` | Secret door / hidden passage |
+| `0x40` | Chest |
+| `0x10` | Ladder up |
+| `0x20` | Ladder down |
+| `0x30` | Ladder up & down |
+
+That the `…4`/`…5` slots are **tower** and **dungeon** (rather than the reverse) is verified against
+the overworlds: every one of the seven regions with a dungeon-entrance tile ships a `…5` file, and
+every one of the three tower regions a `…4`. So entrances link to their maze by the same
+sub-map-digit convention as towns (`village`→`1`, `town`→`2`, `castle`→`3`, `tower`→`4`,
+`dungeon`→`5`). Ultima II dungeons carry no in-data names, so their markers stay generic. The
+synthesised top-down images are shared with Ultima III–V — see
+[`crates/map/src/dungeon.rs`](../../crates/map/src/dungeon.rs).
 
 ## Tile Graphics (embedded in `ULTIMAII.EXE`)
 

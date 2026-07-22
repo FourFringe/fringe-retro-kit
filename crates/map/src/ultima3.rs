@@ -83,7 +83,8 @@ const LOCATIONS: [(&str, &str); 19] = [
 ];
 
 /// Named town and castle maps: `(filename, display title, kind)`. Each is a 64×64 `.ULT` grid in
-/// the same format as the overworld. Dungeons (first-person) and combat arenas are omitted.
+/// the same format as the overworld. Dungeons (a separate tile-grid format — see [`DUNGEONS`]) and
+/// combat arenas aren't in this list.
 const TOWNS: &[(&str, &str, &str)] = &[
     ("LCB.ULT", "Lord British's Castle", "castle"),
     ("EXODUS.ULT", "Castle of Exodus", "castle"),
