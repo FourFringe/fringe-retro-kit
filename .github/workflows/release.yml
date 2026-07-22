@@ -107,6 +107,9 @@ jobs:
         run: |
           set -euo pipefail
           current="$GITHUB_REF_NAME"
+          # `actions/checkout` can leave the triggering tag as a lightweight ref (pointing straight
+          # at the commit), so re-fetch the annotated tag object to read its message reliably.
+          git fetch --force origin "refs/tags/${current}:refs/tags/${current}" >/dev/null 2>&1 || true
           # A custom headline may be carried in the tag's annotation (written at `just release`
           # time); it's absent when the annotation is just the version string.
           headline="$(git for-each-ref "refs/tags/${current}" --format='%(contents:subject)')"
