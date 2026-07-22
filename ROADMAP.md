@@ -340,7 +340,10 @@ none in the viewer):
       `LZDNGBLK` (block *i* holds level *i*'s objects in level-local coordinates). Multi-tile
       objects (trees, ships, statues, large furniture) render whole via their `TILEFLAG`
       double-width / double-height flags. Objects render at an 8-px tile edge to keep the composite
-      tractable; verified against the real game files. Named POIs remain a follow-up (see Phase 9).
+      tractable; verified against the real game files. **Fifteen named towns and castles** are
+      labelled — hand-authored (U6 has no location table) and cross-referenced against Ultima IV's
+      table, label-only since U6's towns are inline in the overworld. Clickable dungeon-entrance
+      POIs are the remaining follow-up (see Phase 9).
 
 For **Ultima I**, town/castle interiors aren't worth exporting (no standalone layout files — they
 live in the executable) and its dungeons are first-person and procedurally generated, so the
@@ -421,9 +424,18 @@ reached.
       the map browser, with **object overlays** on every map: the surface's buildings / furniture /
       NPCs / signs from `LZOBJBLK` and each dungeon level's chests / ladders / torches / creatures
       from `LZDNGBLK` (block *i* → level *i*, level-local coordinates), composited via the
-      `BASETILE` type→tile table and `OBJTILES.VGA` (verified against the real game files; rendered
-      at an 8-px tile edge). Follow-ups: named POIs (U6 has no location table — would need a curated
-      coordinate table or sign-text RE), and multi-tile objects.
+      `BASETILE` type→tile table and `OBJTILES.VGA`, with **multi-tile objects** (trees, ships,
+      statues, large furniture) rendered whole via their `TILEFLAG` double-width/height flags.
+      **Fifteen named towns and castles** are labelled: U6 ships no location table (its town names
+      live only in prose), so the coordinates are hand-authored, read off the render and
+      cross-referenced against Ultima IV's location table (Britannia's geography carries across the
+      series). They're label-only — U6's towns are baked inline into the overworld, so there are no
+      separate town maps to open. Follow-up: **clickable dungeon-entrance POIs** — the cave/hole
+      entrances on the surface are spatial triggers, so they can link to the exported dungeon
+      sub-maps (needs the entrance objects located in `LZOBJBLK`).
+- [ ] **Curated named POIs for Ultima II** — the same hand-authored approach fits U2 (its overworld
+      markers are anonymous and it has no name/link table), and because U2 *does* export each town
+      as its own sub-map, the labels could even be **clickable** (name + target).
 - [ ] **Confirm tentative fields** across the Ultimas with `schema find` / `schema diff`
       (before/after in-game edits), promoting `tentative: true` fields to confirmed.
 - [ ] **Ultima VI objects / inventory / spells** — use the schema explorer + string ripper to map

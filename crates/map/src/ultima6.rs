@@ -26,7 +26,7 @@ use std::path::Path;
 use anyhow::{ensure, Context, Result};
 use image::{imageops::FilterType, Rgb, RgbImage, Rgba, RgbaImage};
 
-use crate::bundle::World;
+use crate::bundle::{Poi, World};
 use crate::{lzw, tilemap};
 
 /// This game's identifier, shared by every world it exports.
@@ -117,7 +117,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         "Ultima VI — Britannia",
         "overworld",
         "britannia",
-        vec![],
+        britannia_pois(),
         image,
     ));
 
@@ -148,6 +148,45 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         ));
     }
     Ok(worlds)
+}
+
+/// Named overworld locations as `(label, tile x, tile y, kind)`. Ultima VI ships no location/name
+/// table (its town names appear only in prose), so these are hand-authored: positions were read
+/// off the rendered overworld and cross-referenced against Ultima IV's location table, since
+/// Britannia's geography carries across the series. U6's towns are baked inline into the overworld
+/// — there are no separate town maps — so these are label-only markers with no click target. A few
+/// rearranged southern keeps are intentionally omitted rather than guessed.
+const LOCATIONS: &[(&str, u32, u32, &str)] = &[
+    ("Lord British's Castle", 295, 358, "castle"),
+    ("Britain", 320, 405, "town"),
+    ("Yew", 232, 168, "town"),
+    ("Empath Abbey", 150, 200, "castle"),
+    ("Minoc", 590, 105, "town"),
+    ("Vesper", 563, 348, "town"),
+    ("Cove", 560, 618, "town"),
+    ("Paws", 388, 585, "town"),
+    ("Trinsic", 385, 725, "town"),
+    ("Skara Brae", 110, 505, "town"),
+    ("Jhelom", 155, 850, "town"),
+    ("New Magincia", 715, 655, "town"),
+    ("Moonglow", 895, 520, "town"),
+    ("The Lycaeum", 880, 400, "castle"),
+    ("Serpent's Hold", 565, 945, "castle"),
+];
+
+/// The named label markers for the Britannia overworld, each centred on its tile in the rendered
+/// image (which uses an 8-px tile edge, so a tile centre is `x * TILE_PX + TILE_PX / 2`).
+fn britannia_pois() -> Vec<Poi> {
+    LOCATIONS
+        .iter()
+        .map(|&(label, x, y, kind)| Poi {
+            px: x * TILE_PX + TILE_PX / 2,
+            py: y * TILE_PX + TILE_PX / 2,
+            kind: kind.to_string(),
+            label: label.to_string(),
+            target: None,
+        })
+        .collect()
 }
 
 /// Read `U6PAL` into a 256-entry RGB palette (its 6-bit `0..=63` channels scaled to 8-bit).
@@ -609,5 +648,19 @@ mod tests {
                 (quad - 3, -1, -1),
             ]
         );
+    }
+
+    #[test]
+    fn britannia_pois_center_on_their_tiles() {
+        let pois = britannia_pois();
+        assert_eq!(pois.len(), LOCATIONS.len());
+        let lb = pois
+            .iter()
+            .find(|p| p.label == "Lord British's Castle")
+            .expect("Lord British's Castle POI");
+        // Tile (295, 358) centred at the 8-px tile edge, and label-only (no sub-map to open).
+        assert_eq!((lb.px, lb.py), (295 * TILE_PX + 4, 358 * TILE_PX + 4));
+        assert_eq!(lb.kind, "castle");
+        assert!(pois.iter().all(|p| p.target.is_none()));
     }
 }
