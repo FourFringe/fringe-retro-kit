@@ -111,13 +111,15 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             .with_context(|| format!("decompressing {OBJBLK_FILE}"))?,
     );
     composite_objects(&mut image, &surface, &basetile, &tileflag, &tiles);
+    let mut pois = named_pois();
+    pois.extend(dungeon_pois(&surface));
     worlds.push(tilemap::world(
         GAME,
         "britannia",
         "Ultima VI — Britannia",
         "overworld",
         "britannia",
-        britannia_pois(),
+        pois,
         image,
     ));
 
@@ -174,17 +176,89 @@ const LOCATIONS: &[(&str, u32, u32, &str)] = &[
     ("Serpent's Hold", 565, 945, "castle"),
 ];
 
-/// The named label markers for the Britannia overworld, each centred on its tile in the rendered
-/// image (which uses an 8-px tile edge, so a tile centre is `x * TILE_PX + TILE_PX / 2`).
-fn britannia_pois() -> Vec<Poi> {
-    LOCATIONS
+/// The Shrines of the Virtues as `(label, tile x, tile y)`. Positions are the shrine objects in
+/// `LZOBJBLK` (rings of standing stones); the names come from cross-referencing Ultima IV's shrine
+/// table, since the surface shrines carry no name in the data. Seven have a stone circle on
+/// Britannia's surface (the eighth, Spirituality, has none).
+const SHRINES: &[(&str, u32, u32)] = &[
+    ("Shrine of Justice", 295, 39),
+    ("Shrine of Sacrifice", 831, 167),
+    ("Shrine of Honesty", 935, 263),
+    ("Shrine of Compassion", 503, 359),
+    ("Shrine of Honor", 327, 823),
+    ("Shrine of Valor", 159, 943),
+    ("Shrine of Humility", 919, 935),
+];
+
+/// The object type of a dungeon-entrance cave mouth in `LZOBJBLK`.
+const DUNGEON_ENTRANCE_TYPE: u16 = 326;
+
+/// Ultima VI's dungeon names in the order the entrance object's `quality` byte indexes them
+/// (1-based), read verbatim from the table in `GAME.EXE`. Entries 8–13 and 19 (`GSA`, the Gargoyle
+/// underworld realms, `Ant Mound`, `Pirate Cave`) have no Britannia surface entrance, so they never
+/// appear as a marker.
+const DUNGEON_NAMES: &[&str] = &[
+    "Deceit",
+    "Despise",
+    "Destard",
+    "Wrong",
+    "Covetous",
+    "Shame",
+    "Hythloth",
+    "GSA",
+    "Control",
+    "Passion",
+    "Diligence",
+    "Tomb of Kings",
+    "Ant Mound",
+    "Swamp Cave",
+    "Spider Cave",
+    "Cyclops Cave",
+    "Heftimus Cave",
+    "Heroes' Hole",
+    "Pirate Cave",
+    "Buccaneer's Cave",
+];
+
+/// The town, castle and shrine label markers for the Britannia overworld, each centred on its tile
+/// in the rendered image (which uses an 8-px tile edge, so a tile centre is
+/// `x * TILE_PX + TILE_PX / 2`). All are label-only — U6's towns are baked inline into the
+/// overworld, so there are no separate maps to open.
+fn named_pois() -> Vec<Poi> {
+    let marker = |label: &str, x: u32, y: u32, kind: &str| Poi {
+        px: x * TILE_PX + TILE_PX / 2,
+        py: y * TILE_PX + TILE_PX / 2,
+        kind: kind.to_string(),
+        label: label.to_string(),
+        target: None,
+    };
+    let towns = LOCATIONS
         .iter()
-        .map(|&(label, x, y, kind)| Poi {
-            px: x * TILE_PX + TILE_PX / 2,
-            py: y * TILE_PX + TILE_PX / 2,
-            kind: kind.to_string(),
-            label: label.to_string(),
-            target: None,
+        .map(|&(label, x, y, kind)| marker(label, x, y, kind));
+    let shrines = SHRINES
+        .iter()
+        .map(|&(label, x, y)| marker(label, x, y, "shrine"));
+    towns.chain(shrines).collect()
+}
+
+/// Dungeon-entrance markers read straight from the surface objects: every
+/// [`DUNGEON_ENTRANCE_TYPE`] object is a cave mouth whose `quality` byte indexes [`DUNGEON_NAMES`]
+/// (1-based). U6's cave mouths are spatial triggers that drop the party into the first dungeon
+/// level, and every dungeon's top level is packed into the single `dungeon-1` sub-map — so each
+/// marker links there.
+fn dungeon_pois(objects: &[Object]) -> Vec<Poi> {
+    objects
+        .iter()
+        .filter(|o| o.obj_type == DUNGEON_ENTRANCE_TYPE)
+        .filter_map(|o| {
+            let name = DUNGEON_NAMES.get(usize::from(o.quality).checked_sub(1)?)?;
+            Some(Poi {
+                px: u32::from(o.x) * TILE_PX + TILE_PX / 2,
+                py: u32::from(o.y) * TILE_PX + TILE_PX / 2,
+                kind: "dungeon".to_string(),
+                label: (*name).to_string(),
+                target: Some(format!("/{GAME}/dungeon-1")),
+            })
         })
         .collect()
 }
@@ -344,13 +418,15 @@ fn imageops_resize(tile: &RgbImage, size: u32) -> RgbImage {
     }
 }
 
-/// One placed object from `LZOBJBLK`: its global tile position, layer, and type/frame.
+/// One placed object from `LZOBJBLK`: its global tile position, layer, type/frame, and `quality`
+/// (used by dungeon entrances to name themselves — see [`dungeon_pois`]).
 struct Object {
     x: u16,
     y: u16,
     z: u8,
     obj_type: u16,
     frame: u8,
+    quality: u8,
 }
 
 /// Decode the 8-byte object at `data[p..]`: `(status, uint24 position, uint16 typeAndFrame,
@@ -366,6 +442,7 @@ fn object_at(data: &[u8], p: usize) -> Option<Object> {
         z: ((position >> 20) & 0xF) as u8,
         obj_type: taf & 0x3FF,
         frame: ((taf >> 10) & 0x3F) as u8,
+        quality: o[7],
     })
 }
 
@@ -651,9 +728,9 @@ mod tests {
     }
 
     #[test]
-    fn britannia_pois_center_on_their_tiles() {
-        let pois = britannia_pois();
-        assert_eq!(pois.len(), LOCATIONS.len());
+    fn named_pois_center_on_their_tiles() {
+        let pois = named_pois();
+        assert_eq!(pois.len(), LOCATIONS.len() + SHRINES.len());
         let lb = pois
             .iter()
             .find(|p| p.label == "Lord British's Castle")
@@ -662,5 +739,44 @@ mod tests {
         assert_eq!((lb.px, lb.py), (295 * TILE_PX + 4, 358 * TILE_PX + 4));
         assert_eq!(lb.kind, "castle");
         assert!(pois.iter().all(|p| p.target.is_none()));
+        assert!(pois.iter().any(|p| p.kind == "shrine"));
+    }
+
+    #[test]
+    fn dungeon_pois_name_entrances_by_quality_and_link_to_the_first_level() {
+        // Two entrance objects (type 326): quality 1 → Deceit, quality 7 → Hythloth. A non-entrance
+        // object and an out-of-range quality are ignored.
+        let entrance = |x: u16, y: u16, quality: u8| Object {
+            x,
+            y,
+            z: 0,
+            obj_type: DUNGEON_ENTRANCE_TYPE,
+            frame: 0,
+            quality,
+        };
+        let objects = vec![
+            entrance(100, 200, 1),
+            entrance(300, 400, 7),
+            entrance(500, 600, 99), // quality past the name table → dropped
+            Object {
+                x: 10,
+                y: 10,
+                z: 0,
+                obj_type: 1,
+                frame: 0,
+                quality: 1,
+            }, // not an entrance
+        ];
+        let pois = dungeon_pois(&objects);
+        assert_eq!(pois.len(), 2);
+        assert_eq!(pois[0].label, "Deceit");
+        assert_eq!(
+            (pois[0].px, pois[0].py),
+            (100 * TILE_PX + 4, 200 * TILE_PX + 4)
+        );
+        assert_eq!(pois[1].label, "Hythloth");
+        assert!(pois
+            .iter()
+            .all(|p| p.kind == "dungeon" && p.target.as_deref() == Some("/ultima6/dungeon-1")));
     }
 }

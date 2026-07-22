@@ -73,8 +73,10 @@ What each game bakes:
   torches and creatures overlaid). Multi-tile objects (trees, ships, statues, large furniture)
   render whole; everything is rendered at an 8-px tile edge to keep the composite tractable.
   Fifteen named towns and castles are labelled (hand-authored, cross-referenced against Ultima IV
-  since U6 ships no location table); they're label-only, as U6's towns are baked inline into the
-  overworld with no separate maps to open.
+  since U6 ships no town-name table); they're label-only, as U6's towns are baked inline into the
+  overworld with no separate maps to open. The seven virtue shrines and all thirteen dungeon
+  entrances are also marked — the dungeons read straight from the game data (each cave-mouth
+  object's `quality` byte names it via the `GAME.EXE` table) and link to the first dungeon level.
 - **Wasteland** — all 42 maps (the desert overworld plus every town and building) from the
   pristine `MASTER1`/`MASTER2` disks, with clickable overworld↔sub-map navigation.
 

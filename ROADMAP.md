@@ -340,10 +340,10 @@ none in the viewer):
       `LZDNGBLK` (block *i* holds level *i*'s objects in level-local coordinates). Multi-tile
       objects (trees, ships, statues, large furniture) render whole via their `TILEFLAG`
       double-width / double-height flags. Objects render at an 8-px tile edge to keep the composite
-      tractable; verified against the real game files. **Fifteen named towns and castles** are
-      labelled — hand-authored (U6 has no location table) and cross-referenced against Ultima IV's
-      table, label-only since U6's towns are inline in the overworld. Clickable dungeon-entrance
-      POIs are the remaining follow-up (see Phase 9).
+      tractable; verified against the real game files. **Fifteen named towns and castles** plus the
+      **seven virtue shrines** are labelled, and **all thirteen dungeon entrances** are marked and
+      clickable — read from the game data (each cave-mouth object's `quality` byte indexes the
+      `GAME.EXE` dungeon-name table) and linked to the shared first dungeon level.
 
 For **Ultima I**, town/castle interiors aren't worth exporting (no standalone layout files — they
 live in the executable) and its dungeons are first-person and procedurally generated, so the
@@ -426,13 +426,20 @@ reached.
       from `LZDNGBLK` (block *i* → level *i*, level-local coordinates), composited via the
       `BASETILE` type→tile table and `OBJTILES.VGA`, with **multi-tile objects** (trees, ships,
       statues, large furniture) rendered whole via their `TILEFLAG` double-width/height flags.
-      **Fifteen named towns and castles** are labelled: U6 ships no location table (its town names
-      live only in prose), so the coordinates are hand-authored, read off the render and
+      **Fifteen named towns and castles** are labelled: U6 ships no *town* location table (their
+      names live only in prose), so those coordinates are hand-authored, read off the render and
       cross-referenced against Ultima IV's location table (Britannia's geography carries across the
       series). They're label-only — U6's towns are baked inline into the overworld, so there are no
-      separate town maps to open. Follow-up: **clickable dungeon-entrance POIs** — the cave/hole
-      entrances on the surface are spatial triggers, so they can link to the exported dungeon
-      sub-maps (needs the entrance objects located in `LZOBJBLK`).
+      separate town maps to open. The **seven Shrines of the Virtues** are also marked (positioned
+      from their stone-circle objects, named via Ultima IV). Finally, **all thirteen dungeon
+      entrances** (the classic seven plus U6's caves — Swamp / Spider / Cyclops / Heftimus Cave,
+      Heroes' Hole, Buccaneer's Cave) are read straight from the game data and are **clickable**:
+      each surface cave-mouth object carries a `quality` byte that indexes the dungeon-name table in
+      `GAME.EXE`, giving an exact position and name, and every dungeon's top level is packed into the
+      shared `dungeon-1` map, so each marker links there.
+- [ ] **Shrine POIs across the earlier Ultimas** — Ultima IV already marks its shrines from the
+      `AVATAR.EXE` table; audit Ultima V (and III where applicable) and add shrine markers wherever
+      the game data locates them, matching U6.
 - [ ] **Curated named POIs for Ultima II** — the same hand-authored approach fits U2 (its overworld
       markers are anonymous and it has no name/link table), and because U2 *does* export each town
       as its own sub-map, the labels could even be **clickable** (name + target).
