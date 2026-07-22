@@ -55,7 +55,7 @@ browser, and a map-code cleanup across all games.
 editor** (map location plus an inventory picker). Map POIs became **clickable**, opening their
 sub-maps.
 
-### v0.6.0 — The RE workbench & full map POIs *(in progress)*
+### v0.6.0 — The RE workbench & full map POIs (2026-07-22)
 
 The **`fringe-retro-kit`** reverse-engineering workbench: a shared `codec` module, a string
 ripper, a schema explorer, a live byte watcher, and an archive / MSQ carver. Alongside it, a wide

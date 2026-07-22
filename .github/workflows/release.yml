@@ -102,27 +102,44 @@ jobs:
         with:
           path: artifacts
 
-      - name: Build the commit changelog
+      - name: Build the release notes
         shell: bash
         run: |
           set -euo pipefail
           current="$GITHUB_REF_NAME"
+          # A custom headline may be carried in the tag's annotation (written at `just release`
+          # time); it's absent when the annotation is just the version string.
+          headline="$(git for-each-ref "refs/tags/${current}" --format='%(contents:subject)')"
+          if [ "$headline" = "$current" ]; then headline=""; fi
           # The most recent tag before this one (by ancestry), if any.
           prev="$(git describe --tags --abbrev=0 "${current}^" 2>/dev/null || true)"
+          : > CHANGELOG_NOTES.md
+          if [ -n "$headline" ]; then
+            printf '## %s\n\n' "$headline" >> CHANGELOG_NOTES.md
+          fi
           if [ -n "$prev" ]; then
-            echo "### Commits since ${prev}" > CHANGELOG_NOTES.md
+            echo "### Commits since ${prev}" >> CHANGELOG_NOTES.md
             range="${prev}..${current}"
           else
-            echo "### Commits" > CHANGELOG_NOTES.md
+            echo "### Commits" >> CHANGELOG_NOTES.md
             range="$current"
           fi
           echo "" >> CHANGELOG_NOTES.md
           git log --no-merges --reverse --pretty='- %s (%h)' "$range" >> CHANGELOG_NOTES.md
+          # Release title: "vX.Y.Z — Headline" when a headline is set, else just the tag name.
+          if [ -n "$headline" ]; then
+            echo "RELEASE_NAME=${current} — ${headline}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_NAME=${current}" >> "$GITHUB_ENV"
+          fi
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          # Our commit list is prepended to GitHub's auto-generated notes (compare link, etc.).
+          # The release title comes from the tag headline (falls back to the tag name).
+          name: ${{ env.RELEASE_NAME }}
+          # Our headline + commit list is prepended to GitHub's auto-generated notes (compare
+          # link, etc.).
           body_path: CHANGELOG_NOTES.md
           files: |
             artifacts/**/*.tar.gz

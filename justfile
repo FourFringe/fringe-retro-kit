@@ -49,8 +49,10 @@ map GAME=("all"):
     cargo run -q -p fringe-retro-map -- serve --open
 
 # Cut a release: bump the workspace version, run the gate, commit, tag, and push.
-# Usage: `just release 0.2.0`. The push triggers the GitHub release workflow.
-release VERSION:
+# Usage: `just release 0.2.0` or `just release 0.2.0 "Optional headline"`. The push triggers the
+# GitHub release workflow; a headline (carried in the tag annotation) becomes the release title
+# and leads its notes.
+release VERSION HEADLINE="":
     #!/usr/bin/env bash
     set -euo pipefail
     if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -62,7 +64,9 @@ release VERSION:
     just check
     git add Cargo.toml Cargo.lock
     git commit -m "Release v{{ VERSION }}"
-    git tag -a "v{{ VERSION }}" -m "v{{ VERSION }}"
+    headline="{{ HEADLINE }}"
+    git tag -a "v{{ VERSION }}" -m "${headline:-v{{ VERSION }}}"
     git push origin main
     git push origin "v{{ VERSION }}"
     printf '\nReleased v%s — pushed main and the tag; the release workflow is now running.\n' "{{ VERSION }}"
+    if [ -n "$headline" ]; then printf 'Headline: %s\n' "$headline"; fi
