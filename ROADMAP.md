@@ -87,11 +87,15 @@ grids into top-down "graph-paper" maps and slot them into the existing dungeon p
       file's 2048-byte level map (eight 16×16 tile grids) is synthesised into per-level graph-paper
       maps, and the `EXODUS.BIN` coordinate table's seven dungeon entrances — now matched, in order,
       to their files — are named and linked to their first level.
-- [ ] Stretch: **Ultima II** (an older non-tile format that needs decoding first).
+- [x] **Ultima II dungeons & towers** (`MAP[XG]N5`/`MAP[XG]N4`, sixteen 16×16 levels each) → same.
+      What earlier looked like "noise" was the overworld tile packing applied to a maze grid: read
+      as raw dungeon tiles, the `…5` (dungeon) and `…4` (tower) map slots are coherent mazes, so
+      each is baked per level and linked from its region's dungeon/tower entrance.
 
 Out of scope: **Ultima I** dungeons are procedurally generated at runtime (no stored maps), so
 there is nothing to bake — the overworld entrance markers are the honest representation. **Ultima
-VI** dungeons are already rendered.
+VI** dungeons are already rendered. With Ultima II done, every game with stored dungeon data now
+bakes its dungeons.
 
 ### Beyond v0.7.0 — ongoing tracks
 

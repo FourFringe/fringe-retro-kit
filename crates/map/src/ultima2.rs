@@ -12,8 +12,12 @@
 //! directly onto the map using the tileset's built-in A–Z font (tiles 32–57, space = 58). We read
 //! those labels back out of the grid and surface them as points of interest, and use a town-name
 //! label (e.g. `TOWNE LINDA`, `PORT BONIFICE`) as the world's title when we can find one.
+//!
+//! Towers (`MAP[XG]N4`) and dungeons (`MAP[XG]N5`) don't use the top-down overworld packing; they
+//! store a first-person maze as sixteen 16×16 tile-grid levels, which we reconstruct as top-down
+//! "graph-paper" maps and link from each overworld's tower/dungeon entrance.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{ensure, Context, Result};
@@ -21,6 +25,7 @@ use image::RgbImage;
 
 use crate::bundle::{Poi, World};
 use crate::cga::{self, CGA_PALETTE1};
+use crate::dungeon;
 use crate::tilemap;
 
 /// Map edge length, in tiles.
@@ -28,6 +33,11 @@ const MAP_W: usize = 64;
 const MAP_H: usize = 64;
 /// Bytes of tile grid in a map file (one byte per tile).
 const MAP_GRID_LEN: usize = MAP_W * MAP_H;
+/// A tower (`…4`) or dungeon (`…5`) map stores its maze as sixteen 16×16 tile-grid levels in the
+/// same final [`MAP_GRID_LEN`] bytes (`16 × 16 × 16 = 4096`).
+const DUNGEON_EDGE: usize = 16;
+const DUNGEON_LEVELS: usize = 16;
+const DUNGEON_LEVEL_BYTES: usize = DUNGEON_EDGE * DUNGEON_EDGE; // 256
 
 const EXE_FILE: &str = "ULTIMAII.EXE";
 /// The shipped DOS executable is exactly this size; the tileset offset below assumes it.
@@ -81,6 +91,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
 
     let mut worlds = Vec::with_capacity(names.len());
     let towns = collect_town_names(game_dir, &names);
+    let (dungeon_level_worlds, dungeon_slugs) = dungeon_worlds(game_dir)?;
     for name in names {
         let data =
             std::fs::read(game_dir.join(&name)).with_context(|| format!("reading map {name}"))?;
@@ -110,7 +121,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         let pois = if is_town {
             vec![]
         } else {
-            overworld_pois(grid, &name, &towns)
+            overworld_pois(grid, &name, &towns, &dungeon_slugs)
         };
 
         let world_id = name.to_ascii_lowercase();
@@ -129,6 +140,7 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
         !worlds.is_empty(),
         "found Ultima II map files but none contained a full 64×64 grid"
     );
+    worlds.extend(dungeon_level_worlds);
     Ok(worlds)
 }
 
@@ -179,11 +191,96 @@ fn is_map_name(name: &str) -> bool {
         && b[5].is_ascii_digit()
 }
 
-/// Whether a map is a top-down **tile** map we can render. The final digit encodes the map's
-/// type: `0` = overworld, `1`–`3` = towns/castles, and `4`–`5` = dungeons and other data stored
-/// in a different (non-top-down) format that decodes to noise. We render only types `0`–`3`.
+/// Whether a map is a top-down overworld/town **tile** map (final digit `0`–`3`). The `4`/`5`
+/// slots hold first-person tower/dungeon mazes in a different layout, reconstructed by
+/// [`dungeon_worlds`] rather than rendered here.
 fn is_tile_map(name: &str) -> bool {
     is_map_name(name) && matches!(name.as_bytes()[5], b'0'..=b'3')
+}
+
+/// Whether a map holds a first-person maze: the tower (final digit `4`) or dungeon (`5`) slot.
+fn is_dungeon_map(name: &str) -> bool {
+    is_map_name(name) && matches!(name.as_bytes()[5], b'4' | b'5')
+}
+
+/// Whether a `…4`/`…5` maze file is a tower or a dungeon. Verified against the overworlds: every
+/// region with a dungeon entrance ships a `…5` file and every region with a tower entrance a `…4`.
+fn dungeon_kind(name: &str) -> &'static str {
+    match name.as_bytes()[5] {
+        b'4' => "tower",
+        _ => "dungeon",
+    }
+}
+
+/// Classify an Ultima II maze tile byte into a shared dungeon [`dungeon::Cell`]. Walls, floors,
+/// doors and ladders are certain; rare region-specific bytes fall through to floor for this rough
+/// pass.
+fn u2_cell(byte: u8) -> dungeon::Cell {
+    use dungeon::Cell;
+    match byte {
+        0x80 => Cell::Wall,
+        0xC0 => Cell::Door,       // a doorway set into a wall
+        0xE0 => Cell::SecretDoor, // a wall-like hidden passage
+        0x40 => Cell::Chest,
+        0x10 => Cell::Ladder {
+            up: true,
+            down: false,
+        },
+        0x20 => Cell::Ladder {
+            up: false,
+            down: true,
+        },
+        0x30 => Cell::Ladder {
+            up: true,
+            down: true,
+        },
+        _ => Cell::Floor, // 0x00 corridor, and rare unmapped bytes
+    }
+}
+
+/// Render every tower (`…4`) and dungeon (`…5`) map as a stack of top-down levels, returning the
+/// worlds and the set of slugs rendered (so their overworld entrances can be linked). Each file
+/// holds sixteen 16×16 tile-grid levels in its final [`MAP_GRID_LEN`] bytes.
+fn dungeon_worlds(game_dir: &Path) -> Result<(Vec<World>, HashSet<String>)> {
+    let tiles = dungeon::tileset(u2_cell);
+    let mut names: Vec<String> = std::fs::read_dir(game_dir)?
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| is_dungeon_map(n))
+        .collect();
+    names.sort();
+
+    let mut worlds = Vec::new();
+    let mut slugs = HashSet::new();
+    for name in names {
+        let data = std::fs::read(game_dir.join(&name))
+            .with_context(|| format!("reading maze map {name}"))?;
+        if data.len() < MAP_GRID_LEN {
+            continue; // not a full grid; skip rather than fail the whole export
+        }
+        let grid = &data[data.len() - MAP_GRID_LEN..];
+        let slug = name.to_ascii_lowercase();
+        let kind = dungeon_kind(&name);
+        for level in 0..DUNGEON_LEVELS {
+            let off = level * DUNGEON_LEVEL_BYTES;
+            let cells = &grid[off..off + DUNGEON_LEVEL_BYTES];
+            worlds.push(tilemap::world(
+                GAME,
+                &format!("{slug}-l{}", level + 1),
+                &format!(
+                    "Ultima II — {} ({}, level {})",
+                    title_case(kind),
+                    name.to_ascii_uppercase(),
+                    level + 1
+                ),
+                kind,
+                &slug,
+                Vec::new(),
+                tilemap::render(cells, DUNGEON_EDGE, DUNGEON_EDGE, &tiles),
+            ));
+        }
+        slugs.insert(slug);
+    }
+    Ok((worlds, slugs))
 }
 
 /// The map's category from its final digit: `0` = overworld, otherwise a town/castle (`1`–`3`).
@@ -219,15 +316,17 @@ fn landmark_kind(tile_index: u8) -> Option<&'static str> {
 }
 
 /// The town sub-map digit a linkable overworld landmark opens: villages open sub-map `1`, towns
-/// `2`, castles `3`. Ultima II has no overworld→map table, but a region's overworld and its towns
-/// share a group, and each town map's final digit encodes the landmark kind (confirmed by which
-/// town files a region ships — e.g. a region with a castle but no village has a `…3` town but no
-/// `…1`). Towers and dungeons have no top-down sub-map, so they aren't linked.
+/// `2`, castles `3`, towers `4`, dungeons `5`. Ultima II has no overworld→map table, but a region's
+/// overworld and its sub-maps share a group, and each sub-map's final digit encodes the landmark
+/// kind (confirmed by which files a region ships — e.g. a region with a castle but no village has a
+/// `…3` town but no `…1`, and every dungeon-entrance region ships a `…5`).
 fn kind_sub_map_digit(kind: &str) -> Option<char> {
     match kind {
         "village" => Some('1'),
         "town" => Some('2'),
         "castle" => Some('3'),
+        "tower" => Some('4'),
+        "dungeon" => Some('5'),
         _ => None,
     }
 }
@@ -256,11 +355,16 @@ fn collect_town_names(game_dir: &Path, names: &[String]) -> HashMap<String, Opti
 }
 
 /// Scan an overworld grid for landmark tiles and emit a POI for each, typed by tile. Village, town
-/// and castle landmarks are **named and linked** to their town sub-map (see [`kind_sub_map_digit`])
-/// when that town was rendered; towers and dungeons stay generic, unlinked markers. The first
-/// column and the bottom two rows hold border/leftover data rather than real landmarks, so they're
-/// skipped.
-fn overworld_pois(grid: &[u8], name: &str, towns: &HashMap<String, Option<String>>) -> Vec<Poi> {
+/// and castle landmarks are **named and linked** to their town sub-map; towers and dungeons link to
+/// the first level of their reconstructed maze (see [`kind_sub_map_digit`]) when it was rendered.
+/// The first column and the bottom two rows hold border/leftover data rather than real landmarks,
+/// so they're skipped.
+fn overworld_pois(
+    grid: &[u8],
+    name: &str,
+    towns: &HashMap<String, Option<String>>,
+    dungeons: &HashSet<String>,
+) -> Vec<Poi> {
     let base = name[..name.len() - 1].to_ascii_lowercase(); // "MAPX20" → "mapx2"
     let mut pois = Vec::new();
     for (i, &byte) in grid.iter().enumerate() {
@@ -272,16 +376,28 @@ fn overworld_pois(grid: &[u8], name: &str, towns: &HashMap<String, Option<String
         let Some(kind) = landmark_kind(byte >> 2) else {
             continue;
         };
-        // Link to the town sub-map this landmark opens, if that town exists in this region.
-        let slug = kind_sub_map_digit(kind)
-            .map(|d| format!("{base}{d}"))
-            .filter(|slug| towns.contains_key(slug));
-        let label = match &slug {
-            Some(slug) => towns[slug].clone().unwrap_or_else(|| title_case(kind)),
-            None => title_case(kind),
+        let slug = kind_sub_map_digit(kind).map(|d| format!("{base}{d}"));
+        let (label, target) = match kind {
+            // Towers and dungeons open a first-person maze: link to its first level, if rendered.
+            "tower" | "dungeon" => {
+                let target = slug
+                    .filter(|s| dungeons.contains(s))
+                    .map(|s| format!("/{GAME}/{s}-l1"));
+                (title_case(kind), target)
+            }
+            // Villages, towns and castles open a named top-down sub-map, if that town was rendered.
+            _ => {
+                let slug = slug.filter(|s| towns.contains_key(s));
+                let label = slug
+                    .as_ref()
+                    .and_then(|s| towns[s].clone())
+                    .unwrap_or_else(|| title_case(kind));
+                let target = slug.map(|s| format!("/{GAME}/{s}"));
+                (label, target)
+            }
         };
         let mut poi = tilemap::poi(x, y, kind, &label);
-        poi.target = slug.map(|slug| format!("/{GAME}/{slug}"));
+        poi.target = target;
         pois.push(poi);
     }
     pois
@@ -535,11 +651,16 @@ mod tests {
         assert!(is_tile_map("MAPX21")); // town
         assert!(is_tile_map("MAPG93")); // castle
         assert!(is_tile_map("mapg82")); // lowercase on disk
-                                        // Types 4–5 are dungeon/other data that decodes to noise.
+                                        // Types 4–5 are first-person tower/dungeon mazes, handled separately.
         assert!(!is_tile_map("MAPX24"));
         assert!(!is_tile_map("MAPX35"));
         assert!(!is_tile_map("MAPG45"));
         assert!(!is_tile_map("mapg44"));
+        // Those slots are the maze maps: `4` = tower, `5` = dungeon.
+        assert!(is_dungeon_map("MAPX24") && dungeon_kind("MAPX24") == "tower");
+        assert!(is_dungeon_map("MAPX35") && dungeon_kind("MAPX35") == "dungeon");
+        assert!(is_dungeon_map("mapg44") && dungeon_kind("mapg44") == "tower");
+        assert!(!is_dungeon_map("MAPX20"));
     }
 
     #[test]
@@ -566,7 +687,7 @@ mod tests {
         put(&mut grid, 10, 10, 2); // plain terrain — not a landmark
 
         // No town registry → every marker stays generic and unlinked.
-        let pois = overworld_pois(&grid, "MAPX20", &HashMap::new());
+        let pois = overworld_pois(&grid, "MAPX20", &HashMap::new(), &HashSet::new());
         let kinds: Vec<&str> = pois.iter().map(|p| p.kind.as_str()).collect();
         assert_eq!(pois.len(), 5);
         for k in ["village", "town", "tower", "castle", "dungeon"] {
@@ -591,7 +712,7 @@ mod tests {
             ("mapx22".to_string(), Some("Towne Linda".to_string())),
             ("mapx21".to_string(), None),
         ]);
-        let pois = overworld_pois(&grid, "MAPX20", &towns);
+        let pois = overworld_pois(&grid, "MAPX20", &towns, &HashSet::new());
 
         let town = pois.iter().find(|p| p.kind == "town").unwrap();
         assert_eq!(town.label, "Towne Linda");
@@ -606,6 +727,42 @@ mod tests {
         let castle = pois.iter().find(|p| p.kind == "castle").unwrap();
         assert_eq!(castle.label, "Castle");
         assert!(castle.target.is_none());
+    }
+
+    #[test]
+    fn overworld_pois_link_towers_and_dungeons_to_their_first_level() {
+        let mut grid = vec![0u8; MAP_GRID_LEN];
+        let put = |g: &mut [u8], x: usize, y: usize, tile: u8| g[y * MAP_W + x] = tile << 2;
+        put(&mut grid, 25, 3, 7); // tower   → digit 4 → mapx24 (rendered)
+        put(&mut grid, 35, 20, 9); // dungeon → digit 5 → mapx25 (rendered)
+        put(&mut grid, 40, 30, 7); // second tower with no rendered maze — stays unlinked
+
+        let dungeons = HashSet::from(["mapx24".to_string(), "mapx25".to_string()]);
+        let pois = overworld_pois(&grid, "MAPX20", &HashMap::new(), &dungeons);
+
+        let tower = pois.iter().find(|p| p.kind == "tower").unwrap();
+        assert_eq!(tower.label, "Tower");
+        assert_eq!(tower.target.as_deref(), Some("/ultima2/mapx24-l1"));
+
+        let dungeon = pois.iter().find(|p| p.kind == "dungeon").unwrap();
+        assert_eq!(dungeon.target.as_deref(), Some("/ultima2/mapx25-l1"));
+    }
+
+    #[test]
+    fn maze_bytes_classify_into_cells() {
+        use dungeon::Cell;
+        assert!(matches!(u2_cell(0x80), Cell::Wall));
+        assert!(matches!(u2_cell(0x00), Cell::Floor));
+        assert!(matches!(u2_cell(0xC0), Cell::Door));
+        assert!(matches!(u2_cell(0xE0), Cell::SecretDoor));
+        assert!(matches!(u2_cell(0x40), Cell::Chest));
+        assert!(matches!(
+            u2_cell(0x20),
+            Cell::Ladder {
+                up: false,
+                down: true
+            }
+        ));
     }
 
     #[test]

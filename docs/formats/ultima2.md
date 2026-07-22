@@ -89,8 +89,14 @@ every town — each a **64 × 64** tile grid, one byte per tile, row-major.
   overworlds / planets / space sectors.
 - The two-digit suffix encodes the world / era / planet and location (not fully decoded).
 
-**Dungeons and mines** are first-person 3-D (like Ultima I) with **no top-down map data**,
-so they can't be rendered as 2-D maps.
+**Dungeons and towers** are entered first-person, but — unlike Ultima I — their layouts **are**
+stored: the `MAP[XG]N5` (dungeon) and `MAP[XG]N4` (tower) map slots hold **sixteen 16×16 tile-grid
+levels** (`16 × 16 × 16 = 4096` bytes, one byte per cell). These use raw dungeon tile codes
+(`0x80` wall, `0x00` floor, `0xC0` door, `0xE0` secret door, `0x40` chest, `0x10`/`0x20`/`0x30`
+ladders), **not** the `>> 2` overworld packing — which is why reading them as overworld tiles
+produced noise. We reconstruct each level as a top-down graph-paper map. Every region with a
+dungeon entrance ships a `…5` file and every tower region a `…4`, so entrances link to their maze
+by the same sub-map-digit convention as towns.
 
 ## Tile Graphics (embedded in `ULTIMAII.EXE`)
 

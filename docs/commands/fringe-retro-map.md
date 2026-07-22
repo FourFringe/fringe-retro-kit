@@ -64,8 +64,9 @@ fringe-retro-map export [--game <id>] [--input <dir>] [--out <root>] [--png <fil
 What each game bakes:
 
 - **Ultima I** — one overworld (Sosaria).
-- **Ultima II** — every overworld and town (dungeons and other non-tile maps are skipped);
-  overworld village/town/castle markers are named and link to their town sub-map.
+- **Ultima II** — every overworld and town; overworld village/town/castle markers are named and
+  link to their town sub-map, and each region's tower and dungeon entrances link to their
+  reconstructed maze (sixteen 16×16 levels each, read from the `…4`/`…5` map slots).
 - **Ultima III** — Sosaria plus its named towns and castles. All seven dungeons are reconstructed
   from their `.ULT` tile grids as top-down graph-paper maps (eight levels each), named and linked
   from their overworld entrances.
