@@ -87,9 +87,10 @@ read from `PARTY.ULT` (`0x08`/`0x09`), not from here.
 Each town and castle is its **own named `.ULT` file** — `BRITISH.ULT`, `YEW.ULT`, `MOON.ULT`,
 `LCB.ULT` (Lord British's Castle), `EXODUS.ULT`, and so on — each a 4648-byte file in the
 identical 64×64, `byte >> 2` format as the overworld, so their names come straight from the
-filenames. Dungeons are smaller **2192-byte** files (`FIRE.ULT`, `MINE.ULT`, `DARDIN.ULT`, …) in
-a first-person layout with no top-down map, and `CNFLCT_*.ULT` are small combat arenas; neither
-is exported.
+filenames. Dungeons are their own smaller **2192-byte** files (`FIRE.ULT`, `MINE.ULT`,
+`DARDIN.ULT`, `M.ULT`, `P.ULT`, `PERINIAN.ULT`, `TIME.ULT`) — **eight 16×16 tile-grid levels**
+(2048 bytes) followed by a per-level name table — and are reconstructed as top-down graph-paper
+maps. `CNFLCT_*.ULT` are small combat arenas and aren't exported.
 
 ## Tile Graphics (`SHAPES.ULT`)
 

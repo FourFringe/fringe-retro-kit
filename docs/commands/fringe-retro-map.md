@@ -66,7 +66,9 @@ What each game bakes:
 - **Ultima I** — one overworld (Sosaria).
 - **Ultima II** — every overworld and town (dungeons and other non-tile maps are skipped);
   overworld village/town/castle markers are named and link to their town sub-map.
-- **Ultima III** — Sosaria plus its named towns and castles.
+- **Ultima III** — Sosaria plus its named towns and castles. All seven dungeons are reconstructed
+  from their `.ULT` tile grids as top-down graph-paper maps (eight levels each), named and linked
+  from their overworld entrances.
 - **Ultima IV** — the 256×256 Britannia overworld plus its towns, villages and castles. All eight
   first-person dungeons (including the Abyss) are reconstructed from their `.DNG` tile grids as
   top-down graph-paper maps (eight levels each) that their overworld entrances link into.

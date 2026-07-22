@@ -4,7 +4,8 @@
 //! `byte >> 2`, the same packing as Ultima II); the remaining bytes hold moon-phase and
 //! whirlpool state. Towns and castles are each their own named 4648-byte `.ULT` file
 //! (`BRITISH`, `FAWN`, `YEW`, …) with the same 64×64 grid, so their names come straight from the
-//! filename. Dungeons are first-person (a different 2192-byte format) and are skipped.
+//! filename. Dungeons are their own 2192-byte `.ULT` files — eight 16×16 tile-grid levels
+//! followed by a per-level name table — reconstructed as top-down "graph-paper" maps.
 //!
 //! Tiles: `SHAPES.ULT` — 80 tiles of 16×16 CGA 2-bpp graphics (64 bytes each, no header), so the
 //! [`crate::cga`] decoder is reused directly (with a gently muted palette — see [`SOFT_PALETTE`]).
@@ -22,6 +23,7 @@ use image::{Rgb, RgbImage};
 
 use crate::bundle::{Poi, World};
 use crate::cga;
+use crate::dungeon;
 use crate::tilemap;
 
 /// Map edge length, in tiles.
@@ -55,9 +57,9 @@ const GAME: &str = "ultima3";
 
 /// The overworld locations named in the browser, **in the order of the `EXODUS.BIN` coordinate
 /// table**: the two castles, then the ten towns, then the seven dungeons. (Ambrosia is reached
-/// by whirlpool and has no overworld entrance, so it isn't here.) The dungeons keep a generic
-/// label — their table order isn't independently verified, and Ultima III's dungeons are
-/// first-person, so we don't render them.
+/// by whirlpool and has no overworld entrance, so it isn't here.) The seven dungeon entries line
+/// up, in order, with [`DUNGEONS`]; [`named_pois`] gives each its real name and links it to its
+/// reconstructed map.
 const LOCATIONS: [(&str, &str); 19] = [
     ("Lord British's Castle", "castle"),
     ("Castle of Exodus", "castle"),
@@ -104,13 +106,106 @@ fn town_slug(file: &str) -> String {
 }
 
 /// The bundle path of the sub-map an overworld location opens, matched by name against [`TOWNS`]
-/// and only when that map ships in this install. Dungeons have no top-down map and get no target.
+/// and only when that map ships in this install. Dungeons are linked separately by
+/// [`dungeon_target`].
 fn town_target(game_dir: &Path, label: &str) -> Option<String> {
     TOWNS
         .iter()
         .find(|(_, title, _)| *title == label)
         .filter(|(file, _, _)| game_dir.join(file).exists())
         .map(|(file, _, _)| format!("/{GAME}/{}", town_slug(file)))
+}
+
+/// The seven dungeons, in the order their entrances appear in the `EXODUS.BIN` coordinate table
+/// (right after the ten towns), as `(filename, display name)`. Each is a 2192-byte `.ULT` file:
+/// eight 16×16 tile-grid levels followed by a per-level name table.
+///
+/// The five word-named files carry their canonical names; `M.ULT` and `P.ULT` are single-letter
+/// files whose canonical names aren't certain (their in-game entry banners are "Welcome fools to
+/// your doom!!" and "Clues to follow!"), so those are best-effort and worth a later pass.
+const DUNGEONS: &[(&str, &str)] = &[
+    ("M.ULT", "Dungeon of Doom"),
+    ("FIRE.ULT", "Dungeon of Fire"),
+    ("TIME.ULT", "Dungeon of Time"),
+    ("P.ULT", "Clues to Follow"),
+    ("PERINIAN.ULT", "Perinian Depths"),
+    ("MINE.ULT", "Mines of Morinia"),
+    ("DARDIN.ULT", "Dardin's Pit"),
+];
+
+/// A dungeon `.ULT`'s level map: eight levels, each a 16×16 grid of one-byte tile codes, followed
+/// by the per-level name table (which this top-down view doesn't need).
+const DUNGEON_EDGE: usize = 16;
+const DUNGEON_LEVELS: usize = 8;
+const DUNGEON_LEVEL_BYTES: usize = DUNGEON_EDGE * DUNGEON_EDGE; // 256
+const DUNGEON_MAP_BYTES: usize = DUNGEON_LEVELS * DUNGEON_LEVEL_BYTES; // 2048
+
+/// Classify an Ultima III dungeon tile byte into a shared dungeon [`dungeon::Cell`]. Ladders,
+/// chests and the two wall styles are certain; the low-nibble feature bytes (`0x01`–`0x0F`) cover
+/// the game's hazards (traps, gremlins, winds, slides) and are rendered generically as hazards
+/// for this rough pass.
+fn u3_cell(byte: u8) -> dungeon::Cell {
+    use dungeon::Cell;
+    match byte {
+        0x10 => Cell::Ladder {
+            up: true,
+            down: false,
+        },
+        0x20 => Cell::Ladder {
+            up: false,
+            down: true,
+        },
+        0x30 => Cell::Ladder {
+            up: true,
+            down: true,
+        },
+        0x40 => Cell::Chest,
+        0x80 => Cell::Wall,
+        0xA0 => Cell::AltWall, // a second wall style (chamber pillars / inscribed walls)
+        0xC0 => Cell::SecretDoor, // a passage set into a wall
+        0x01..=0x0F => Cell::Trap, // low-nibble hazard/feature tiles
+        _ => Cell::Floor,      // 0x00 corridor, and any unmapped structural byte
+    }
+}
+
+/// Build a [`World`] for every level of every dungeon that ships in this install, synthesising a
+/// top-down "graph-paper" map from each level's 16×16 tile grid.
+fn dungeon_worlds(game_dir: &Path) -> Result<Vec<World>> {
+    let tiles = dungeon::tileset(u3_cell);
+    let mut worlds = Vec::new();
+    for (file, name) in DUNGEONS {
+        let path = game_dir.join(file);
+        if !path.exists() {
+            continue; // not every install ships every dungeon
+        }
+        let data = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        if data.len() < DUNGEON_MAP_BYTES {
+            continue; // unexpected build; ship the rest of the maps without this dungeon
+        }
+        let s = town_slug(file);
+        for level in 0..DUNGEON_LEVELS {
+            let off = level * DUNGEON_LEVEL_BYTES;
+            let grid = &data[off..off + DUNGEON_LEVEL_BYTES];
+            worlds.push(tilemap::world(
+                GAME,
+                &format!("{s}-l{}", level + 1),
+                &format!("Ultima III — {name} (level {})", level + 1),
+                "dungeon",
+                &s,
+                Vec::new(),
+                tilemap::render(grid, DUNGEON_EDGE, DUNGEON_EDGE, &tiles),
+            ));
+        }
+    }
+    Ok(worlds)
+}
+
+/// The bundle path of a dungeon's first level, if its `.ULT` ships in this install.
+fn dungeon_target(game_dir: &Path, file: &str) -> Option<String> {
+    game_dir
+        .join(file)
+        .exists()
+        .then(|| format!("/{GAME}/{}-l1", town_slug(file)))
 }
 
 /// Render Ultima III into its worlds: the Sosaria overworld plus each named town and castle.
@@ -148,6 +243,8 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             render(&grid, &tiles),
         ));
     }
+
+    worlds.extend(dungeon_worlds(game_dir)?);
 
     Ok(worlds)
 }
@@ -187,19 +284,30 @@ fn overworld_pois(game_dir: &Path, grid: &[u8]) -> Vec<Poi> {
     named_pois(game_dir, grid).unwrap_or_else(|| tile_scan_pois(grid))
 }
 
-/// Build named POIs from the `EXODUS.BIN` location table, or `None` if it can't be located.
+/// Build named POIs from the `EXODUS.BIN` location table, or `None` if it can't be located. The
+/// seven dungeon entries, in table order, correspond to [`DUNGEONS`]; each gets that dungeon's
+/// name and a link to its reconstructed first level.
 fn named_pois(game_dir: &Path, grid: &[u8]) -> Option<Vec<Poi>> {
     let exe = std::fs::read(game_dir.join(EXE_FILE)).ok()?;
     let start = find_location_table(&exe, grid)?;
+    let mut dungeon_idx = 0;
     let pois = LOCATIONS
         .iter()
         .enumerate()
         .map(|(i, (label, kind))| {
             let x = u32::from(exe[start + 2 * i]);
             let y = u32::from(exe[start + 2 * i + 1]);
-            let mut poi = tilemap::poi(x, y, kind, label);
-            poi.target = town_target(game_dir, label);
-            poi
+            if *kind == "dungeon" {
+                let (file, name) = DUNGEONS[dungeon_idx];
+                dungeon_idx += 1;
+                let mut poi = tilemap::poi(x, y, kind, name);
+                poi.target = dungeon_target(game_dir, file);
+                poi
+            } else {
+                let mut poi = tilemap::poi(x, y, kind, label);
+                poi.target = town_target(game_dir, label);
+                poi
+            }
         })
         .collect();
     Some(pois)
@@ -362,5 +470,36 @@ mod tests {
         // Dungeons have no top-down map, and absent maps aren't linked.
         assert_eq!(town_target(dir.path(), "Dungeon"), None);
         assert_eq!(town_target(dir.path(), "Yew"), None);
+    }
+
+    #[test]
+    fn dungeon_bytes_classify_into_cells() {
+        use dungeon::Cell;
+        assert!(matches!(u3_cell(0x00), Cell::Floor));
+        assert!(matches!(u3_cell(0x80), Cell::Wall));
+        assert!(matches!(u3_cell(0xA0), Cell::AltWall));
+        assert!(matches!(u3_cell(0xC0), Cell::SecretDoor));
+        assert!(matches!(u3_cell(0x40), Cell::Chest));
+        assert!(matches!(u3_cell(0x06), Cell::Trap));
+        assert!(matches!(
+            u3_cell(0x10),
+            Cell::Ladder {
+                up: true,
+                down: false
+            }
+        ));
+        assert!(matches!(
+            u3_cell(0x30),
+            Cell::Ladder {
+                up: true,
+                down: true
+            }
+        ));
+    }
+
+    #[test]
+    fn dungeon_count_matches_overworld_dungeon_entries() {
+        let dungeons = LOCATIONS.iter().filter(|(_, k)| *k == "dungeon").count();
+        assert_eq!(dungeons, DUNGEONS.len());
     }
 }

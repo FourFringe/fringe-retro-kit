@@ -83,8 +83,11 @@ grids into top-down "graph-paper" maps and slot them into the existing dungeon p
       512-byte level map at the head of each `.DNG` is synthesised into per-level graph-paper maps
       (adding orbs and altars to the shared cell palette), and every overworld entrance POI —
       including the Abyss — links to its dungeon's first level.
-- [ ] Stretch: **Ultima III** (2192-byte first-person format), then **Ultima II** (an older
-      non-tile format that needs decoding first).
+- [x] **Ultima III dungeons** (`*.ULT` 2192-byte files, seven dungeons × eight levels) → same. Each
+      file's 2048-byte level map (eight 16×16 tile grids) is synthesised into per-level graph-paper
+      maps, and the `EXODUS.BIN` coordinate table's seven dungeon entrances — now matched, in order,
+      to their files — are named and linked to their first level.
+- [ ] Stretch: **Ultima II** (an older non-tile format that needs decoding first).
 
 Out of scope: **Ultima I** dungeons are procedurally generated at runtime (no stored maps), so
 there is nothing to bake — the overworld entrance markers are the honest representation. **Ultima
