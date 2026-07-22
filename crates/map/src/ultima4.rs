@@ -25,6 +25,7 @@ use anyhow::{ensure, Context, Result};
 use image::Rgb;
 
 use crate::bundle::{Poi, World};
+use crate::dungeon;
 use crate::ega;
 use crate::tilemap;
 
@@ -152,6 +153,117 @@ fn town_slug(file: &str) -> String {
     file.trim_end_matches(".ULT").to_ascii_lowercase()
 }
 
+/// The eight dungeons, in overworld-entrance order, as `(display name, .DNG filename)`. Each
+/// `.DNG` opens with eight dungeon levels, each an 8×8 grid of one-byte tile codes; room and
+/// trigger data follow the level map, which is all this top-down view needs.
+const DUNGEONS: &[(&str, &str)] = &[
+    ("Deceit", "DECEIT.DNG"),
+    ("Despise", "DESPISE.DNG"),
+    ("Destard", "DESTARD.DNG"),
+    ("Wrong", "WRONG.DNG"),
+    ("Covetous", "COVETOUS.DNG"),
+    ("Shame", "SHAME.DNG"),
+    ("Hythloth", "HYTHLOTH.DNG"),
+    ("The Abyss", "ABYSS.DNG"),
+];
+
+/// A `.DNG`'s level map: eight levels, each an 8×8 grid of one-byte tile codes.
+const DUNGEON_EDGE: usize = 8;
+const DUNGEON_LEVELS: usize = 8;
+const DUNGEON_LEVEL_BYTES: usize = DUNGEON_EDGE * DUNGEON_EDGE; // 64
+const DUNGEON_MAP_BYTES: usize = DUNGEON_LEVELS * DUNGEON_LEVEL_BYTES; // 512
+
+/// A URL-safe slug of a location name (lowercase, non-alphanumeric runs collapsed to `-`).
+fn slug(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    out.trim_end_matches('-').to_string()
+}
+
+/// Classify an Ultima IV `.DNG` tile byte into a shared dungeon [`dungeon::Cell`]. The high nibble
+/// is the cell type; the low nibble a detail (field kind, room number, fountain flavour).
+fn u4_cell(byte: u8) -> dungeon::Cell {
+    use dungeon::{Cell, Field};
+    match byte >> 4 {
+        0x0 => Cell::Floor, // open corridor
+        0x1 => Cell::Ladder {
+            up: true,
+            down: false,
+        },
+        0x2 => Cell::Ladder {
+            up: false,
+            down: true,
+        },
+        0x3 => Cell::Ladder {
+            up: true,
+            down: true,
+        },
+        0x4 => Cell::Chest,
+        0x5 | 0x6 | 0x8 => Cell::Trap, // ceiling hole / floor hole / winds & darkness
+        0x7 => Cell::Orb,
+        0x9 => Cell::Fountain,
+        0xA => Cell::Field(match byte & 0x0F {
+            0 => Field::Poison,
+            1 => Field::Energy,
+            2 => Field::Fire,
+            _ => Field::Sleep,
+        }),
+        0xB => Cell::Altar,
+        0xC => Cell::Door,
+        0xD => Cell::Room,
+        0xE => Cell::SecretDoor,
+        _ => Cell::Wall, // 0xF
+    }
+}
+
+/// Build a [`World`] for every level of every dungeon that ships in this install, synthesising a
+/// top-down "graph-paper" map from each level's tile grid.
+fn dungeon_worlds(game_dir: &Path) -> Result<Vec<World>> {
+    let tiles = dungeon::tileset(u4_cell);
+    let mut worlds = Vec::new();
+    for (name, file) in DUNGEONS {
+        let path = game_dir.join(file);
+        if !path.exists() {
+            continue; // not every install ships every dungeon
+        }
+        let data = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        if data.len() < DUNGEON_MAP_BYTES {
+            continue; // unexpected build; ship the rest of the maps without this dungeon
+        }
+        let s = slug(name);
+        for level in 0..DUNGEON_LEVELS {
+            let off = level * DUNGEON_LEVEL_BYTES;
+            let grid = &data[off..off + DUNGEON_LEVEL_BYTES];
+            worlds.push(tilemap::world(
+                GAME,
+                &format!("{s}-l{}", level + 1),
+                &format!("Ultima IV — {name} (level {})", level + 1),
+                "dungeon",
+                &s,
+                Vec::new(),
+                tilemap::render(grid, DUNGEON_EDGE, DUNGEON_EDGE, &tiles),
+            ));
+        }
+    }
+    Ok(worlds)
+}
+
+/// The bundle path of the first level of the dungeon an overworld entrance opens, matched by name
+/// against [`DUNGEONS`] and only when that `.DNG` actually ships in this install.
+fn dungeon_target(game_dir: &Path, label: &str) -> Option<String> {
+    DUNGEONS
+        .iter()
+        .find(|(name, _)| *name == label)
+        .filter(|(_, file)| game_dir.join(file).exists())
+        .map(|(name, _)| format!("/{GAME}/{}-l1", slug(name)))
+}
+
 /// The bundle path of the sub-map an overworld location opens, matched by name against [`TOWNS`]
 /// and only when that map actually ships in this install. Dungeons, shrines and the Abyss have no
 /// top-down map and get no target.
@@ -206,6 +318,8 @@ pub fn export_worlds(game_dir: &Path) -> Result<Vec<World>> {
             tilemap::render(&data[..TOWN_GRID_LEN], TOWN_W, TOWN_H, &tiles),
         ));
     }
+
+    worlds.extend(dungeon_worlds(game_dir)?);
 
     Ok(worlds)
 }
@@ -326,7 +440,7 @@ fn named_pois(game_dir: &Path, grid: &[u8]) -> Option<Vec<Poi>> {
         }
         if let Some(display) = display_kind(kind) {
             let mut poi = tilemap::poi(u32::from(x), u32::from(y), display, label);
-            poi.target = town_target(game_dir, label);
+            poi.target = town_target(game_dir, label).or_else(|| dungeon_target(game_dir, label));
             pois.push(poi);
         }
     }

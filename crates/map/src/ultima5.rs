@@ -26,9 +26,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{ensure, Context, Result};
-use image::{Rgb, RgbImage};
+use image::RgbImage;
 
 use crate::bundle::{Poi, World};
+use crate::dungeon;
 use crate::ega::EGA_PALETTE;
 use crate::lzw;
 use crate::tilemap::{self, TILE_SIZE};
@@ -538,22 +539,6 @@ const DUNGEON_LEVEL_BYTES: usize = DUNGEON_EDGE * DUNGEON_EDGE; // 64
 const DUNGEON_BYTES: usize = DUNGEON_COUNT * DUNGEON_LEVELS * DUNGEON_LEVEL_BYTES; // 4096
 /// The eight dungeons sit at the end of [`LOCATIONS`], in `DUNGEON.DAT` order.
 const DUNGEON_FIRST_LOCATION: usize = 32;
-/// Edge, in pixels, of a synthesised dungeon-cell image.
-const DTILE: u32 = 32;
-
-const D_WALL: Rgb<u8> = Rgb([54, 52, 64]);
-const D_WALL_ALT: Rgb<u8> = Rgb([80, 54, 54]);
-const D_WALL_EDGE: Rgb<u8> = Rgb([32, 30, 40]);
-const D_FLOOR: Rgb<u8> = Rgb([206, 198, 176]);
-const D_GRID: Rgb<u8> = Rgb([176, 168, 148]);
-const D_DOOR: Rgb<u8> = Rgb([148, 96, 42]);
-const D_SECRET: Rgb<u8> = Rgb([170, 60, 150]);
-const D_LADDER_UP: Rgb<u8> = Rgb([232, 202, 44]);
-const D_LADDER_DOWN: Rgb<u8> = Rgb([228, 138, 40]);
-const D_CHEST: Rgb<u8> = Rgb([150, 102, 40]);
-const D_FOUNTAIN: Rgb<u8> = Rgb([56, 120, 216]);
-const D_TRAP: Rgb<u8> = Rgb([196, 44, 44]);
-const D_ROOM: Rgb<u8> = Rgb([150, 70, 180]);
 
 /// Build a [`World`] for every level of every dungeon, and register each dungeon's first level as
 /// the target its overworld entrance POI links to.
@@ -569,7 +554,7 @@ fn dungeon_worlds(
     if data.len() < DUNGEON_BYTES {
         return Ok(Vec::new()); // unexpected build; ship the rest of the maps without dungeons
     }
-    let tiles = dungeon_tileset();
+    let tiles = dungeon::tileset(u5_cell);
     let mut worlds = Vec::with_capacity(DUNGEON_COUNT * DUNGEON_LEVELS);
     for di in 0..DUNGEON_COUNT {
         let (name, _) = LOCATIONS[DUNGEON_FIRST_LOCATION + di];
@@ -592,99 +577,33 @@ fn dungeon_worlds(
     Ok(worlds)
 }
 
-/// The 256 synthesised dungeon-cell images, indexed by the raw `DUNGEON.DAT` byte.
-fn dungeon_tileset() -> Vec<RgbImage> {
-    (0..=u8::MAX).map(dungeon_tile).collect()
-}
-
-/// Synthesise the top-down image for one dungeon cell. The high nibble is the cell type; the low
-/// nibble a detail (energy-field colour, etc.).
-fn dungeon_tile(byte: u8) -> RgbImage {
-    let (hi, lo) = (byte >> 4, byte & 0x0F);
-    match hi {
-        0xB => return wall_tile(D_WALL, false),     // normal wall
-        0xC => return wall_tile(D_WALL_ALT, false), // alternate wall (skeleton in manacles)
-        0xD => return wall_tile(D_WALL, true),      // secret door — a wall with a faint seam
-        _ => {}
-    }
-    let mut img = floor_tile();
-    match hi {
-        0xE => fill_rect(&mut img, 6, 13, 26, 19, D_DOOR), // door
-        0x1 => fill_rect(&mut img, 9, 9, 23, 16, D_LADDER_UP), // ladder up
-        0x2 => fill_rect(&mut img, 9, 16, 23, 23, D_LADDER_DOWN), // ladder down
-        0x3 => {
-            fill_rect(&mut img, 9, 9, 23, 16, D_LADDER_UP);
-            fill_rect(&mut img, 9, 16, 23, 23, D_LADDER_DOWN);
-        }
-        0x4 | 0x7 => fill_rect(&mut img, 9, 10, 23, 22, D_CHEST), // chest (closed / open)
-        0x5 => fill_rect(&mut img, 9, 9, 23, 23, D_FOUNTAIN),     // fountain
-        0x6 => fill_rect(&mut img, 10, 10, 22, 22, D_TRAP),       // trap / pit
-        0x8 => fill_rect(&mut img, 5, 5, 27, 27, field_color(lo)), // energy field
-        0xF => {
-            // A room (a separate combat map): a bold frame on the floor cell.
-            fill_rect(&mut img, 5, 5, 27, 7, D_ROOM);
-            fill_rect(&mut img, 5, 25, 27, 27, D_ROOM);
-            fill_rect(&mut img, 5, 5, 7, 27, D_ROOM);
-            fill_rect(&mut img, 25, 5, 27, 27, D_ROOM);
-        }
-        _ => {} // 0x0 open hallway (plain floor); 0x9 / 0xA unused
-    }
-    img
-}
-
-/// The colour of an energy field, from the low nibble's bottom two bits.
-fn field_color(lo: u8) -> Rgb<u8> {
-    match lo & 0x3 {
-        0 => Rgb([150, 80, 200]), // sleep — purple
-        1 => Rgb([70, 180, 70]),  // poison — green
-        2 => Rgb([232, 96, 32]),  // fire — orange
-        _ => Rgb([232, 220, 44]), // energy — yellow
-    }
-}
-
-/// A parchment floor cell with a faint grid border.
-fn floor_tile() -> RgbImage {
-    let mut img = RgbImage::from_pixel(DTILE, DTILE, D_FLOOR);
-    border(&mut img, D_GRID);
-    img
-}
-
-/// A solid wall cell; `secret` adds a faint seam hinting at a hidden door.
-fn wall_tile(fill: Rgb<u8>, secret: bool) -> RgbImage {
-    let mut img = RgbImage::from_pixel(DTILE, DTILE, fill);
-    border(&mut img, D_WALL_EDGE);
-    if secret {
-        fill_rect(
-            &mut img,
-            DTILE / 2 - 1,
-            6,
-            DTILE / 2 + 1,
-            DTILE - 6,
-            D_SECRET,
-        );
-    }
-    img
-}
-
-/// Fill the half-open rectangle `[x0, x1) × [y0, y1)` with `c`, clipped to the image.
-fn fill_rect(img: &mut RgbImage, x0: u32, y0: u32, x1: u32, y1: u32, c: Rgb<u8>) {
-    for y in y0..y1.min(img.height()) {
-        for x in x0..x1.min(img.width()) {
-            img.put_pixel(x, y, c);
-        }
-    }
-}
-
-/// Draw a one-pixel border around the image.
-fn border(img: &mut RgbImage, c: Rgb<u8>) {
-    let (w, h) = (img.width(), img.height());
-    for x in 0..w {
-        img.put_pixel(x, 0, c);
-        img.put_pixel(x, h - 1, c);
-    }
-    for y in 0..h {
-        img.put_pixel(0, y, c);
-        img.put_pixel(w - 1, y, c);
+/// Classify a `DUNGEON.DAT` byte into a shared dungeon [`dungeon::Cell`]. The high nibble is the
+/// cell type; the low nibble a detail (energy-field colour, etc.).
+fn u5_cell(byte: u8) -> dungeon::Cell {
+    use dungeon::Cell;
+    match byte >> 4 {
+        0xB => Cell::Wall,       // normal wall
+        0xC => Cell::AltWall,    // alternate wall (skeleton in manacles)
+        0xD => Cell::SecretDoor, // secret door
+        0xE => Cell::Door,
+        0x1 => Cell::Ladder {
+            up: true,
+            down: false,
+        },
+        0x2 => Cell::Ladder {
+            up: false,
+            down: true,
+        },
+        0x3 => Cell::Ladder {
+            up: true,
+            down: true,
+        },
+        0x4 | 0x7 => Cell::Chest, // chest (closed / open)
+        0x5 => Cell::Fountain,
+        0x6 => Cell::Trap,                        // trap / pit / floor hole
+        0x8 => Cell::Field(dungeon::field(byte)), // energy field (low bits select the kind)
+        0xF => Cell::Room,
+        _ => Cell::Floor, // 0x0 open hallway; 0x9 / 0xA unused
     }
 }
 
@@ -758,18 +677,22 @@ mod tests {
     }
 
     #[test]
-    fn dungeon_tiles_categorise_by_high_nibble() {
-        assert_eq!(dungeon_tileset().len(), 256);
-        let mid = DTILE / 2;
-        // Normal (0xB) and alternate (0xC) walls fill the cell with their colours.
-        assert_eq!(*dungeon_tile(0xB0).get_pixel(mid, mid), D_WALL);
-        assert_eq!(*dungeon_tile(0xC0).get_pixel(mid, mid), D_WALL_ALT);
-        // Open hallway (0x00) is floor; a door (0xE0) draws a bar across it.
-        assert_eq!(*dungeon_tile(0x00).get_pixel(mid, mid), D_FLOOR);
-        assert_eq!(*dungeon_tile(0xE0).get_pixel(mid, 15), D_DOOR);
-        // The energy-field colour comes from the low nibble's bottom two bits.
-        assert_eq!(field_color(1), Rgb([70, 180, 70]));
-        assert_eq!(field_color(2), Rgb([232, 96, 32]));
+    fn dungeon_bytes_classify_into_cells() {
+        use dungeon::{Cell, Field};
+        assert!(matches!(u5_cell(0xB0), Cell::Wall));
+        assert!(matches!(u5_cell(0xC0), Cell::AltWall));
+        assert!(matches!(u5_cell(0xD0), Cell::SecretDoor));
+        assert!(matches!(u5_cell(0xE0), Cell::Door));
+        assert!(matches!(u5_cell(0x00), Cell::Floor));
+        assert!(matches!(
+            u5_cell(0x10),
+            Cell::Ladder {
+                up: true,
+                down: false
+            }
+        ));
+        assert!(matches!(u5_cell(0xF0), Cell::Room));
+        assert!(matches!(u5_cell(0x82), Cell::Field(Field::Fire)));
     }
 
     #[test]

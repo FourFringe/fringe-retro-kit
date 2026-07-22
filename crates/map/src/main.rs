@@ -6,6 +6,7 @@
 mod bundle;
 mod cga;
 mod config;
+mod dungeon;
 mod ega;
 mod lzw;
 mod serve;

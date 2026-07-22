@@ -79,7 +79,10 @@ grids into top-down "graph-paper" maps and slot them into the existing dungeon p
       levels are baked as synthesised graph-paper maps (walls, corridors, doors, ladders, chests,
       fountains, traps, energy fields, rooms and secret doors), and each overworld entrance POI now
       links to its dungeon's first level.
-- [ ] **Ultima IV dungeons** (fixed tile grids, eight dungeons × eight levels) → same.
+- [x] **Ultima IV dungeons** (`*.DNG` fixed tile grids, eight dungeons × eight levels) → same. The
+      512-byte level map at the head of each `.DNG` is synthesised into per-level graph-paper maps
+      (adding orbs and altars to the shared cell palette), and every overworld entrance POI —
+      including the Abyss — links to its dungeon's first level.
 - [ ] Stretch: **Ultima III** (2192-byte first-person format), then **Ultima II** (an older
       non-tile format that needs decoding first).
 
