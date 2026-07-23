@@ -9,6 +9,7 @@
 pub mod checksum;
 pub mod exepack;
 pub mod huffman;
+pub mod nrbf;
 pub mod strings;
 pub mod strings5;
 pub mod xor;
