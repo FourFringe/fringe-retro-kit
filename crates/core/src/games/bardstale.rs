@@ -18,9 +18,9 @@
 
 use std::path::Path;
 
-use crate::codec::nrbf::Document;
+use crate::codec::nrbf::{Document, Value};
 use crate::save::atomic_write;
-use crate::schema::{Endian, Field, FieldKind};
+use crate::schema::{Endian, Field, FieldKind, Variants};
 use crate::{Error, Result};
 
 /// The .NET class of a party/roster character.
@@ -74,6 +74,11 @@ impl BardsTaleSave {
 
     /// The current value of a character field, if present in this save.
     pub fn character_get(&self, index: usize, key: &str) -> Option<String> {
+        // Class/race/gender are boxed .NET enums referenced by the character; resolve to a name.
+        if let Some((member, variants)) = char_enum(key) {
+            let (_, value) = self.enum_ref(index, member)?;
+            return Some(variant_name(variants, value));
+        }
         let member = char_member(key)?;
         let id = *self.char_ids.get(index)?;
         let obj = self.doc.object(id)?;
@@ -82,6 +87,15 @@ impl BardsTaleSave {
 
     /// Set a character field to a new integer value, validated against the field's storage width.
     pub fn character_set(&mut self, index: usize, key: &str, value: &str) -> Result<()> {
+        // An enum field patches the `value__` of the character's boxed enum object.
+        if let Some((member, variants)) = char_enum(key) {
+            let (ref_id, _) = self.enum_ref(index, member).ok_or_else(|| {
+                Error::Format(format!("character #{index} has no `{key}` to set"))
+            })?;
+            let v = variant_value(variants, value)
+                .ok_or_else(|| Error::Format(format!("`{key}` must be one of its named values")))?;
+            return self.doc.patch_int(ref_id, "value__", v);
+        }
         let member =
             char_member(key).ok_or_else(|| Error::Format(format!("unknown field `{key}`")))?;
         let id = *self
@@ -90,6 +104,18 @@ impl BardsTaleSave {
             .ok_or_else(|| Error::Format(format!("no character #{index}")))?;
         let v = parse_int(key, value)?;
         self.doc.patch_int(id, member, v)
+    }
+
+    /// Resolve a character's boxed-enum member (`m_class`/`m_race`/`m_gender`) to the boxed
+    /// object's id and its current `value__`.
+    fn enum_ref(&self, index: usize, member: &str) -> Option<(i32, i64)> {
+        let id = *self.char_ids.get(index)?;
+        let ch = self.doc.object(id)?;
+        let Value::Ref(ref_id) = ch.member(member)?.value else {
+            return None;
+        };
+        let value = self.doc.object(ref_id)?.int("value__")?;
+        Some((ref_id, value))
     }
 
     /// The current value of a party-wide field, if present in this save.
@@ -192,6 +218,63 @@ fn party_target(key: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
+/// Map an enum field key to the character's boxed-enum member and its named values.
+fn char_enum(key: &str) -> Option<(&'static str, Variants)> {
+    Some(match key {
+        "class" => ("m_class", CLASS),
+        "race" => ("m_race", RACE),
+        "gender" => ("m_gender", GENDER),
+        _ => return None,
+    })
+}
+
+/// The display name of an enum value, or the raw number if it isn't a known variant.
+fn variant_name(variants: Variants, value: i64) -> String {
+    variants
+        .iter()
+        .find(|(k, _)| i64::from(*k) == value)
+        .map(|(_, name)| (*name).to_string())
+        .unwrap_or_else(|| value.to_string())
+}
+
+/// Parse an enum edit: a variant name (case-insensitive) or a raw integer.
+fn variant_value(variants: Variants, input: &str) -> Option<i64> {
+    let input = input.trim();
+    if let Some((k, _)) = variants.iter().find(|(_, n)| n.eq_ignore_ascii_case(input)) {
+        return Some(i64::from(*k));
+    }
+    input.parse::<i64>().ok()
+}
+
+/// Character classes, in the game's enum order (values confirmed against a real party).
+const CLASS: Variants = &[
+    (0, "Warrior"),
+    (1, "Paladin"),
+    (2, "Rogue"),
+    (3, "Bard"),
+    (4, "Hunter"),
+    (5, "Monk"),
+    (6, "Conjurer"),
+    (7, "Magician"),
+    (8, "Sorcerer"),
+    (9, "Wizard"),
+    (10, "Archmage"),
+];
+
+/// Character races, in the game's enum order.
+const RACE: Variants = &[
+    (0, "Human"),
+    (1, "Elf"),
+    (2, "Dwarf"),
+    (3, "Hobbit"),
+    (4, "Half-Elf"),
+    (5, "Half-Orc"),
+    (6, "Gnome"),
+];
+
+/// Character genders, in the game's enum order.
+const GENDER: Variants = &[(0, "Male"), (1, "Female")];
+
 /// A little-endian integer field of the given inclusive maximum. The width/endian are only
 /// display metadata: edits go through [`Document::patch_int`], which validates against the
 /// value's real storage width.
@@ -203,10 +286,23 @@ const fn int(max: u32) -> FieldKind {
     }
 }
 
+/// A named-variant field. The width/endian are display metadata; edits patch the boxed enum's
+/// `value__` via [`Document::patch_int`].
+const fn enum_field(variants: Variants) -> FieldKind {
+    FieldKind::Enum {
+        bytes: 4,
+        endian: Endian::Little,
+        variants,
+    }
+}
+
 const PARTY_FIELDS: &[Field] =
     &[Field::new("gold", "Gold", 0, int(i32::MAX as u32)).in_section("Party")];
 
 const CHAR_FIELDS: &[Field] = &[
+    Field::new("class", "Class", 0, enum_field(CLASS)).in_section("Identity"),
+    Field::new("race", "Race", 0, enum_field(RACE)).in_section("Identity"),
+    Field::new("gender", "Gender", 0, enum_field(GENDER)).in_section("Identity"),
     Field::new("strength", "Strength", 0, int(999)).in_section("Attributes"),
     Field::new("intelligence", "Intelligence", 0, int(999)).in_section("Attributes"),
     Field::new("dexterity", "Dexterity", 0, int(999)).in_section("Attributes"),
@@ -359,6 +455,50 @@ mod tests {
         assert!(save.character_set(0, "strength", "not a number").is_err());
         assert!(save.character_set(0, "no_such_field", "1").is_err());
         assert!(save.character_set(9, "strength", "1").is_err());
+    }
+
+    #[test]
+    fn reads_and_edits_a_boxed_enum_class() {
+        let mut v = header(1);
+        // Boxed enum object #10: BardsTale.Character+Class { value__ = 3 (Bard) }.
+        v.push(5); // ClassWithMembersAndTypes
+        v.extend_from_slice(&10i32.to_le_bytes());
+        v.extend(lp("BardsTale.Character+Class"));
+        v.extend_from_slice(&1i32.to_le_bytes()); // 1 member
+        v.extend(lp("value__"));
+        v.push(0); // PRIMITIVE
+        v.push(8); // Int32
+        v.extend_from_slice(&7i32.to_le_bytes()); // LibraryId
+        v.extend_from_slice(&3i32.to_le_bytes()); // value__ = 3
+
+        // Character #1 with m_name (string), m_class (reference -> #10), m_level (int).
+        v.push(5);
+        v.extend_from_slice(&1i32.to_le_bytes());
+        v.extend(lp(CHARACTER_CLASS));
+        v.extend_from_slice(&3i32.to_le_bytes()); // 3 members
+        v.extend(lp("m_name"));
+        v.extend(lp("m_class"));
+        v.extend(lp("m_level"));
+        v.extend_from_slice(&[0u8, 3u8, 0u8]); // PRIMITIVE, SYSTEM_CLASS, PRIMITIVE
+        v.push(18); // m_name primitive = String
+        v.extend(lp("BardsTale.Character+Class")); // SYSTEM_CLASS type name
+        v.push(8); // m_level primitive = Int32
+        v.extend_from_slice(&7i32.to_le_bytes()); // LibraryId
+        v.extend(lp("Merlin")); // m_name value
+        v.push(9); // MemberReference
+        v.extend_from_slice(&10i32.to_le_bytes()); // m_class -> #10
+        v.extend_from_slice(&5i32.to_le_bytes()); // m_level = 5
+        v.push(11); // MessageEnd
+
+        let mut save = BardsTaleSave::from_bytes(v).unwrap();
+        assert_eq!(save.character_get(0, "class").as_deref(), Some("Bard"));
+        // Set by name, and by raw number.
+        save.character_set(0, "class", "Wizard").unwrap();
+        assert_eq!(save.character_get(0, "class").as_deref(), Some("Wizard"));
+        save.character_set(0, "class", "10").unwrap();
+        assert_eq!(save.character_get(0, "class").as_deref(), Some("Archmage"));
+        // An unknown variant name is rejected.
+        assert!(save.character_set(0, "class", "Wombat").is_err());
     }
 
     #[test]

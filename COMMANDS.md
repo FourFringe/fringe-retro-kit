@@ -8,10 +8,10 @@ Fringe Retro Kit ships **three binaries**, each with its own focused command ref
 | **`fringe-retro-map`** | Bake a game's world maps into web tiles and browse them locally, with your party's live position. | [docs/commands/fringe-retro-map.md](docs/commands/fringe-retro-map.md) |
 | **`fringe-retro-kit`** | The reverse-engineering workbench — codec lab, string ripper, schema explorer, live logger, and container carver — for mapping new save formats. | [docs/commands/fringe-retro-kit.md](docs/commands/fringe-retro-kit.md) |
 
-> **Current status:** supports **Ultima I–VI** and **Wasteland**, with automatic game discovery,
-> a Save Library, and automatic backups. The game is auto-detected from each save file, so the
-> same `fringe-retro` commands work across all of them. Planned features are tracked in
-> [ROADMAP.md](ROADMAP.md).
+> **Current status:** supports **Ultima I–VI**, **Wasteland**, and **The Bard's Tale Trilogy**,
+> with automatic game discovery, a Save Library, and automatic backups. The game is auto-detected
+> from each save file, so the same `fringe-retro` commands work across all of them. Planned
+> features are tracked in [ROADMAP.md](ROADMAP.md).
 
 Legend used throughout the per-binary references: ✅ implemented · 🔷 planned (not yet available).
 

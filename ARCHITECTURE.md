@@ -186,13 +186,16 @@ The field-schema engine understands generic concepts — integers, enums, string
 bitfields, structures — and avoids game-specific knowledge; the codec pipeline handles the
 container/crypto concerns that data can't express.
 
-**Current state:** seven games are supported in `crates/core` — Ultima I–VI and Wasteland —
-all editable via both the CLI and the TUI. The field-schema engine
+**Current state:** eight games are supported in `crates/core` — Ultima I–VI, Wasteland, and
+The Bard's Tale Trilogy — all editable via both the CLI and the TUI. The field-schema engine
 (`crates/core/src/schema.rs`) has been extracted and the Ultimas run on it; Wasteland adds
 an MSQ codec (decrypt + re-encrypt with the game's own checksum), and Ultima VI reads party
-stats from the uncompressed `OBJLIST`. The reusable codec pieces have begun to consolidate:
-`crates/core/src/codec/` now holds the shared cipher, decompressors, checksums, and string
-codecs (used by both the games and the `fringe-retro-kit` workbench), and
+stats from the uncompressed `OBJLIST`. The Bard's Tale Trilogy (a Unity/IL2CPP remaster)
+saves with .NET's `BinaryFormatter`, so `crates/core/src/codec/nrbf.rs` parses that
+self-describing object graph and patches integers in place. The reusable codec pieces have
+begun to consolidate: `crates/core/src/codec/` now holds the shared cipher, decompressors,
+checksums, and string codecs (used by both the games and the `fringe-retro-kit` workbench),
+and
 `crates/core/src/scan.rs` the byte-scanning primitives. The full `Transform`-pipeline codec
 layer and user-authored schema files remain the destination, not yet where we are.
 

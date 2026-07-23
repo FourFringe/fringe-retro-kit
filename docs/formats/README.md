@@ -33,6 +33,7 @@ we leaned on (see [References & credits](#references--credits)).
 | [Ultima V](ultima5.md) | `SAVED.GAM` | LE binary (`u16`/`u8`) | plain file | Follows the Codex of Ultima Wisdom wiki; verified against a real save |
 | [Ultima VI](ultima6.md) | `OBJLIST` (in a save directory) | LE binary | plain arrays | Party stats via the Nuvie layout; verified against a real save (no LZW needed) |
 | [Wasteland](wasteland.md) | `GAME1` (in a save directory) | binary | **encrypted MSQ blocks** | Character sheets editable; byte-faithful writes verified against a real save |
+| [The Bard's Tale Trilogy](bardstale.md) | `Save1.dat`, `AutoSave.dat`, … | self-describing | **.NET `BinaryFormatter` (MS-NRBF)** | Stats, class/race/gender, party gold editable; in-place patch verified against a real Steam save |
 
 ## Map & graphics formats
 

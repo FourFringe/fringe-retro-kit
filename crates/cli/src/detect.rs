@@ -312,11 +312,6 @@ struct UnsupportedSig {
 /// have a `GameKind`; those are reported in the supported section.)
 const UNSUPPORTED: &[UnsupportedSig] = &[
     UnsupportedSig {
-        title: "The Bard's Tale Trilogy",
-        gog_names: &["The Bard's Tale Trilogy", "Bard's Tale Trilogy"],
-        steam_app_id: Some(843260),
-    },
-    UnsupportedSig {
         title: "Magic Carpet Plus",
         gog_names: &["Magic Carpet Plus", "Magic Carpet"],
         steam_app_id: None,
@@ -546,12 +541,13 @@ mod tests {
     }
 
     #[test]
-    fn detects_unsupported_gog_and_steam() {
+    fn detects_unsupported_and_skips_supported() {
         let apps = tempfile::tempdir().unwrap();
         // A GOG bundle we recognize but don't support (no save subdir needed).
         std::fs::create_dir_all(apps.path().join("Magic Carpet Plus™.app")).unwrap();
 
-        // A Steam library with the Bard's Tale Trilogy manifest.
+        // A Steam library with the Bard's Tale Trilogy manifest. It's a *supported* game now,
+        // so it must NOT show up in the unsupported list even when installed.
         let steam = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(steam.path().join("steamapps")).unwrap();
         std::fs::write(
@@ -564,21 +560,13 @@ mod tests {
             detect_unsupported_in(&[apps.path().to_path_buf()], &[steam.path().to_path_buf()]);
         let titles: Vec<&str> = found.iter().map(|g| g.title.as_str()).collect();
         assert!(titles.contains(&"Magic Carpet Plus"));
-        assert!(titles.contains(&"The Bard's Tale Trilogy"));
+        assert!(!titles.contains(&"The Bard's Tale Trilogy"));
 
         let mc = found
             .iter()
             .find(|g| g.title == "Magic Carpet Plus")
             .unwrap();
         assert_eq!(mc.platform, "gog");
-        let bt = found
-            .iter()
-            .find(|g| g.title == "The Bard's Tale Trilogy")
-            .unwrap();
-        assert_eq!(bt.platform, "steam");
-        assert!(bt
-            .install_dir
-            .ends_with("steamapps/common/The Bard's Tale Trilogy"));
     }
 
     #[test]
