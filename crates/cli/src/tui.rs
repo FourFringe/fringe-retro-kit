@@ -5,12 +5,13 @@
 //! and a scrollable inspector for the selected game's save. Editing and the Save Library
 //! come later (see `ROADMAP.md`).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use fringe_retro_core::backup;
 use fringe_retro_core::backup::RetentionPolicy;
+use fringe_retro_core::games::bardstale;
 use fringe_retro_core::games::GameKind;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -30,6 +31,53 @@ struct SaveFile {
     name: String,
     path: PathBuf,
     found: bool,
+}
+
+/// Build the list of a game's save files in `dir`: the known static names first, then any
+/// additional files matching the game's slot extension that are present on disk (e.g. the
+/// Bard's Tale Trilogy's extra `SaveN.dat` slots), sorted for a stable order.
+fn discover_save_files(kind: GameKind, dir: &Path) -> Vec<SaveFile> {
+    let mut files: Vec<SaveFile> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for name in kind.save_files() {
+        seen.insert(name.to_string());
+        let path = dir.join(name);
+        let found = path.exists();
+        files.push(SaveFile {
+            name: name.to_string(),
+            path,
+            found,
+        });
+    }
+    if let Some(ext) = kind.save_extension() {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut extra: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.to_ascii_lowercase().ends_with(ext) && !seen.contains(n))
+                .collect();
+            extra.sort();
+            for name in extra {
+                let path = dir.join(&name);
+                files.push(SaveFile {
+                    name: name.clone(),
+                    path,
+                    found: true,
+                });
+                seen.insert(name);
+            }
+        }
+    }
+    files
+}
+
+/// A short description of a save slot (e.g. the party name and location), for the file
+/// picker's labels. Only games with self-describing saves provide one.
+fn slot_description(kind: GameKind, path: &Path) -> Option<String> {
+    match kind {
+        GameKind::BardsTale => bardstale::describe(&std::fs::read(path).ok()?),
+        _ => None,
+    }
 }
 
 /// One game shown in the browser.
@@ -1225,6 +1273,7 @@ impl App {
         let title = format!("{} ({})", row.title, row.id);
         let row_title = row.title.clone();
         let inspectable = row.inspectable;
+        let kind = row.kind;
         // Copy out the file data so the `self.games` borrow ends before we mutate `self`.
         let files: Vec<(String, PathBuf, bool)> = row
             .files
@@ -1260,9 +1309,15 @@ impl App {
             _ => {
                 let entries: Vec<FileEntry> = found
                     .iter()
-                    .map(|f| FileEntry {
-                        label: f.0.clone(),
-                        path: f.1.clone(),
+                    .map(|f| {
+                        let label = match slot_description(kind, &f.1) {
+                            Some(desc) => format!("{}  —  {}", f.0, desc),
+                            None => f.0.clone(),
+                        };
+                        FileEntry {
+                            label,
+                            path: f.1.clone(),
+                        }
                     })
                     .collect();
                 let mut list = ListState::default();
@@ -2478,20 +2533,7 @@ pub fn run(config: Config) -> Result<()> {
     let mut games = Vec::new();
     for g in config.games()? {
         let files = match &g.save_dir {
-            Some(dir) => g
-                .kind
-                .save_files()
-                .iter()
-                .map(|name| {
-                    let path = dir.join(name);
-                    let found = path.exists();
-                    SaveFile {
-                        name: name.to_string(),
-                        path,
-                        found,
-                    }
-                })
-                .collect(),
+            Some(dir) => discover_save_files(g.kind, dir),
             None => Vec::new(),
         };
         games.push(GameRow {
@@ -2592,6 +2634,32 @@ mod tests {
         assert!(matches!(app.stack.last(), Some(Screen::Inspect(_))));
         app.handle_key(KeyCode::Esc);
         assert!(matches!(app.stack.last(), Some(Screen::Games(_))));
+    }
+
+    #[test]
+    fn discovers_bardstale_slots_including_extras() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["Save1.dat", "Save3.dat", "AutoSave.dat", "notes.txt"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        let files = discover_save_files(GameKind::BardsTale, dir.path());
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        // The known static names plus the discovered extra slot; the non-.dat file is ignored.
+        assert!(names.contains(&"Save1.dat"));
+        assert!(names.contains(&"AutoSave.dat"));
+        assert!(names.contains(&"Save3.dat"));
+        assert!(!names.contains(&"notes.txt"));
+        assert!(files.iter().all(|f| f.found));
+    }
+
+    #[test]
+    fn fixed_layout_games_do_not_scan_for_extras() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("EXTRA.SAV"), b"x").unwrap();
+        let files = discover_save_files(GameKind::Ultima1, dir.path());
+        // Only the four known Ultima I slots, none of which exist here.
+        assert_eq!(files.len(), 4);
+        assert!(files.iter().all(|f| !f.found));
     }
 
     /// Build an app with one Ultima I game backed by a real temp save file.

@@ -105,6 +105,17 @@ impl GameKind {
         }
     }
 
+    /// The filename extension of a game's dynamically-named save slots, if it keeps a variable
+    /// set of them. The Bard's Tale Trilogy names its slots `Save1.dat`, `AutoSave.dat`, … so
+    /// any `.dat` in its save directory is a slot to be discovered; fixed-layout games that
+    /// always use the same filenames return `None`.
+    pub fn save_extension(self) -> Option<&'static str> {
+        match self {
+            GameKind::BardsTale => Some(".dat"),
+            _ => None,
+        }
+    }
+
     /// Whether the headless CLI can currently inspect/edit this game's saves.
     pub fn is_inspectable(self) -> bool {
         true
@@ -127,5 +138,15 @@ mod tests {
     #[test]
     fn ultima1_lists_four_slots() {
         assert_eq!(GameKind::Ultima1.save_files().len(), 4);
+    }
+
+    #[test]
+    fn only_bardstale_discovers_extra_slots() {
+        assert_eq!(GameKind::BardsTale.save_extension(), Some(".dat"));
+        for kind in GameKind::ALL {
+            if kind != GameKind::BardsTale {
+                assert_eq!(kind.save_extension(), None);
+            }
+        }
     }
 }

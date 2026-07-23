@@ -133,6 +133,25 @@ pub fn looks_like(bytes: &[u8]) -> bool {
         && bytes[13..17] == [0, 0, 0, 0]
 }
 
+/// A short human description of a save slot — the party's name and current location — for the
+/// save-file picker. Returns `None` if the bytes don't parse or hold neither detail.
+pub fn describe(bytes: &[u8]) -> Option<String> {
+    let doc = Document::parse(bytes).ok()?;
+    let party = doc.objects_of_class("BardsTale.SaveableParty").next();
+    let name = party.and_then(|o| doc.member_str(o, "m_name"));
+    let header = doc.objects_of_class("BardsTale.GameSaveHeader").next();
+    let map = header.and_then(|o| doc.member_str(o, "m_map"));
+    match (
+        name.filter(|s| !s.is_empty()),
+        map.filter(|s| !s.is_empty()),
+    ) {
+        (Some(name), Some(map)) => Some(format!("{name} · {map}")),
+        (Some(name), None) => Some(name.to_string()),
+        (None, Some(map)) => Some(map.to_string()),
+        (None, None) => None,
+    }
+}
+
 /// Parse an edit value as an integer, with a field-specific error message.
 fn parse_int(key: &str, value: &str) -> Result<i64> {
     value
@@ -253,6 +272,25 @@ mod tests {
         v
     }
 
+    /// A `ClassWithMembersAndTypes` object whose members are all strings. `members` is
+    /// `(member_name, value)`; the object id is `id`.
+    fn str_obj(id: i32, class: &str, members: &[(&str, &str)]) -> Vec<u8> {
+        let mut v = vec![5]; // ClassWithMembersAndTypes
+        v.extend_from_slice(&id.to_le_bytes());
+        v.extend(lp(class));
+        v.extend_from_slice(&(members.len() as i32).to_le_bytes());
+        for (name, _) in members {
+            v.extend(lp(name));
+        }
+        v.extend(vec![0u8; members.len()]); // all PRIMITIVE
+        v.extend(vec![18u8; members.len()]); // all String
+        v.extend_from_slice(&7i32.to_le_bytes()); // LibraryId
+        for (_, value) in members {
+            v.extend(lp(value));
+        }
+        v
+    }
+
     /// A one-character party save with a `GameStats` holding party gold.
     fn save_bytes() -> Vec<u8> {
         let mut v = header(1);
@@ -318,5 +356,24 @@ mod tests {
         assert!(save.character_set(0, "strength", "not a number").is_err());
         assert!(save.character_set(0, "no_such_field", "1").is_err());
         assert!(save.character_set(9, "strength", "1").is_err());
+    }
+
+    #[test]
+    fn describes_a_slot() {
+        let mut v = header(1);
+        v.extend(str_obj(
+            1,
+            "BardsTale.SaveableParty",
+            &[("m_name", "The A-TEAM")],
+        ));
+        v.extend(str_obj(
+            2,
+            "BardsTale.GameSaveHeader",
+            &[("m_map", "Skara Brae")],
+        ));
+        v.push(11); // MessageEnd
+        assert_eq!(describe(&v).as_deref(), Some("The A-TEAM · Skara Brae"));
+        // Bytes that don't parse yield no description rather than an error.
+        assert_eq!(describe(b"not an nrbf stream"), None);
     }
 }
