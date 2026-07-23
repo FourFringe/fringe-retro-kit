@@ -346,14 +346,29 @@ async fn toc(State(app): State<Arc<AppState>>) -> Html<String> {
 
     for game in games {
         let mut group: Vec<&Entry> = entries.iter().filter(|e| e.game == game).collect();
-        // Region key, then overworld before its sub-maps, then world id (numbers sorted
-        // numerically so "map2" comes before "map10").
+        // Regions that contain an overworld (the main maps and their towns) sort ahead of the
+        // dungeon-only groups, so a game's overworld isn't buried between its dungeons.
+        let overworld_groups: std::collections::HashSet<&str> = group
+            .iter()
+            .filter(|e| e.kind == "overworld")
+            .map(|e| e.group.as_str())
+            .collect();
+        let region_rank = |e: &Entry| u8::from(!overworld_groups.contains(e.group.as_str()));
+        // Overworld regions first, then by region key; within a region the overworld leads, then
+        // its sub-maps by world id (numbers sorted numerically so "map2" comes before "map10").
         group.sort_by(|a, b| {
-            (&a.group, a.kind != "overworld", natural_key(&a.world)).cmp(&(
-                &b.group,
-                b.kind != "overworld",
-                natural_key(&b.world),
-            ))
+            (
+                region_rank(a),
+                &a.group,
+                a.kind != "overworld",
+                natural_key(&a.world),
+            )
+                .cmp(&(
+                    region_rank(b),
+                    &b.group,
+                    b.kind != "overworld",
+                    natural_key(&b.world),
+                ))
         });
         // The game heading is the shared title prefix (e.g. "Ultima II — Towne Linda" → "Ultima II").
         let header = group
@@ -384,9 +399,14 @@ async fn toc(State(app): State<Arc<AppState>>) -> Html<String> {
                 push_toc_item(&mut body, e, false);
             }
             if !subs.is_empty() {
+                let (label, badge_kind) = group_label(&subs);
+                let badge = badge_kind
+                    .map(|k| format!(" <span class=\"badge {k}\">{k}</span>", k = html_escape(&k)))
+                    .unwrap_or_default();
                 body.push_str(&format!(
-                    "<li><details class=\"region\"><summary class=\"subs\">\
-                     {n} sub-map{s}</summary><ul>",
+                    "<li><details class=\"region\"><summary class=\"subs\">{label}{badge}\
+                     <span class=\"count\">{n} map{s}</span></summary><ul>",
+                    label = html_escape(&label),
                     n = subs.len(),
                     s = if subs.len() == 1 { "" } else { "s" },
                 ));
@@ -434,6 +454,95 @@ fn push_toc_item(body: &mut String, e: &Entry, sub: bool) {
         world = html_escape(&e.world),
         name = html_escape(name),
     ));
+}
+
+/// A heading for a nested sub-map group and, when they're all one kind, that kind's badge. Levels
+/// of one place (a dungeon) share a name, so the group is titled by it (e.g. `Deceit`); a region's
+/// mixed sub-maps are described by their kinds instead (e.g. `Towns & castles`).
+fn group_label(subs: &[&Entry]) -> (String, Option<String>) {
+    let mut bases: Vec<String> = subs.iter().map(|e| strip_level(display_name(e))).collect();
+    bases.sort();
+    bases.dedup();
+
+    let mut kinds: Vec<&str> = subs
+        .iter()
+        .map(|e| e.kind.as_str())
+        .filter(|k| !k.is_empty())
+        .collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+
+    if bases.len() == 1 {
+        // Several floors of one place — a dungeon. Name it, and badge its (single) kind.
+        let badge = (kinds.len() == 1).then(|| kinds[0].to_string());
+        (bases.pop().unwrap(), badge)
+    } else {
+        (kinds_label(&kinds), None)
+    }
+}
+
+/// The world's display name with the game prefix (`Ultima IV — `) dropped.
+fn display_name(e: &Entry) -> &str {
+    e.title
+        .split_once(" — ")
+        .map_or(e.title.as_str(), |(_, rest)| rest)
+}
+
+/// Strip a trailing floor/level qualifier so several floors of one place share a base name:
+/// `Deceit (level 3)` → `Deceit`; `Dungeon (MAPG15, level 2)` → `Dungeon (MAPG15)`;
+/// `Lord British's Castle (Upper)` → `Lord British's Castle`.
+fn strip_level(name: &str) -> String {
+    let Some(open) = name.rfind(" (") else {
+        return name.to_string();
+    };
+    if !name.ends_with(')') {
+        return name.to_string();
+    }
+    let inside = &name[open + 2..name.len() - 1];
+    // "MAPG15, level 2" keeps the leading id; "level 3" / "Upper" drop the whole parenthetical.
+    match inside.split_once(", level ") {
+        Some((keep, _)) => format!("{} ({keep})", &name[..open]),
+        None => name[..open].to_string(),
+    }
+}
+
+/// A plural label for a set of location kinds, in a natural reading order, e.g. `["castle",
+/// "town"]` → `Towns & castles`. Falls back to a generic term when there are no known kinds.
+fn kinds_label(kinds: &[&str]) -> String {
+    const ORDER: &[(&str, &str)] = &[
+        ("town", "Towns"),
+        ("village", "Villages"),
+        ("castle", "Castles"),
+        ("tower", "Towers"),
+        ("dungeon", "Dungeons"),
+        ("shrine", "Shrines"),
+        ("monument", "Monuments"),
+    ];
+    let mut names: Vec<String> = ORDER
+        .iter()
+        .filter(|(k, _)| kinds.contains(k))
+        .map(|(_, label)| (*label).to_string())
+        .collect();
+    // Any kind not in the table becomes a capitalised plural, so nothing goes unlabelled.
+    for &k in kinds {
+        if !k.is_empty() && !ORDER.iter().any(|(known, _)| *known == k) {
+            names.push(format!("{}{}s", k[..1].to_uppercase(), &k[1..]));
+        }
+    }
+    match names.split_first() {
+        None => "Sub-maps".to_string(),
+        Some((first, [])) => first.clone(),
+        Some((first, rest)) => {
+            // Lower-case the trailing terms so the phrase reads naturally.
+            let rest: Vec<String> = rest.iter().map(|s| s.to_lowercase()).collect();
+            let (last, mid) = rest.split_last().unwrap();
+            if mid.is_empty() {
+                format!("{first} & {last}")
+            } else {
+                format!("{first}, {} & {last}", mid.join(", "))
+            }
+        }
+    }
 }
 
 /// Scan `<root>/<game>/<world>/manifest.json`, reading each world's title.
@@ -541,5 +650,54 @@ mod tests {
         // Non-numeric ids still order lexically.
         assert_eq!(natural_key("britannia"), ("britannia", 0));
         assert_eq!(natural_key("mapx30"), ("mapx", 30));
+    }
+
+    fn entry(title: &str, kind: &str) -> Entry {
+        Entry {
+            game: "ultimax".into(),
+            world: "w".into(),
+            title: format!("Ultima X — {title}"),
+            kind: kind.into(),
+            group: "grp".into(),
+        }
+    }
+
+    #[test]
+    fn strip_level_drops_floor_qualifiers_but_keeps_ids() {
+        assert_eq!(strip_level("Deceit (level 3)"), "Deceit");
+        assert_eq!(strip_level("Dungeon (MAPG15, level 2)"), "Dungeon (MAPG15)");
+        assert_eq!(
+            strip_level("Lord British's Castle (Upper)"),
+            "Lord British's Castle"
+        );
+        assert_eq!(strip_level("Britain"), "Britain");
+    }
+
+    #[test]
+    fn group_label_names_a_dungeon_by_its_shared_place() {
+        let subs = [
+            entry("Deceit (level 1)", "dungeon"),
+            entry("Deceit (level 8)", "dungeon"),
+        ];
+        let refs: Vec<&Entry> = subs.iter().collect();
+        let (label, badge) = group_label(&refs);
+        assert_eq!(label, "Deceit");
+        assert_eq!(badge.as_deref(), Some("dungeon"));
+    }
+
+    #[test]
+    fn group_label_describes_a_mixed_region_by_kinds() {
+        let subs = [
+            entry("Britain", "town"),
+            entry("Cove", "village"),
+            entry("Lord British's Castle", "castle"),
+        ];
+        let refs: Vec<&Entry> = subs.iter().collect();
+        let (label, badge) = group_label(&refs);
+        assert_eq!(label, "Towns, villages & castles");
+        assert_eq!(badge, None);
+        // Two kinds join with "&"; unknown groups get a generic term.
+        assert_eq!(kinds_label(&["castle", "town"]), "Towns & castles");
+        assert_eq!(kinds_label(&[]), "Sub-maps");
     }
 }
