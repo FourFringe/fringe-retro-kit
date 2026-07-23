@@ -55,6 +55,7 @@ fn gog_mac_app_names(kind: GameKind) -> &'static [&'static str] {
         GameKind::Ultima5 => &["Ultima V"],
         GameKind::Ultima6 => &["Ultima VI"],
         GameKind::Wasteland => &[],
+        GameKind::BardsTale => &[],
     }
 }
 
@@ -161,6 +162,7 @@ fn find_gog_bundle(roots: &[PathBuf], names: &[&str]) -> Option<PathBuf> {
 fn steam_app_id(kind: GameKind) -> Option<u32> {
     match kind {
         GameKind::Wasteland => Some(259130), // "Wasteland 1 - The Original Classic"
+        GameKind::BardsTale => Some(843260), // "The Bard's Tale Trilogy"
         _ => None,
     }
 }
@@ -170,8 +172,24 @@ fn steam_app_id(kind: GameKind) -> Option<u32> {
 fn steam_save_dir(kind: GameKind, home: &Path) -> Option<PathBuf> {
     match kind {
         GameKind::Wasteland => wasteland_slot(&home.join("Library/Application Support/Wasteland")),
+        GameKind::BardsTale => bardstale_save_dir(&home.join("Library/Application Support/Steam")),
         _ => None,
     }
+}
+
+/// The Bard's Tale Trilogy stores its saves in Steam Cloud, under a per-user `userdata`
+/// directory: `userdata/<steamid>/843260/remote/saves`. We don't know the numeric steam id
+/// ahead of time, so scan for the first such directory that exists.
+fn bardstale_save_dir(steam_root: &Path) -> Option<PathBuf> {
+    let userdata = steam_root.join("userdata");
+    let entries = std::fs::read_dir(&userdata).ok()?;
+    for entry in entries.flatten() {
+        let saves = entry.path().join("843260/remote/saves");
+        if saves.is_dir() {
+            return Some(saves);
+        }
+    }
+    None
 }
 
 /// The active Wasteland save slot under `root`: the one named by `LASTSAVE`, else the first

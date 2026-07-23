@@ -4,6 +4,7 @@
 //! sibling modules; a generic, data-driven engine is deferred until a few games have
 //! been implemented by hand (see `ROADMAP.md`).
 
+pub mod bardstale;
 pub mod ultima1;
 pub mod ultima2;
 pub mod ultima3;
@@ -23,11 +24,12 @@ pub enum GameKind {
     Ultima5,
     Ultima6,
     Wasteland,
+    BardsTale,
 }
 
 impl GameKind {
     /// Every supported game, in a stable order.
-    pub const ALL: [GameKind; 7] = [
+    pub const ALL: [GameKind; 8] = [
         GameKind::Ultima1,
         GameKind::Ultima2,
         GameKind::Ultima3,
@@ -35,6 +37,7 @@ impl GameKind {
         GameKind::Ultima5,
         GameKind::Ultima6,
         GameKind::Wasteland,
+        GameKind::BardsTale,
     ];
 
     /// The stable lowercase identifier (e.g. `ultima1`).
@@ -47,6 +50,7 @@ impl GameKind {
             GameKind::Ultima5 => "ultima5",
             GameKind::Ultima6 => "ultima6",
             GameKind::Wasteland => "wasteland",
+            GameKind::BardsTale => "bardstale",
         }
     }
 
@@ -60,6 +64,7 @@ impl GameKind {
             GameKind::Ultima5 => "Ultima V",
             GameKind::Ultima6 => "Ultima VI",
             GameKind::Wasteland => "Wasteland",
+            GameKind::BardsTale => "The Bard's Tale Trilogy",
         }
     }
 
@@ -80,6 +85,7 @@ impl GameKind {
             GameKind::Ultima5 => "SAVED.GAM",
             GameKind::Ultima6 => "OBJLIST",
             GameKind::Wasteland => "GAME1",
+            GameKind::BardsTale => "Save1.dat",
         }
     }
 
@@ -95,6 +101,7 @@ impl GameKind {
             GameKind::Ultima5 => &["SAVED.GAM"],
             GameKind::Ultima6 => &["OBJLIST"],
             GameKind::Wasteland => &["GAME1"],
+            GameKind::BardsTale => &["Save1.dat", "AutoSave.dat"],
         }
     }
 

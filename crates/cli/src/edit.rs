@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use fringe_retro_core::backup;
+use fringe_retro_core::games::bardstale::{self, BardsTaleSave};
 use fringe_retro_core::games::ultima1::{self, Ultima1Save};
 use fringe_retro_core::games::ultima2::{self, Ultima2Save};
 use fringe_retro_core::games::ultima3::{self, Ultima3Party, Ultima3Roster};
@@ -29,6 +30,7 @@ enum Loaded {
     Ultima5(Ultima5Save),
     Ultima6(Ultima6Save),
     Wasteland(WastelandSave),
+    BardsTale(BardsTaleSave),
 }
 
 /// A character/slot within a save that can be edited.
@@ -74,6 +76,8 @@ impl Session {
         let bytes = std::fs::read(path)?;
         let save = if bytes.starts_with(b"msq0") {
             Loaded::Wasteland(WastelandSave::from_bytes(bytes)?)
+        } else if bardstale::looks_like(&bytes) {
+            Loaded::BardsTale(BardsTaleSave::from_bytes(bytes)?)
         } else if bytes.len() == ultima3::PARTY_LEN {
             Loaded::Ultima3Party(Ultima3Party::from_bytes(bytes)?)
         } else if bytes.len() == ultima3::ROSTER_LEN {
@@ -146,6 +150,7 @@ impl Session {
             Loaded::Ultima5(_) => GameKind::Ultima5,
             Loaded::Ultima6(_) => GameKind::Ultima6,
             Loaded::Wasteland(_) => GameKind::Wasteland,
+            Loaded::BardsTale(_) => GameKind::BardsTale,
         }
     }
 
@@ -173,6 +178,9 @@ impl Session {
                 Loaded::Ultima6(Ultima6Save::from_bytes(vec![0u8; ultima6::OBJLIST_LEN]).ok()?)
             }
             GameKind::Wasteland => Loaded::Wasteland(WastelandSave::scratch()),
+            // A Bard's Tale save is an NRBF object graph; there is no meaningful zeroed
+            // scratch buffer to dry-run against, so templates aren't validated offline.
+            GameKind::BardsTale => return None,
         };
         Some(Session {
             path: PathBuf::new(),
@@ -271,6 +279,18 @@ impl Session {
                 }));
                 entities
             }
+            Loaded::BardsTale(s) => {
+                // Entity 0 is the party-wide state; entities 1..=n are the characters.
+                let mut entities = vec![Entity {
+                    index: 0,
+                    label: "Party".to_string(),
+                }];
+                entities.extend(s.occupied_characters().into_iter().map(|i| Entity {
+                    index: i + 1,
+                    label: format!("{}. {}", i + 1, s.character_summary(i)),
+                }));
+                entities
+            }
         }
     }
 
@@ -312,6 +332,13 @@ impl Session {
                     wasteland::party_fields()
                 } else {
                     wasteland::character_fields()
+                }
+            }
+            Loaded::BardsTale(_) => {
+                if entity == 0 {
+                    BardsTaleSave::party_fields()
+                } else {
+                    BardsTaleSave::character_fields()
                 }
             }
         }
@@ -363,6 +390,13 @@ impl Session {
                 }
             }
             Loaded::Wasteland(s) => {
+                if entity == 0 {
+                    s.party_get(key)
+                } else {
+                    s.character_get(entity - 1, key)
+                }
+            }
+            Loaded::BardsTale(s) => {
                 if entity == 0 {
                     s.party_get(key)
                 } else {
@@ -482,6 +516,13 @@ impl Session {
                     s.character_set(entity - 1, key, value)
                 }
             }
+            Loaded::BardsTale(s) => {
+                if entity == 0 {
+                    s.party_set(key, value)
+                } else {
+                    s.character_set(entity - 1, key, value)
+                }
+            }
         }
         .map_err(|e| anyhow!("{e}"))?;
         self.dirty = true;
@@ -501,6 +542,7 @@ impl Session {
             Loaded::Ultima5(s) => s.write(&self.path),
             Loaded::Ultima6(s) => s.write(&self.path),
             Loaded::Wasteland(s) => s.write(&self.path),
+            Loaded::BardsTale(s) => s.write(&self.path),
         }?;
         self.dirty = false;
         Ok(backup_path)

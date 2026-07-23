@@ -10,7 +10,7 @@
 #
 # Each [games.<id>] table defines one game; <id> is how you refer to it on the command
 # line. Fields:
-#   game        which built-in parser to use: ultima1 | ultima2 | ultima3 | ultima4 | ultima5 | ultima6 | wasteland.
+#   game        which built-in parser to use: ultima1 | ultima2 | ultima3 | ultima4 | ultima5 | ultima6 | wasteland | bardstale.
 #               Defaults to <id>, so [games.ultima1] needs no `game` key. Use `game` when
 #               your id differs, e.g. [games.u2-gog] with game = "ultima2".
 #   save_dir    directory holding the game's save files (required to use the identifier).
@@ -55,6 +55,14 @@ save_dir = "/Applications/Ultima VI™.app/Contents/Resources/game"
 platform = "steam"
 enabled = true
 save_dir = "/Users/you/Library/Application Support/Wasteland"
+
+# The Bard's Tale Trilogy (Steam remaster) saves to Steam Cloud under your userdata folder.
+# Point `save_dir` at the `saves` directory (swap in your numeric Steam id). Slots are
+# `Save1.dat`, `AutoSave.dat`, etc. IMPORTANT: edit only with Steam fully closed, so its
+# cloud sync doesn't overwrite your change.
+[games.bardstale]
+platform = "steam"
+save_dir = "/Users/you/Library/Application Support/Steam/userdata/000000000/843260/remote/saves"
 
 # The Save Library: your curated collection of named save snapshots (kept separate from the
 # automatic .bak backups). Set a folder to store them in — local or cloud-synced (Dropbox,
