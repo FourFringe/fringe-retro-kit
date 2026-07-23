@@ -174,7 +174,6 @@ fn char_member(key: &str) -> Option<&'static str> {
         "max_spellpoints" => "m_maxSpellpoints",
         "level" => "m_level",
         "experience" => "m_experience",
-        "gold" => "m_gold",
         "condition" => "m_condition",
         "disarm_trap" => "m_disarmTrapBonus",
         "identify" => "m_identifyBonus",
@@ -187,7 +186,8 @@ fn char_member(key: &str) -> Option<&'static str> {
 /// Map a party field key to the `(class, member)` that holds it.
 fn party_target(key: &str) -> Option<(&'static str, &'static str)> {
     match key {
-        "gold" => Some(("BardsTale.GameStats", "m_gold")),
+        // Party gold is pooled in the game-state object (each character's own `m_gold` is 0).
+        "gold" => Some(("BardsTale.GameStateData", "m_gold")),
         _ => None,
     }
 }
@@ -203,9 +203,8 @@ const fn int(max: u32) -> FieldKind {
     }
 }
 
-const PARTY_FIELDS: &[Field] = &[Field::new("gold", "Gold", 0, int(i32::MAX as u32))
-    .in_section("Party")
-    .tentative()];
+const PARTY_FIELDS: &[Field] =
+    &[Field::new("gold", "Gold", 0, int(i32::MAX as u32)).in_section("Party")];
 
 const CHAR_FIELDS: &[Field] = &[
     Field::new("strength", "Strength", 0, int(999)).in_section("Attributes"),
@@ -219,7 +218,6 @@ const CHAR_FIELDS: &[Field] = &[
     Field::new("max_spellpoints", "Max Spell Points", 0, int(65535)).in_section("Vitals"),
     Field::new("level", "Level", 0, int(255)).in_section("Progress"),
     Field::new("experience", "Experience", 0, int(i32::MAX as u32)).in_section("Progress"),
-    Field::new("gold", "Gold", 0, int(i32::MAX as u32)).in_section("Progress"),
     Field::new("condition", "Condition", 0, int(255)).in_section("Status"),
     Field::new("disarm_trap", "Disarm Trap Bonus", 0, int(255)).in_section("Thief"),
     Field::new("identify", "Identify Bonus", 0, int(255)).in_section("Thief"),
@@ -306,7 +304,12 @@ mod tests {
                 ("m_experience", 1015),
             ],
         ));
-        v.extend(class_obj(2, "BardsTale.GameStats", "", &[("m_gold", 1200)]));
+        v.extend(class_obj(
+            2,
+            "BardsTale.GameStateData",
+            "",
+            &[("m_gold", 1200)],
+        ));
         v.push(11); // MessageEnd
         v
     }
