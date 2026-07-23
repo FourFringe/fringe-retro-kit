@@ -65,37 +65,30 @@ levels, object overlays, named towns and shrines, and data-driven dungeon entran
 `GAME.EXE` name table), **Ultima V** shrines, and named, clickable **Ultima II** POIs. Capped with
 a cross-game POI audit and this move to a release-based roadmap.
 
+### v0.7.0 — Explorable dungeons for every game (2026-07-23)
+
+Top-down maps for the first-person **dungeons** of Ultima II–V (Ultima VI's already rendered),
+reconstructed from the mazes each game stores as tile grids and fed through one shared renderer:
+
+- **Ultima V** (`DUNGEON.DAT`) — eight dungeons of eight 8×8 levels.
+- **Ultima IV** (`*.DNG`) — eight dungeons of eight 8×8 levels; every entrance, the Abyss included,
+  links to its first level.
+- **Ultima III** (`*.ULT`) — seven dungeons of eight 16×16 levels, named and linked via the
+  `EXODUS.BIN` location table.
+- **Ultima II** (`MAP[XG]N4`/`N5`) — the tower and dungeon map slots that earlier looked like
+  "noise" turned out to be sixteen 16×16 maze levels each, now baked and linked per region.
+
+Each level is drawn as a "graph-paper" map from a shared cell vocabulary, then made legible. The
+first-pass colour blocks became **intuitive icons** — up/down-arrow stairs, an ✕ for traps, and
+drawn doors, chests, fountains, orbs, altars and hatched energy fields — the viewer gained a
+**per-game legend** listing just the symbols that game uses, and the map index now shows **named,
+ordered groups** (e.g. *Deceit*, *Towns & castles*) with the overworld first, instead of anonymous
+"N sub-maps" rows. Ultima I's dungeons stay out of scope: they're generated at runtime, so there's
+nothing to bake.
+
 ---
 
 ## Planned
-
-### v0.7.0 — First-person dungeon maps
-
-Ultima IV and V store their first-person dungeons as fixed tile grids (walls, doors, ladders,
-fields) — the same shape as Ultima VI's dungeons, which already render top-down. Reconstruct those
-grids into top-down "graph-paper" maps and slot them into the existing dungeon pipeline.
-
-- [x] **Ultima V dungeons** (`DUNGEON.DAT`) → top-down per-level maps. All eight dungeons × eight
-      levels are baked as synthesised graph-paper maps (walls, corridors, doors, ladders, chests,
-      fountains, traps, energy fields, rooms and secret doors), and each overworld entrance POI now
-      links to its dungeon's first level.
-- [x] **Ultima IV dungeons** (`*.DNG` fixed tile grids, eight dungeons × eight levels) → same. The
-      512-byte level map at the head of each `.DNG` is synthesised into per-level graph-paper maps
-      (adding orbs and altars to the shared cell palette), and every overworld entrance POI —
-      including the Abyss — links to its dungeon's first level.
-- [x] **Ultima III dungeons** (`*.ULT` 2192-byte files, seven dungeons × eight levels) → same. Each
-      file's 2048-byte level map (eight 16×16 tile grids) is synthesised into per-level graph-paper
-      maps, and the `EXODUS.BIN` coordinate table's seven dungeon entrances — now matched, in order,
-      to their files — are named and linked to their first level.
-- [x] **Ultima II dungeons & towers** (`MAP[XG]N5`/`MAP[XG]N4`, sixteen 16×16 levels each) → same.
-      What earlier looked like "noise" was the overworld tile packing applied to a maze grid: read
-      as raw dungeon tiles, the `…5` (dungeon) and `…4` (tower) map slots are coherent mazes, so
-      each is baked per level and linked from its region's dungeon/tower entrance.
-
-Out of scope: **Ultima I** dungeons are procedurally generated at runtime (no stored maps), so
-there is nothing to bake — the overworld entrance markers are the honest representation. **Ultima
-VI** dungeons are already rendered. With Ultima II done, every game with stored dungeon data now
-bakes its dungeons.
 
 ### Beyond v0.7.0 — ongoing tracks
 
