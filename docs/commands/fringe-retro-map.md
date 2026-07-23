@@ -140,3 +140,9 @@ Perinia*). A **"you are here"** marker tracks the party's current position, read
 save file: the server watches the save and pushes updates over Server-Sent Events, so the marker
 moves the moment you save in-game. Everything is served from `http://127.0.0.1` — no internet is
 required, and no game assets are copied or redistributed.
+
+Dungeon-level views (the reconstructed first-person mazes) show a **glyph legend** in the top-right,
+under the marker control: a key to the synthesised symbols — walls, floor, doors, secret doors,
+ladders (up/down arrows), chests, fountains, traps, orbs, altars, energy fields and rooms. The key
+lists only the symbols that game's dungeons actually use, so, say, Ultima II (which has no traps or
+fountains underground) shows a shorter list than Ultima IV.

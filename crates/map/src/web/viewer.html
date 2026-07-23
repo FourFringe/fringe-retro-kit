@@ -36,6 +36,39 @@
         font-family: system-ui, sans-serif;
         text-decoration: none;
       }
+      /* Legend key for synthesised dungeon glyphs, shown under the POI controls. */
+      .legend {
+        background: #1b1b2b;
+        color: #ddd;
+        padding: 6px 9px;
+        border-radius: 4px;
+        font-family: system-ui, sans-serif;
+        font-size: 12px;
+        box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+        max-height: 70vh;
+        overflow-y: auto;
+      }
+      .legend-title {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .legend-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        white-space: nowrap;
+        line-height: 22px;
+      }
+      .legend-swatch {
+        width: 22px;
+        height: 22px;
+        flex: 0 0 auto;
+        background-image: url(/legend.png);
+        background-repeat: no-repeat;
+        background-size: 22px auto;
+        image-rendering: pixelated;
+        border: 1px solid #33334a;
+      }
     </style>
   </head>
   <body>
@@ -134,6 +167,43 @@
         }
         if (Object.keys(overlays).length) {
           L.control.layers(null, overlays, { collapsed: false }).addTo(map);
+        }
+
+        // Dungeon maps are drawn with synthesised glyphs, so show a key of just the symbols this
+        // game uses (m.legend). It's added after the POI control, so in the top-right corner it
+        // stacks just under the POI checkboxes.
+        if (m.legend && m.legend.length) {
+          try {
+            // The full ordered label list gives each glyph's row in the /legend.png sprite strip.
+            const order = await (await fetch("/legend.json")).json();
+            const row = {};
+            order.forEach((label, i) => (row[label] = i));
+            const Legend = L.Control.extend({
+              options: { position: "topright" },
+              onAdd() {
+                const div = L.DomUtil.create("div", "legend");
+                div.innerHTML =
+                  '<div class="legend-title">Legend</div>' +
+                  m.legend
+                    .filter((label) => label in row)
+                    .map(
+                      (label) =>
+                        '<div class="legend-row"><span class="legend-swatch" style="background-position:0 ' +
+                        -row[label] * 22 +
+                        'px"></span>' +
+                        label +
+                        "</div>",
+                    )
+                    .join("");
+                L.DomEvent.disableClickPropagation(div);
+                L.DomEvent.disableScrollPropagation(div);
+                return div;
+              },
+            });
+            new Legend().addTo(map);
+          } catch (e) {
+            /* the legend is optional */
+          }
         }
 
         // "You are here": the party's live position, streamed from the server, which watches

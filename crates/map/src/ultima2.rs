@@ -243,6 +243,10 @@ fn u2_cell(byte: u8) -> dungeon::Cell {
 /// holds sixteen 16×16 tile-grid levels in its final [`MAP_GRID_LEN`] bytes.
 fn dungeon_worlds(game_dir: &Path) -> Result<(Vec<World>, HashSet<String>)> {
     let tiles = dungeon::tileset(u2_cell);
+    let legend: Vec<String> = dungeon::legend_for(u2_cell)
+        .into_iter()
+        .map(String::from)
+        .collect();
     let mut names: Vec<String> = std::fs::read_dir(game_dir)?
         .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
         .filter(|n| is_dungeon_map(n))
@@ -263,7 +267,7 @@ fn dungeon_worlds(game_dir: &Path) -> Result<(Vec<World>, HashSet<String>)> {
         for level in 0..DUNGEON_LEVELS {
             let off = level * DUNGEON_LEVEL_BYTES;
             let cells = &grid[off..off + DUNGEON_LEVEL_BYTES];
-            worlds.push(tilemap::world(
+            let mut world = tilemap::world(
                 GAME,
                 &format!("{slug}-l{}", level + 1),
                 &format!(
@@ -276,7 +280,9 @@ fn dungeon_worlds(game_dir: &Path) -> Result<(Vec<World>, HashSet<String>)> {
                 &slug,
                 Vec::new(),
                 tilemap::render(cells, DUNGEON_EDGE, DUNGEON_EDGE, &tiles),
-            ));
+            );
+            world.meta.legend = legend.clone();
+            worlds.push(world);
         }
         slugs.insert(slug);
     }

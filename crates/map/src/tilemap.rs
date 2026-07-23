@@ -67,6 +67,7 @@ pub fn world(
             kind: kind.into(),
             group: group.into(),
             map_id: None,
+            legend: Vec::new(),
         },
         image,
         pois,

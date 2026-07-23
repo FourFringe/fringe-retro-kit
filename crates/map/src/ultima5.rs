@@ -557,6 +557,10 @@ fn dungeon_worlds(
         return Ok(Vec::new()); // unexpected build; ship the rest of the maps without dungeons
     }
     let tiles = dungeon::tileset(u5_cell);
+    let legend: Vec<String> = dungeon::legend_for(u5_cell)
+        .into_iter()
+        .map(String::from)
+        .collect();
     let mut worlds = Vec::with_capacity(DUNGEON_COUNT * DUNGEON_LEVELS);
     for di in 0..DUNGEON_COUNT {
         let (name, _) = LOCATIONS[DUNGEON_FIRST_LOCATION + di];
@@ -565,7 +569,7 @@ fn dungeon_worlds(
         for level in 0..DUNGEON_LEVELS {
             let off = (di * DUNGEON_LEVELS + level) * DUNGEON_LEVEL_BYTES;
             let grid = &data[off..off + DUNGEON_LEVEL_BYTES];
-            worlds.push(tilemap::world(
+            let mut world = tilemap::world(
                 GAME,
                 &format!("{s}-l{}", level + 1),
                 &format!("Ultima V — {name} (level {})", level + 1),
@@ -573,7 +577,9 @@ fn dungeon_worlds(
                 &s,
                 Vec::new(),
                 tilemap::render(grid, DUNGEON_EDGE, DUNGEON_EDGE, &tiles),
-            ));
+            );
+            world.meta.legend = legend.clone();
+            worlds.push(world);
         }
     }
     Ok(worlds)

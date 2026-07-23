@@ -173,6 +173,10 @@ fn u3_cell(byte: u8) -> dungeon::Cell {
 /// top-down "graph-paper" map from each level's 16×16 tile grid.
 fn dungeon_worlds(game_dir: &Path) -> Result<Vec<World>> {
     let tiles = dungeon::tileset(u3_cell);
+    let legend: Vec<String> = dungeon::legend_for(u3_cell)
+        .into_iter()
+        .map(String::from)
+        .collect();
     let mut worlds = Vec::new();
     for (file, name) in DUNGEONS {
         let path = game_dir.join(file);
@@ -187,7 +191,7 @@ fn dungeon_worlds(game_dir: &Path) -> Result<Vec<World>> {
         for level in 0..DUNGEON_LEVELS {
             let off = level * DUNGEON_LEVEL_BYTES;
             let grid = &data[off..off + DUNGEON_LEVEL_BYTES];
-            worlds.push(tilemap::world(
+            let mut world = tilemap::world(
                 GAME,
                 &format!("{s}-l{}", level + 1),
                 &format!("Ultima III — {name} (level {})", level + 1),
@@ -195,7 +199,9 @@ fn dungeon_worlds(game_dir: &Path) -> Result<Vec<World>> {
                 &s,
                 Vec::new(),
                 tilemap::render(grid, DUNGEON_EDGE, DUNGEON_EDGE, &tiles),
-            ));
+            );
+            world.meta.legend = legend.clone();
+            worlds.push(world);
         }
     }
     Ok(worlds)

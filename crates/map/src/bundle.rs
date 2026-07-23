@@ -29,6 +29,11 @@ pub struct WorldMeta {
     /// stores a global map id in the save that the position marker must match to a world, so we
     /// record it here (and in the manifest) for the server to resolve `curMap` to a world.
     pub map_id: Option<u32>,
+    /// For worlds rendered from the shared synthesised dungeon glyphs (see [`crate::dungeon`]),
+    /// the legend labels those dungeons actually use, so the viewer can show a key limited to this
+    /// game's symbols. Empty for worlds drawn from a game's own tiles (including Ultima VI's
+    /// dungeons).
+    pub legend: Vec<String>,
 }
 
 /// A fully rendered world ready to be baked into a bundle: its identity, composite image, and
@@ -72,6 +77,8 @@ struct Manifest {
     tile_pattern: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     map_id: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    legend: Vec<String>,
     pois: Vec<Poi>,
 }
 
@@ -111,6 +118,7 @@ pub fn write_bundle(export_root: &Path, world: &World) -> Result<PathBuf> {
         height,
         tile_pattern: "{z}/{x}/{y}.png".to_string(),
         map_id: meta.map_id,
+        legend: meta.legend.clone(),
         pois: world.pois.clone(),
     };
     let json = serde_json::to_string_pretty(&manifest)?;
@@ -172,6 +180,7 @@ mod tests {
                 kind: "overworld".into(),
                 group: "overworld".into(),
                 map_id: None,
+                legend: Vec::new(),
             },
             image: RgbImage::from_pixel(300, 300, image::Rgb([1, 2, 3])),
             pois: vec![],

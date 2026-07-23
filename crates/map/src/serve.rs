@@ -29,7 +29,9 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tower_http::services::ServeDir;
 
-use crate::{config::Config, tilemap, ultima1, ultima2, ultima3, ultima4, ultima5, wasteland};
+use crate::{
+    config::Config, dungeon, tilemap, ultima1, ultima2, ultima3, ultima4, ultima5, wasteland,
+};
 
 /// Shared server state: where bundles live, plus the config for resolving each game's save.
 struct AppState {
@@ -57,6 +59,8 @@ pub async fn serve(root: PathBuf, port: u16, open: bool, config: Config) -> Resu
         .route("/view", get(viewer))
         .route("/leaflet.js", get(leaflet_js))
         .route("/leaflet.css", get(leaflet_css))
+        .route("/legend.png", get(legend_png))
+        .route("/legend.json", get(legend_json))
         .route("/api/position", get(position))
         .route("/api/position/stream", get(position_stream))
         .nest_service("/b", ServeDir::new(root))
@@ -97,6 +101,26 @@ async fn leaflet_css() -> impl IntoResponse {
         [(header::CONTENT_TYPE, HeaderValue::from_static("text/css"))],
         include_str!("web/vendor/leaflet.css"),
     )
+}
+
+/// The full dungeon glyph key as a vertical sprite strip (one [`dungeon::TILE`]-sized glyph per
+/// row, in [`dungeon::legend_labels`] order). A viewer slices out just the rows its world's
+/// `legend` lists.
+async fn legend_png() -> impl IntoResponse {
+    let mut buf = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(dungeon::legend_strip())
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .expect("encoding the dungeon legend as PNG");
+    (
+        [(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))],
+        buf.into_inner(),
+    )
+}
+
+/// The full ordered dungeon legend labels, matching the rows of `/legend.png`; a viewer uses this
+/// to find the sprite row for each label its world's `legend` names.
+async fn legend_json() -> impl IntoResponse {
+    Json(dungeon::legend_labels())
 }
 
 /// Query for the player-position endpoint: which `game`, and which `world` is being viewed (the
